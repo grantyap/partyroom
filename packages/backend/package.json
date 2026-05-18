@@ -6,16 +6,20 @@
   "author": "",
   "scripts": {
     "dev": "convex dev",
-    "dev:setup": "convex dev --configure --until-success"
+    "dev:setup": "convex dev --configure --until-success",
+    "format": "oxfmt --config ../../.oxfmtrc.json ."
   },
   "dependencies": {
+    "@convex-dev/better-auth": "catalog:",
+    "@mmailaender/convex-better-auth-svelte": "catalog:",
+    "better-auth": "catalog:",
     "convex": "catalog:",
     "dotenv": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {
     "@partyroom/config": "workspace:*",
-    "@types/node": "^24.3.0",
+    "@types/node": "^25.8.0",
     "typescript": "catalog:"
   }
 }

@@ -1,11 +1,12 @@
 <script lang="ts">
-	import '../app.css';
-    import Header from '../components/Header.svelte';
-    import { PUBLIC_CONVEX_URL } from '$env/static/public';
-	import { setupConvex } from 'convex-svelte';
+	import { authClient } from "$lib/auth-client";
+	import { createSvelteAuthClient } from "@mmailaender/convex-better-auth-svelte/svelte";
+	import "../app.css";
+	import Header from "../components/Header.svelte";
+
+	createSvelteAuthClient({ authClient });
 
 	const { children } = $props();
-	setupConvex(PUBLIC_CONVEX_URL);
 </script>
 
 <div class="grid h-svh grid-rows-[auto_1fr]">

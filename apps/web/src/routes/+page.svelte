@@ -1,10 +1,10 @@
 <script lang="ts">
-import { useQuery } from 'convex-svelte';
-import { api } from "@partyroom/backend/convex/_generated/api";
+	import { useQuery } from "@mmailaender/convex-svelte";
+	import { api } from "@partyroom/backend/convex/_generated/api";
 
-const healthCheck = useQuery(api.healthCheck.get, {});
+	const healthCheck = useQuery(api.healthCheck.get, {});
 
-const TITLE_TEXT = `
+	const TITLE_TEXT = `
    ██████╗ ███████╗████████╗████████╗███████╗██████╗
    ██╔══██╗██╔════╝╚══██╔══╝╚══██╔══╝██╔════╝██╔══██╗
    ██████╔╝█████╗     ██║      ██║   █████╗  ██████╔╝
