@@ -2,16 +2,11 @@
 	import { authClient } from "$lib/auth-client";
 	import { createSvelteAuthClient } from "@mmailaender/convex-better-auth-svelte/svelte";
 	import "../app.css";
-	import Header from "../components/Header.svelte";
+	import type { LayoutProps } from "./$types";
 
-	createSvelteAuthClient({ authClient });
+	const { data, children }: LayoutProps = $props();
 
-	const { children } = $props();
+	createSvelteAuthClient({ authClient, getServerState: () => data.authState });
 </script>
 
-<div class="grid h-svh grid-rows-[auto_1fr]">
-	<Header />
-	<main class="overflow-y-auto">
-		{@render children()}
-	</main>
-</div>
+{@render children()}

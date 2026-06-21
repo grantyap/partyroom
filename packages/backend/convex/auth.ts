@@ -36,3 +36,5 @@ export const getCurrentUser = query({
     return await authComponent.getAuthUser(ctx);
   },
 });
+
+export type User = Awaited<ReturnType<typeof authComponent.getAuthUser>>;
