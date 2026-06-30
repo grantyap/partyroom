@@ -19,7 +19,11 @@
 	} = $props();
 
 	// svelte-ignore state_referenced_locally
-	const { form: formData, errors, enhance } = form;
+	const { form: formData, errors, message, enhance } = form;
+
+	const errorMessages = $derived(
+		[$message ?? undefined, $errors._errors].filter((v) => !!v),
+	);
 </script>
 
 <div class={cn("flex flex-col gap-6", className)} {...restProps}>
@@ -100,9 +104,9 @@
 						</Field.Field>
 					</Field.Field>
 					<Field.Field>
-						{#if $errors._errors}
+						{#if errorMessages.length > 0}
 							<ul>
-								{#each $errors._errors as error}
+								{#each errorMessages as error}
 									<li class="text-sm text-destructive">
 										{error}
 									</li>

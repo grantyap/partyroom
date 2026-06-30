@@ -1,12 +1,12 @@
 <script lang="ts">
+	import { goto } from "$app/navigation";
+	import { authClient } from "$lib/auth-client";
 	import { signUpSchema } from "$lib/components/auth/form-schema";
 	import SignupForm from "$lib/components/auth/signup-form.svelte";
 	import GalleryVerticalEndIcon from "@lucide/svelte/icons/gallery-vertical-end";
 	import { superForm } from "sveltekit-superforms";
 	import { zod4 } from "sveltekit-superforms/adapters";
 	import type { PageProps } from "./$types";
-	import { authClient } from "$lib/auth-client";
-	import { goto } from "$app/navigation";
 
 	const { data }: PageProps = $props();
 
@@ -21,13 +21,17 @@
 
 			const { fullName, email, password } = form.data;
 
-			await authClient.signUp.email({
+			const result = await authClient.signUp.email({
 				name: fullName,
 				email,
 				password,
 			});
-			await goto("/");
+
+			if (result.data) {
+				await goto("/");
+			}
 		},
+		resetForm: false,
 	});
 </script>
 

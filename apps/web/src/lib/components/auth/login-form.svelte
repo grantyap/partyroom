@@ -5,7 +5,6 @@
 		Field,
 		FieldDescription,
 		FieldGroup,
-		FieldLabel,
 		FieldSeparator,
 	} from "$lib/components/ui/field/index.js";
 	import * as Form from "$lib/components/ui/form";
@@ -24,7 +23,11 @@
 	} = $props();
 
 	// svelte-ignore state_referenced_locally
-	const { form: formData, errors, enhance } = form;
+	const { form: formData, errors, message, enhance } = form;
+
+	const errorMessages = $derived(
+		[$message ?? undefined, $errors._errors].filter((v) => !!v),
+	);
 </script>
 
 <div class={cn("flex flex-col gap-6", className)} {...restProps}>
@@ -100,9 +103,9 @@
 						<Form.FieldErrors />
 					</Form.Field>
 					<Field>
-						{#if $errors._errors}
+						{#if errorMessages.length > 0}
 							<p class="text-sm text-destructive">
-								{$errors._errors.join(", ")}
+								{errorMessages.join(", ")}
 							</p>
 						{/if}
 						<Button type="submit">Login</Button>
