@@ -1,0 +1,27 @@
+{
+  "name": "@partyroom/activities",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/client.ts",
+    "./convex.config": "./component/convex.config.ts",
+    "./_generated/component.js": "./component/_generated/component.ts"
+  },
+  "scripts": {
+    "codegen": "cd ../backend && convex codegen --component-dir ../../packages/activities/component",
+    "check-types": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@convex-dev/workflow": "^0.4.4",
+    "convex": "catalog:",
+    "convex-helpers": "^0.1.99"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.0",
+    "convex-test": "^0.0.54",
+    "typescript": "catalog:",
+    "vite": "^8.1.5",
+    "vitest": "^4.1.10"
+  }
+}
