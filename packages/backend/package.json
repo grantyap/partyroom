@@ -6,12 +6,20 @@
   "author": "",
   "scripts": {
     "dev": "convex dev",
-    "dev:setup": "convex dev --configure --until-success",
-    "format": "oxfmt --config ../../.oxfmtrc.json ."
+    "dev:setup": "convex dev --once --env-file .env.local",
+    "format": "oxfmt --config ../../.oxfmtrc.json .",
+    "check-types": "tsc --noEmit -p convex/tsconfig.json",
+    "test": "vitest",
+    "test:once": "vitest run"
   },
   "dependencies": {
+    "@partyroom/activities": "workspace:*",
+    "@partyroom/activity-worker": "workspace:*",
+    "@partyroom/media-activities": "workspace:*",
     "@convex-dev/better-auth": "catalog:",
     "@convex-dev/presence": "catalog:",
+    "@convex-dev/workflow": "^0.4.4",
+    "@convex-dev/workpool": "^0.4.8",
     "@mmailaender/convex-better-auth-svelte": "catalog:",
     "better-auth": "catalog:",
     "convex": "catalog:",
@@ -20,8 +28,12 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@edge-runtime/vm": "^5.0.0",
     "@partyroom/config": "workspace:*",
     "@types/node": "^25.8.0",
-    "typescript": "catalog:"
+    "convex-test": "^0.0.54",
+    "typescript": "catalog:",
+    "vite": "^8.1.5",
+    "vitest": "^4.1.10"
   }
 }

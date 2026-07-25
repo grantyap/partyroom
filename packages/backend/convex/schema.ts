@@ -1,8 +1,10 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 import { roomRoleSchema } from "./rooms.schema";
+import { mediaTables } from "./media/schema";
 
 export default defineSchema({
+  ...mediaTables,
   rooms: defineTable({
     owner: v.string(),
     name: v.string(),

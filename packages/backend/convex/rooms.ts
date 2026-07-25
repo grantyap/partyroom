@@ -112,16 +112,17 @@ export const createRoom = mutation({
 
     requireRoomPermission({ user: user._id, permission: "rooms:create" });
 
+    const roomName = name || generateSlug();
     const room = await ctx.db.insert("rooms", {
       owner: user._id,
-      name: name || generateSlug(),
+      name: roomName,
     });
 
     await Promise.all(
       (members ?? [])?.map(({ user, role }) => ctx.db.insert("roomMembers", { room, user, role })),
     );
 
-    return room;
+    return { id: room, name: roomName };
   },
 });
 
