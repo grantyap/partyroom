@@ -6,10 +6,6 @@
 
 @custom-variant dark (&:is(.dark *));
 
-body {
-  @apply bg-neutral-950 text-neutral-100;
-}
-
 :root {
   --background: oklch(1 0 0);
 

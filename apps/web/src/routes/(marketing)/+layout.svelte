@@ -5,7 +5,7 @@
 	const { children }: LayoutProps = $props();
 </script>
 
-<div class="grid h-svh grid-rows-[auto_1fr]">
+<div class="grid h-svh grid-rows-[auto_1fr] bg-neutral-950 text-neutral-100">
 	<Header />
 	<main class="overflow-y-auto">
 		{@render children()}
