@@ -28,13 +28,12 @@
 				{
 					onError: ({ error }) => {
 						setMessage(form, error.message);
-						console.debug("Sign in error:", error);
 					},
 				},
 			);
 
 			if (result.data) {
-				await goto("/");
+				await goto("/app");
 			}
 		},
 		resetForm: false,

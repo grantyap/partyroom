@@ -28,7 +28,7 @@
 			});
 
 			if (result.data) {
-				await goto("/");
+				await goto("/app");
 			}
 		},
 		resetForm: false,

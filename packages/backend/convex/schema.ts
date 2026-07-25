@@ -6,7 +6,9 @@ export default defineSchema({
   rooms: defineTable({
     owner: v.string(),
     name: v.string(),
-  }).index("by_owner", ["owner"]),
+  })
+    .index("by_owner", ["owner"])
+    .index("by_name", ["name"]),
   roomMembers: defineTable({
     room: v.id("rooms"),
     user: v.string(),
@@ -19,5 +21,7 @@ export default defineSchema({
     room: v.id("rooms"),
     user: v.string(),
     body: v.string(),
-  }).index("by_room", ["room"]),
+  })
+    .index("by_room", ["room"])
+    .index("by_room_user", ["room", "user"]),
 });

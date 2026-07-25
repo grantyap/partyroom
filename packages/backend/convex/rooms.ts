@@ -2,48 +2,49 @@ import { Infer, v } from "convex/values";
 import { generateSlug } from "random-word-slugs";
 import { Doc } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
-import { authComponent, getCurrentUserHelper } from "./auth";
+import { authComponent, getCurrentUserImpl } from "./auth";
 import { roomRoleSchema } from "./rooms.schema";
 
-export const getRoom = query({
+export const getRoomByName = query({
   args: {
-    id: v.id("rooms"),
+    name: v.string(),
   },
-  handler: async (ctx, { id }) => {
-    const user = await authComponent.getAuthUser(ctx);
+  handler: async (ctx, { name }) => {
+    const user = await getCurrentUserImpl(ctx);
     if (!user) {
       throw new Error("Unauthenticated");
     }
 
-    const [room, roomMember] = await Promise.all([
-      ctx.db.get("rooms", id),
-      ctx.db
-        .query("roomMembers")
-        .withIndex("by_room_user", (q) => q.eq("room", id).eq("user", user._id))
-        .first(),
-    ]);
-
+    const room = await ctx.db
+      .query("rooms")
+      .withIndex("by_name", (q) => q.eq("name", name))
+      .first();
     if (!room) {
       throw new Error("Room not found");
     }
-    if (!roomMember) {
-      throw new Error("User not in room");
-    }
 
-    await requireRoomPermission({
+    const roomMember = await ctx.db
+      .query("roomMembers")
+      .withIndex("by_room_user", (q) => q.eq("room", room._id).eq("user", user._id))
+      .first();
+    const hasReadPermission = await userHasRoomPermission({
       user: user._id,
       room,
       roomMember,
       permission: "rooms:read",
     });
 
-    return await ctx.db.get("rooms", id);
+    if (!hasReadPermission) {
+      throw new Error("User not in room");
+    }
+
+    return room;
   },
 });
 
 export const getRooms = query({
   handler: async (ctx) => {
-    const user = await getCurrentUserHelper(ctx);
+    const user = await getCurrentUserImpl(ctx);
     if (!user) {
       throw new Error("Unauthenticated");
     }
@@ -52,7 +53,10 @@ export const getRooms = query({
       ctx.db
         .query("rooms")
         .withIndex("by_owner", (q) => q.eq("owner", user._id))
-        .collect(),
+        .collect()
+        .then((ownedRooms) =>
+          ownedRooms.map((ownedRoom) => ({ ...ownedRoom, owner: { name: user.name } })),
+        ),
       ctx.db
         .query("roomMembers")
         .withIndex("by_user", (q) => q.eq("user", user._id))
@@ -79,7 +83,13 @@ export const getRooms = query({
         return null;
       }
 
-      return room;
+      const owner = await authComponent.getAnyUserById(ctx, room.owner);
+      if (!owner) {
+        // This should never happen. Every room must have a valid owner.
+        return null;
+      }
+
+      return { ...room, owner: { name: owner.name } };
     });
 
     return await Promise.all(roomPromises).then((rooms) => [
@@ -95,7 +105,7 @@ export const createRoom = mutation({
     name: v.optional(v.string()),
   },
   handler: async (ctx, { members, name }) => {
-    const user = await getCurrentUserHelper(ctx);
+    const user = await getCurrentUserImpl(ctx);
     if (!user) {
       throw new Error("Unauthenticated");
     }
@@ -125,7 +135,7 @@ export const roleRoomPermissions = {
   member: ["rooms:read", "rooms:chat"],
 } as const satisfies Record<Infer<typeof roomRoleSchema>, RoleRoomPermission[]>;
 
-async function isUserRoomOwner(user: string, room: { owner: string }) {
+function isUserRoomOwner(user: string, room: { owner: string }) {
   return room.owner === user;
 }
 
@@ -133,7 +143,7 @@ async function userHasRoomPermission(
   opts: { user: string } & (
     | {
         room: Pick<Doc<"rooms">, "owner">;
-        roomMember: Pick<Doc<"roomMembers">, "role">;
+        roomMember: Pick<Doc<"roomMembers">, "role"> | null;
         permission: Exclude<RoleRoomPermission, "rooms:create">;
       }
     | { room?: never; roomMember?: never; permission: "rooms:create" }
@@ -143,9 +153,13 @@ async function userHasRoomPermission(
     return true;
   }
 
-  const isOwner = await isUserRoomOwner(opts.user, opts.room);
+  const isOwner = isUserRoomOwner(opts.user, opts.room);
   if (isOwner) {
     return true;
+  }
+
+  if (!opts.roomMember) {
+    return false;
   }
 
   return (

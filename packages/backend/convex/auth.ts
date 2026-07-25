@@ -33,13 +33,18 @@ export const createAuth = (ctx: GenericCtx<DataModel>) => {
 export const getCurrentUser = query({
   args: {},
   handler: async (ctx) => {
-    return await authComponent.getAuthUser(ctx);
+    return await getCurrentUserImpl(ctx);
   },
 });
 
 export type User = Awaited<ReturnType<typeof authComponent.getAuthUser>>;
 
-export async function getCurrentUserHelper(ctx: QueryCtx) {
+/**
+ * Gets the currently logged in user.
+ * 
+ * This correctly handles the "Act as user" checkbox in the Convex dashboard.
+ */
+export async function getCurrentUserImpl(ctx: QueryCtx) {
   try {
     return await authComponent.getAuthUser(ctx);
   } catch (error) {
