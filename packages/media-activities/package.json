@@ -1,0 +1,19 @@
+{
+  "name": "@partyroom/media-activities",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/registry.ts"
+  },
+  "scripts": {
+    "check-types": "tsc --noEmit",
+    "generate": "bun ../../scripts/generate-activity-contracts.ts"
+  },
+  "dependencies": {
+    "@partyroom/activities": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.0",
+    "typescript": "catalog:"
+  }
+}

@@ -1,0 +1,325 @@
+{
+  "resolve": {
+    "name": "media.resolve",
+    "version": 1,
+    "taskQueue": "media",
+    "input": {
+      "kind": "object",
+      "fields": {
+        "jobId": {
+          "kind": "string"
+        }
+      }
+    },
+    "output": {
+      "kind": "object",
+      "fields": {
+        "extractor": {
+          "kind": "string"
+        },
+        "sourceId": {
+          "kind": "string"
+        },
+        "title": {
+          "kind": "optional",
+          "value": {
+            "kind": "string"
+          }
+        },
+        "duration": {
+          "kind": "optional",
+          "value": {
+            "kind": "number"
+          }
+        }
+      }
+    },
+    "artifacts": {}
+  },
+  "download": {
+    "name": "media.download",
+    "version": 1,
+    "taskQueue": "media",
+    "input": {
+      "kind": "object",
+      "fields": {
+        "jobId": {
+          "kind": "string"
+        }
+      }
+    },
+    "output": {
+      "kind": "object",
+      "fields": {
+        "storageId": {
+          "kind": "artifact",
+          "disposition": "intermediate"
+        },
+        "duration": {
+          "kind": "number"
+        },
+        "fileName": {
+          "kind": "string"
+        },
+        "contentType": {
+          "kind": "string"
+        }
+      }
+    },
+    "artifacts": {
+      "storageId": {
+        "disposition": "intermediate"
+      }
+    }
+  },
+  "extractAudio": {
+    "name": "media.extractAudio",
+    "version": 1,
+    "taskQueue": "media",
+    "input": {
+      "kind": "object",
+      "fields": {
+        "sourceUrl": {
+          "kind": "string"
+        }
+      }
+    },
+    "output": {
+      "kind": "object",
+      "fields": {
+        "storageId": {
+          "kind": "artifact",
+          "disposition": "intermediate"
+        },
+        "duration": {
+          "kind": "number"
+        },
+        "contentType": {
+          "kind": "string"
+        }
+      }
+    },
+    "artifacts": {
+      "storageId": {
+        "disposition": "intermediate"
+      }
+    }
+  },
+  "separate": {
+    "name": "media.separate",
+    "version": 1,
+    "taskQueue": "stems",
+    "input": {
+      "kind": "object",
+      "fields": {
+        "audioUrl": {
+          "kind": "string"
+        }
+      }
+    },
+    "output": {
+      "kind": "object",
+      "fields": {
+        "instrumentalStorageId": {
+          "kind": "artifact",
+          "disposition": "retained"
+        },
+        "vocalsStorageId": {
+          "kind": "artifact",
+          "disposition": "intermediate"
+        },
+        "contentType": {
+          "kind": "string"
+        },
+        "model": {
+          "kind": "string"
+        }
+      }
+    },
+    "artifacts": {
+      "instrumentalStorageId": {
+        "disposition": "retained"
+      },
+      "vocalsStorageId": {
+        "disposition": "intermediate"
+      }
+    }
+  },
+  "transcribe": {
+    "name": "media.transcribe",
+    "version": 1,
+    "taskQueue": "lyrics",
+    "input": {
+      "kind": "object",
+      "fields": {
+        "audioUrl": {
+          "kind": "string"
+        }
+      }
+    },
+    "output": {
+      "kind": "object",
+      "fields": {
+        "storageId": {
+          "kind": "artifact",
+          "disposition": "retained"
+        },
+        "timedLyricsStorageId": {
+          "kind": "artifact",
+          "disposition": "retained"
+        },
+        "contentType": {
+          "kind": "string"
+        },
+        "model": {
+          "kind": "string"
+        },
+        "language": {
+          "kind": "optional",
+          "value": {
+            "kind": "string"
+          }
+        }
+      }
+    },
+    "artifacts": {
+      "storageId": {
+        "disposition": "retained"
+      },
+      "timedLyricsStorageId": {
+        "disposition": "retained"
+      }
+    }
+  },
+  "analyzeMelody": {
+    "name": "media.analyzeMelody",
+    "version": 1,
+    "taskQueue": "annotations",
+    "input": {
+      "kind": "object",
+      "fields": {
+        "audioUrl": {
+          "kind": "string"
+        }
+      }
+    },
+    "output": {
+      "kind": "object",
+      "fields": {
+        "storageId": {
+          "kind": "artifact",
+          "disposition": "intermediate"
+        },
+        "contentType": {
+          "kind": "string"
+        },
+        "model": {
+          "kind": "string"
+        }
+      }
+    },
+    "artifacts": {
+      "storageId": {
+        "disposition": "intermediate"
+      }
+    }
+  },
+  "assembleAnnotations": {
+    "name": "media.assembleAnnotations",
+    "version": 1,
+    "taskQueue": "annotations",
+    "input": {
+      "kind": "object",
+      "fields": {
+        "lyricsUrl": {
+          "kind": "string"
+        },
+        "melodyUrl": {
+          "kind": "string"
+        },
+        "duration": {
+          "kind": "number"
+        },
+        "extractor": {
+          "kind": "string"
+        },
+        "sourceId": {
+          "kind": "string"
+        },
+        "title": {
+          "kind": "optional",
+          "value": {
+            "kind": "string"
+          }
+        }
+      }
+    },
+    "output": {
+      "kind": "object",
+      "fields": {
+        "annotationsStorageId": {
+          "kind": "artifact",
+          "disposition": "retained"
+        },
+        "midiStorageId": {
+          "kind": "artifact",
+          "disposition": "retained"
+        },
+        "musicXmlStorageId": {
+          "kind": "artifact",
+          "disposition": "retained"
+        },
+        "contentType": {
+          "kind": "string"
+        }
+      }
+    },
+    "artifacts": {
+      "annotationsStorageId": {
+        "disposition": "retained"
+      },
+      "midiStorageId": {
+        "disposition": "retained"
+      },
+      "musicXmlStorageId": {
+        "disposition": "retained"
+      }
+    }
+  },
+  "mux": {
+    "name": "media.mux",
+    "version": 1,
+    "taskQueue": "media",
+    "input": {
+      "kind": "object",
+      "fields": {
+        "videoUrl": {
+          "kind": "string"
+        },
+        "instrumentalUrl": {
+          "kind": "string"
+        }
+      }
+    },
+    "output": {
+      "kind": "object",
+      "fields": {
+        "storageId": {
+          "kind": "artifact",
+          "disposition": "retained"
+        },
+        "duration": {
+          "kind": "number"
+        },
+        "contentType": {
+          "kind": "string"
+        }
+      }
+    },
+    "artifacts": {
+      "storageId": {
+        "disposition": "retained"
+      }
+    }
+  }
+}
