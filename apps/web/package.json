@@ -10,10 +10,10 @@
     "prepare": "svelte-kit sync || echo ''",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
-    "format": "oxfmt --config ../../.oxfmtrc.json ."
+    "format": "oxfmt --config ../../.oxfmtrc.json .",
+    "test": "bun test src/lib/karaoke.test.ts"
   },
   "dependencies": {
-    "convex-svelte": "catalog:",
     "@convex-dev/better-auth": "catalog:",
     "@convex-dev/presence": "catalog:",
     "@mmailaender/convex-better-auth-svelte": "catalog:",
@@ -21,6 +21,7 @@
     "@partyroom/env": "workspace:*",
     "better-auth": "catalog:",
     "convex": "catalog:",
+    "convex-svelte": "catalog:",
     "dotenv": "catalog:",
     "zod": "catalog:"
   },
@@ -35,6 +36,7 @@
     "@sveltejs/vite-plugin-svelte": "^7.2.0",
     "@tailwindcss/vite": "^4.2.4",
     "@tanstack/table-core": "^8.21.3",
+    "@types/bun": "^1.3.0",
     "bits-ui": "^2.16.3",
     "clsx": "^2.1.1",
     "embla-carousel-svelte": "^8.6.0",

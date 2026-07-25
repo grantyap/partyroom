@@ -1,8 +1,10 @@
 <script lang="ts">
+	import RoomMedia from "$lib/components/room-media.svelte";
 	import { Button } from "$lib/components/ui/button";
 	import { Input } from "$lib/components/ui/input";
 	import * as Item from "$lib/components/ui/item";
 	import { Presence } from "$lib/presence.svelte";
+	import ArrowLeftIcon from "@lucide/svelte/icons/arrow-left";
 	import { api } from "@partyroom/backend/convex/_generated/api";
 	import type { Id } from "@partyroom/backend/convex/_generated/dataModel";
 	import { useMutation, useQuery } from "convex-svelte";
@@ -39,6 +41,7 @@
 	const sendMessage = useMutation(api.chat.sendMessage);
 </script>
 
+<Button href="/app" variant="outline"><ArrowLeftIcon /> All rooms</Button>
 <h1>Room &ldquo;{room.data?.name}&rdquo;</h1>
 <pre class="text-xs text-muted-foreground font-mono">{JSON.stringify(
 		room.data,
@@ -64,6 +67,7 @@
 		</Item.Root>
 	{/each}
 </ul>
+<RoomMedia {roomId} />
 <div>
 	<h2 class="text-xl font-medium">Chat</h2>
 	<ul>
@@ -90,13 +94,13 @@
 				return;
 			}
 
-			const rollbackMessageBody = messageBody;
+			const rollbackMessageBody = messageBody.trim();
 			try {
 				await sendMessage(
 					{
 						room: roomId,
 						user: data.user._id,
-						body: messageBody,
+						body: messageBody.trim(),
 					},
 					{
 						optimisticUpdate: (store, args) => {
@@ -134,6 +138,6 @@
 		class="flex gap-2 items-center"
 	>
 		<Input bind:value={messageBody} class="flex-1" />
-		<Button>Send</Button>
+		<Button type="submit">Send</Button>
 	</form>
 </div>

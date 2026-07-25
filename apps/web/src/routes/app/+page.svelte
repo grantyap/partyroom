@@ -1,11 +1,23 @@
 <script lang="ts">
-	import { useQuery } from "convex-svelte";
-	import { api } from "@partyroom/backend/convex/_generated/api";
+	import { goto } from "$app/navigation";
+	import { Button } from "$lib/components/ui/button";
 	import * as Item from "$lib/components/ui/item";
+	import { api } from "@partyroom/backend/convex/_generated/api";
+	import { useMutation, useQuery } from "convex-svelte";
 
 	const rooms = useQuery(api.rooms.getRooms);
+
+	const createRoom = useMutation(api.rooms.createRoom);
 </script>
 
+<Button
+	onclick={async () => {
+		const room = await createRoom({});
+		await goto(`/app/rooms/${room.name}`);
+	}}
+>
+	Create room
+</Button>
 <ul>
 	{#each rooms.data as room (room._id)}
 		<Item.Root variant="outline">
