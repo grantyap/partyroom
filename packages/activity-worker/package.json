@@ -1,0 +1,22 @@
+{
+  "name": "@partyroom/activity-worker",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "check-types": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@partyroom/activities": "workspace:*",
+    "convex": "catalog:",
+    "convex-helpers": "^0.1.99",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.0",
+    "typescript": "catalog:"
+  }
+}
