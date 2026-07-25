@@ -35,6 +35,11 @@ function activity<
   const Queue extends (typeof mediaQueues)[keyof typeof mediaQueues],
 >(config: {
   name: Name;
+  /**
+   * Bump when this activity's worker-facing input, output, artifacts, or
+   * observable behavior changes incompatibly. Workflow-only graph changes do
+   * not require an activity version bump.
+   */
   version: Version;
   queue: Queue;
   input: Input;

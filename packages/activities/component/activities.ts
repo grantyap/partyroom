@@ -172,6 +172,7 @@ const claimResult = v.union(
 
 export const claim = mutation({
   args: {
+    protocolVersion: v.literal(protocolVersion),
     taskQueue: v.string(),
     workerId: v.string(),
     supportedActivities: v.array(activityDefinition),

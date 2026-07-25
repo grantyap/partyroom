@@ -172,6 +172,9 @@ class WorkerTests(unittest.IsolatedAsyncioTestCase):
         async def handle(request: httpx.Request) -> httpx.Response:
             nonlocal claimed_once, completion
             if request.url.path.endswith("/claim"):
+                import json
+
+                self.assertEqual(json.loads(request.content)["protocolVersion"], 1)
                 if claimed_once:
                     return httpx.Response(200, json=None)
                 claimed_once = True

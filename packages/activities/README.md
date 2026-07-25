@@ -294,6 +294,21 @@ protocol version. Existing versions must remain registered until their queued
 and running work has drained. Breaking input or output changes require a new
 activity version.
 
+Compatibility has three deliberately separate rules:
+
+- Changing only workflow ordering, branching, or joining requires no version
+  change. Convex Workflow owns that durable orchestration.
+- Changing an activity's input, output, artifacts, or observable worker behavior
+  requires incrementing that activity's `version`.
+- Changing the shared claim, lease, cancellation, progress, or artifact HTTP
+  protocol incompatibly requires incrementing `protocolVersion`.
+
+Workers include `protocolVersion` in every claim request. The backend rejects a
+claim before leasing work when that version differs, so an old worker cannot
+fail an activity merely because a rolling deployment changed the transport.
+The `defineActivity` and managed workflow APIs repeat these rules in their
+editor documentation so the decision is visible at callsites.
+
 The worker activity contracts are generated from the application activity registry.
 TypeScript receives compile-time input/output inference. Python receives
 generated Pydantic models plus runtime validation. This provides wire

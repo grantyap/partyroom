@@ -40,6 +40,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         "mutation",
         "internal",
         {
+          protocolVersion: 1;
           supportedActivities: Array<{ name: string; version: number }>;
           taskQueue: string;
           workerId: string;

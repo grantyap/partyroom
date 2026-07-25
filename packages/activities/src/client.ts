@@ -90,6 +90,11 @@ export function defineActivity<
   Queue extends QueueDefinition,
 >(config: {
   name: Name;
+  /**
+   * Bump when this activity's input, output, artifact contract, or observable
+   * behavior changes incompatibly. Workflow-only orchestration changes do not
+   * require an activity version bump.
+   */
   version: Version;
   queue: Queue;
   input: InputSchema;
@@ -250,6 +255,7 @@ export class ActivityManager {
 export type WorkerActivityDefinition = { name: string; version: number };
 
 export type ClaimRequest = {
+  protocolVersion: typeof protocolVersion;
   taskQueue: string;
   workerId: string;
   supportedActivities: WorkerActivityDefinition[];

@@ -97,6 +97,12 @@ export class ManagedWorkflowManager {
     private readonly lifecycleCompletion: FunctionReference<"mutation", "internal">,
   ) {}
 
+  /**
+   * Defines durable orchestration. Changing only the workflow graph does not
+   * require a worker protocol or activity version bump. Bump an activity's
+   * version when its worker-facing contract changes, and bump protocolVersion
+   * when the shared backend-to-worker transport changes incompatibly.
+   */
   define<const Args extends PropertyValidators>(config: {
     args: Args;
     workpoolOptions?: Parameters<WorkflowManager["define"]>[0]["workpoolOptions"];

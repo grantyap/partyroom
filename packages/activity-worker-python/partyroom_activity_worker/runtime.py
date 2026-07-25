@@ -11,7 +11,13 @@ from typing import Any, Generic, TypeVar, cast
 import httpx
 from pydantic import BaseModel
 
-from .protocol import ClaimedActivity, FailureResponse, RenewalResponse, TerminalResponse
+from .protocol import (
+    PROTOCOL_VERSION,
+    ClaimedActivity,
+    FailureResponse,
+    RenewalResponse,
+    TerminalResponse,
+)
 
 
 Input = TypeVar("Input", bound=BaseModel)
@@ -295,6 +301,7 @@ class Worker:
                 body = await self._request(
                     "claim",
                     {
+                        "protocolVersion": PROTOCOL_VERSION,
                         "taskQueue": self.task_queue,
                         "workerId": f"{self.worker_id}:{self.instance_id}:{slot}",
                         "supportedActivities": [

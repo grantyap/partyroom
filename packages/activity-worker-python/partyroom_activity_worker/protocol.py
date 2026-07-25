@@ -1,6 +1,9 @@
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+
+PROTOCOL_VERSION = 1
 
 
 class ProtocolModel(BaseModel):
@@ -13,7 +16,7 @@ class ActivityIdentity(ProtocolModel):
 
 
 class ClaimedActivity(ProtocolModel):
-    protocol_version: int = Field(alias="protocolVersion")
+    protocol_version: Literal[1] = Field(alias="protocolVersion")
     activity_id: str = Field(alias="activityId")
     activity_type: str = Field(alias="activityType")
     activity_version: int = Field(alias="activityVersion")

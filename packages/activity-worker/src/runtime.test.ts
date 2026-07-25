@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { defineActivity, defineQueue, wire } from "@partyroom/activities";
+import { claimRequestSchema } from "./protocol";
 import { ActivityWorker, ApplicationError, defineHandler, runManagedProcess } from "./runtime";
 
 const queue = defineQueue("test", { leaseDurationMs: 30_000 });
@@ -41,6 +42,20 @@ function claimBody(leaseDurationMs = 30_000) {
 }
 
 describe("ActivityWorker", () => {
+  test("rejects missing or incompatible claim protocol versions", () => {
+    const claim = {
+      taskQueue: "test",
+      workerId: "worker",
+      supportedActivities: [{ name: "test.echo", version: 1 }],
+    };
+    expect(() => claimRequestSchema.parse(claim)).toThrow();
+    expect(() => claimRequestSchema.parse({ ...claim, protocolVersion: 2 })).toThrow();
+    expect(claimRequestSchema.parse({ ...claim, protocolVersion: 1 })).toEqual({
+      ...claim,
+      protocolVersion: 1,
+    });
+  });
+
   test("force-kills a managed process that ignores cancellation", async () => {
     const controller = new AbortController();
     const running = runManagedProcess(
@@ -115,6 +130,7 @@ describe("ActivityWorker", () => {
       const path = new URL(input instanceof Request ? input.url : input).pathname;
       const body = JSON.parse(String(init?.body ?? "{}"));
       if (path === "/workers/claim") {
+        expect(body.protocolVersion).toBe(1);
         if (claimed) return Response.json(null);
         claimed = true;
         return Response.json(claimBody());

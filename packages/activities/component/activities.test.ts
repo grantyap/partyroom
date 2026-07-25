@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { convexTest } from "convex-test";
 import { api, internal } from "./_generated/api";
 import schema from "./schema";
+import { protocolVersion } from "./validators";
 
 const modules = import.meta.glob("./**/*.{ts,js}");
 
@@ -29,6 +30,7 @@ function scheduleArgs(overrides: Record<string, unknown> = {}) {
 
 async function claim(t: ReturnType<typeof convexTest>, workerId = "worker-1") {
   return await t.mutation(api.activities.claim, {
+    protocolVersion,
     taskQueue: "stems",
     workerId,
     supportedActivities: [{ name: "media.separate", version: 1 }],
@@ -43,6 +45,21 @@ describe("activities component", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  test("rejects claims from an incompatible worker protocol", async () => {
+    const t = convexTest(schema, modules);
+    await expect(
+      t.mutation(
+        api.activities.claim,
+        {
+          protocolVersion: 2,
+          taskQueue: "stems",
+          workerId: "old-worker",
+          supportedActivities: [{ name: "media.separate", version: 1 }],
+        } as never,
+      ),
+    ).rejects.toThrow();
   });
 
   test("claims compatible work once and respects queue concurrency", async () => {
@@ -192,6 +209,7 @@ describe("activities component", () => {
       scheduleArgs({ taskQueue: "other-stems" }),
     );
     const running = await t.mutation(api.activities.claim, {
+      protocolVersion,
       taskQueue: "other-stems",
       workerId: "worker",
       supportedActivities: [{ name: "media.separate", version: 1 }],

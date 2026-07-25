@@ -1,3 +1,4 @@
+import { protocolVersion } from "@partyroom/activities";
 import { z } from "zod";
 
 export const activityDefinitionSchema = z.object({
@@ -6,13 +7,14 @@ export const activityDefinitionSchema = z.object({
 });
 
 export const claimRequestSchema = z.object({
+  protocolVersion: z.literal(protocolVersion),
   taskQueue: z.string().min(1),
   workerId: z.string().min(1),
   supportedActivities: z.array(activityDefinitionSchema).min(1),
 });
 
 export const claimedActivitySchema = z.object({
-  protocolVersion: z.literal(1),
+  protocolVersion: z.literal(protocolVersion),
   activityId: z.string().min(1),
   activityType: z.string().min(1),
   activityVersion: z.number().int().positive(),

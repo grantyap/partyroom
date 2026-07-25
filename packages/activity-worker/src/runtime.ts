@@ -4,6 +4,7 @@ import type {
   ActivityOutput,
   ArtifactId,
 } from "@partyroom/activities";
+import { protocolVersion } from "@partyroom/activities";
 import { parse } from "convex-helpers/validators";
 import type { Value } from "convex/values";
 import {
@@ -272,6 +273,7 @@ export class ActivityWorker {
         const activity = await this.request(
           "claim",
           {
+            protocolVersion,
             taskQueue: this.options.taskQueue,
             workerId: `${this.options.workerId}:${this.instanceId}:${slot}`,
             supportedActivities: [...this.handlers.values()].map(({ definition }) => ({
