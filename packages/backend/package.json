@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@convex-dev/better-auth": "catalog:",
+    "@convex-dev/presence": "catalog:",
     "@mmailaender/convex-better-auth-svelte": "catalog:",
     "better-auth": "catalog:",
     "convex": "catalog:",

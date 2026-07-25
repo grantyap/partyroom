@@ -3,13 +3,13 @@ import { api } from "@partyroom/backend/convex/_generated/api";
 import { error } from "@sveltejs/kit";
 import type { PageServerLoad } from "./$types";
 
-export const load: PageServerLoad = async ({ params }) => {
+export const load: PageServerLoad = async ({ params, parent }) => {
   const { roomName } = params;
 
   const client = createConvexHttpClient();
 
-  return {
-    room: await (async () => {
+  const [room, user] = await Promise.all([
+    (async () => {
       try {
         return await client.query(api.rooms.getRoomByName, { name: roomName });
       } catch (err) {
@@ -25,5 +25,17 @@ export const load: PageServerLoad = async ({ params }) => {
         throw err;
       }
     })(),
+    parent().then(({ user }) => {
+      if (!user) {
+        error(401);
+      }
+
+      return user;
+    }),
+  ]);
+
+  return {
+    room,
+    user,
   };
 };

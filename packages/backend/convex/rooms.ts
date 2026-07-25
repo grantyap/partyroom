@@ -27,7 +27,7 @@ export const getRoomByName = query({
       .query("roomMembers")
       .withIndex("by_room_user", (q) => q.eq("room", room._id).eq("user", user._id))
       .first();
-    const hasReadPermission = await userHasRoomPermission({
+    const hasReadPermission = userHasRoomPermission({
       user: user._id,
       room,
       roomMember,
@@ -73,12 +73,12 @@ export const getRooms = query({
       }
 
       if (
-        !(await userHasRoomPermission({
+        !userHasRoomPermission({
           user: user._id,
           room,
           roomMember: { role },
           permission: "rooms:read",
-        }))
+        })
       ) {
         return null;
       }
@@ -110,7 +110,7 @@ export const createRoom = mutation({
       throw new Error("Unauthenticated");
     }
 
-    await requireRoomPermission({ user: user._id, permission: "rooms:create" });
+    requireRoomPermission({ user: user._id, permission: "rooms:create" });
 
     const room = await ctx.db.insert("rooms", {
       owner: user._id,
@@ -139,7 +139,7 @@ function isUserRoomOwner(user: string, room: { owner: string }) {
   return room.owner === user;
 }
 
-async function userHasRoomPermission(
+export function userHasRoomPermission(
   opts: { user: string } & (
     | {
         room: Pick<Doc<"rooms">, "owner">;
@@ -167,8 +167,8 @@ async function userHasRoomPermission(
   ).includes(opts.permission);
 }
 
-const requireRoomPermission = async (...args: Parameters<typeof userHasRoomPermission>) => {
-  if (!(await userHasRoomPermission(...args))) {
+export const requireRoomPermission = (...args: Parameters<typeof userHasRoomPermission>) => {
+  if (!userHasRoomPermission(...args)) {
     throw new Error("Unauthorized");
   }
 };

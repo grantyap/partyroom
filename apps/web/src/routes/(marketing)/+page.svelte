@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { useQuery } from "@mmailaender/convex-svelte";
+	import { useQuery } from "convex-svelte";
 	import { api } from "@partyroom/backend/convex/_generated/api";
 
 	const healthCheck = useQuery(api.healthCheck.get, {});
