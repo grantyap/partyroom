@@ -1,8 +1,8 @@
 import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
-import { getCurrentUserImpl } from "./auth";
+import { authComponent, getCurrentUserImpl } from "./auth";
 
-export const getMessage = query({
+export const getMessages = query({
   args: {
     room: v.id("rooms"),
   },
@@ -11,7 +11,21 @@ export const getMessage = query({
       .query("messages")
       .withIndex("by_room", (q) => q.eq("room", room))
       .order("desc")
-      .take(50);
+      .take(50)
+      .then(async (messages) => {
+        return await Promise.all(
+          messages.map(async (message) => {
+            const user = await authComponent.getAnyUserById(ctx, message.user);
+            return {
+              ...message,
+              user: {
+                _id: message.user,
+                name: user?.name,
+              },
+            };
+          }),
+        );
+      });
     return messages.reverse();
   },
 });
