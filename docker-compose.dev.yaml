@@ -1,0 +1,25 @@
+services:
+  backend:
+    ports:
+      - "${PORT:-3210}:3210"
+      - "${SITE_PROXY_PORT:-3211}:3211"
+
+  dashboard:
+    ports:
+      - "${DASHBOARD_PORT:-6791}:6791"
+
+  media-worker:
+    ports:
+      - "${MEDIA_WORKER_PORT:-4100}:4100"
+
+  stem-worker:
+    ports:
+      - "${STEM_WORKER_PORT:-4200}:4200"
+
+  lyrics-worker:
+    ports:
+      - "${LYRICS_WORKER_PORT:-4300}:4300"
+
+  annotations-worker:
+    ports:
+      - "${ANNOTATIONS_WORKER_PORT:-4400}:4400"

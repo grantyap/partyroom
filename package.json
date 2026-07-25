@@ -20,7 +20,11 @@
   },
   "type": "module",
   "scripts": {
-    "dev": "turbo dev",
+    "dev": "bun run dev:infra && turbo dev",
+    "dev:infra": "docker compose -f docker-compose.yaml -f docker-compose.dev.yaml up -d --wait --build",
+    "dev:down": "docker compose -f docker-compose.yaml -f docker-compose.dev.yaml down",
+    "dev:reset": "docker compose -f docker-compose.yaml -f docker-compose.dev.yaml down --volumes",
+    "generate:activities": "bun scripts/generate-activity-contracts.ts",
     "build": "turbo build",
     "check-types": "turbo check-types",
     "dev:web": "turbo -F web dev",

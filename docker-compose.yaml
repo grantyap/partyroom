@@ -1,0 +1,204 @@
+name: partyroom
+
+services:
+  backend:
+    image: ghcr.io/get-convex/convex-backend:latest
+    stop_grace_period: 10s
+    stop_signal: SIGINT
+    expose:
+      - "3210"
+      - "3211"
+    volumes:
+      - data:/convex/data
+    environment:
+      - V8_ACTION_USER_TIMEOUT_SECS
+      - ACTIVITY_WORKER_TOKEN
+      - NODE_ACTION_USER_TIMEOUT_SECS
+      - APPLICATION_MAX_CONCURRENT_MUTATIONS=${APPLICATION_MAX_CONCURRENT_MUTATIONS:-16}
+      - APPLICATION_MAX_CONCURRENT_NODE_ACTIONS=${APPLICATION_MAX_CONCURRENT_NODE_ACTIONS:-16}
+      - APPLICATION_MAX_CONCURRENT_QUERIES=${APPLICATION_MAX_CONCURRENT_QUERIES:-16}
+      - APPLICATION_MAX_CONCURRENT_V8_ACTIONS=${APPLICATION_MAX_CONCURRENT_V8_ACTIONS:-16}
+      - AWS_ACCESS_KEY_ID
+      - AWS_REGION
+      - AWS_S3_DISABLE_CHECKSUMS
+      - AWS_S3_DISABLE_SSE
+      - AWS_S3_FORCE_PATH_STYLE
+      - AWS_SECRET_ACCESS_KEY
+      - AWS_SESSION_TOKEN
+      - CONVEX_CLOUD_ORIGIN=${CONVEX_CLOUD_ORIGIN:-http://127.0.0.1:${PORT:-3210}}
+      - CONVEX_RELEASE_VERSION_DEV
+      - CONVEX_SITE_ORIGIN=${CONVEX_SITE_ORIGIN:-http://127.0.0.1:${SITE_PROXY_PORT:-3211}}
+      - DATABASE_URL
+      - DISABLE_BEACON
+      - DISABLE_METRICS_ENDPOINT=${DISABLE_METRICS_ENDPOINT:-true} # Enable if you want prometheus compatible /metrics endpoint
+      - DOCUMENT_RETENTION_DELAY=${DOCUMENT_RETENTION_DELAY:-172800} # Lower default document retention to 2 days
+      - DO_NOT_REQUIRE_SSL
+      - HTTP_SERVER_TIMEOUT_SECONDS
+      - INSTANCE_NAME
+      - INSTANCE_SECRET
+      - MYSQL_URL
+      - POSTGRES_URL
+      - REDACT_LOGS_TO_CLIENT
+      - RUST_BACKTRACE
+      - RUST_LOG=${RUST_LOG:-info}
+      - S3_ENDPOINT_URL
+      - S3_STORAGE_EXPORTS_BUCKET
+      - S3_STORAGE_FILES_BUCKET
+      - S3_STORAGE_MODULES_BUCKET
+      - S3_STORAGE_SEARCH_BUCKET
+      - S3_STORAGE_SNAPSHOT_IMPORTS_BUCKET
+      - WORKER_CONVEX_CLOUD_ORIGIN=${WORKER_CONVEX_CLOUD_ORIGIN:-http://backend:3210}
+      - WORKER_SIGNING_SECRET
+
+    healthcheck:
+      test: curl -f http://localhost:3210/version
+      interval: 5s
+      start_period: 10s
+
+  dashboard:
+    image: ghcr.io/get-convex/convex-dashboard:latest
+    stop_grace_period: 10s
+    stop_signal: SIGINT
+    expose:
+      - "6791"
+    environment:
+      - NEXT_PUBLIC_DEPLOYMENT_URL=${NEXT_PUBLIC_DEPLOYMENT_URL:-http://127.0.0.1:${PORT:-3210}}
+      - NEXT_PUBLIC_LOAD_MONACO_INTERNALLY
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  media-worker:
+    build:
+      context: .
+      dockerfile: apps/media-worker/Dockerfile
+    restart: unless-stopped
+    cpus: "${MEDIA_WORKER_CPU_LIMIT:-2.0}"
+    mem_limit: "${MEDIA_WORKER_MEMORY_LIMIT:-1g}"
+    memswap_limit: "${MEDIA_WORKER_MEMORY_LIMIT:-1g}"
+    pids_limit: 256
+    expose:
+      - "4100"
+    environment:
+      - MAX_MEDIA_BYTES=${MAX_MEDIA_BYTES:-2147483648}
+      - ACTIVITY_WORKER_API_URL=${ACTIVITY_WORKER_API_URL:-http://backend:3211/activities/workers/}
+      - ACTIVITY_WORKER_TOKEN
+      - MAX_MEDIA_DURATION_SECONDS=${MAX_MEDIA_DURATION_SECONDS:-1200}
+      - MEDIA_WORKER_CONCURRENCY=${MEDIA_WORKER_CONCURRENCY:-2}
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - bun
+        - -e
+        - fetch('http://localhost:4100/health').then((response) => { if (!response.ok) process.exit(1); }).catch(() => process.exit(1));
+      interval: 5s
+      timeout: 3s
+      start_period: 5s
+      retries: 10
+
+  stem-worker:
+    build:
+      context: .
+      dockerfile: apps/stem-worker/Dockerfile
+    restart: unless-stopped
+    cpus: "${STEM_WORKER_CPU_LIMIT:-2.0}"
+    mem_limit: "${STEM_WORKER_MEMORY_LIMIT:-3g}"
+    memswap_limit: "${STEM_WORKER_MEMORY_SWAP_LIMIT:-4g}"
+    pids_limit: 256
+    expose:
+      - "4200"
+    environment:
+      - MAX_MEDIA_BYTES=${MAX_MEDIA_BYTES:-2147483648}
+      - ACTIVITY_WORKER_API_URL=${ACTIVITY_WORKER_API_URL:-http://backend:3211/activities/workers/}
+      - ACTIVITY_WORKER_TOKEN
+      - STEM_MODEL=${STEM_MODEL:-Kim_Vocal_2.onnx}
+      - STEM_WORKER_CONCURRENCY=${STEM_WORKER_CONCURRENCY:-1}
+    volumes:
+      - stem_models:/models
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://localhost:4200/health')
+      interval: 5s
+      timeout: 3s
+      start_period: 10s
+      retries: 10
+
+  lyrics-worker:
+    build:
+      context: .
+      dockerfile: apps/lyrics-worker/Dockerfile
+    restart: unless-stopped
+    cpus: "${LYRICS_WORKER_CPU_LIMIT:-3.0}"
+    mem_limit: "${LYRICS_WORKER_MEMORY_LIMIT:-7g}"
+    memswap_limit: "${LYRICS_WORKER_MEMORY_SWAP_LIMIT:-9g}"
+    pids_limit: 256
+    expose:
+      - "4300"
+    environment:
+      - LYRICS_ALIGNER_MODEL=${LYRICS_ALIGNER_MODEL:-Qwen/Qwen3-ForcedAligner-0.6B}
+      - ACTIVITY_WORKER_API_URL=${ACTIVITY_WORKER_API_URL:-http://backend:3211/activities/workers/}
+      - ACTIVITY_WORKER_TOKEN
+      - LYRICS_ASR_MODEL=${LYRICS_ASR_MODEL:-Qwen/Qwen3-ASR-0.6B}
+      - LYRICS_CHUNK_SECONDS=${LYRICS_CHUNK_SECONDS:-60}
+      - LYRICS_MAX_NEW_TOKENS=${LYRICS_MAX_NEW_TOKENS:-1024}
+      - LYRICS_WORKER_CONCURRENCY=${LYRICS_WORKER_CONCURRENCY:-1}
+      - MAX_MEDIA_BYTES=${MAX_MEDIA_BYTES:-2147483648}
+    volumes:
+      - lyrics_models:/models
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://localhost:4300/health')
+      interval: 5s
+      timeout: 3s
+      start_period: 10s
+      retries: 10
+
+  annotations-worker:
+    build:
+      context: .
+      dockerfile: apps/annotations-worker/Dockerfile
+    restart: unless-stopped
+    cpus: "${ANNOTATIONS_WORKER_CPU_LIMIT:-1.0}"
+    mem_limit: "${ANNOTATIONS_WORKER_MEMORY_LIMIT:-2g}"
+    memswap_limit: "${ANNOTATIONS_WORKER_MEMORY_LIMIT:-2g}"
+    pids_limit: 256
+    expose:
+      - "4400"
+    environment:
+      - ANNOTATIONS_WORKER_CONCURRENCY=${ANNOTATIONS_WORKER_CONCURRENCY:-1}
+      - ACTIVITY_WORKER_API_URL=${ACTIVITY_WORKER_API_URL:-http://backend:3211/activities/workers/}
+      - ACTIVITY_WORKER_TOKEN
+      - MAX_MEDIA_BYTES=${MAX_MEDIA_BYTES:-2147483648}
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://localhost:4400/health')
+      interval: 5s
+      timeout: 3s
+      start_period: 10s
+      retries: 10
+
+volumes:
+  data:
+  stem_models:
+  lyrics_models:

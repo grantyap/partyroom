@@ -30,23 +30,52 @@ Follow the prompts to create a new Convex project and connect it to your applica
 
 Copy environment variables from `packages/backend/.env.local` to `apps/*/.env`.
 
+Create the two root development secrets:
+
+```bash
+cp .env.example .env
+```
+
+Everything else, including local ports, worker addresses, resource limits, and
+model names, has a development default in the Compose files.
+
 Then, run the development server:
 
 ```bash
 bun run dev
 ```
 
+This rebuilds the local Docker Compose services using Docker's build cache, waits for them to
+become healthy, and then starts the Turborepo development tasks. The containers, Convex data, and
+downloaded AI models remain available between development sessions. The first separation and
+transcription download their configured models into the `stem_models` and `lyrics_models` volumes.
+
+To stop the local containers without deleting their data:
+
+```bash
+bun run dev:down
+```
+
+To stop the containers and permanently reset their local data:
+
+```bash
+bun run dev:reset
+```
+
 Open [http://localhost:5173](http://localhost:5173) in your browser to see the web application.
-Your app will connect to the Convex cloud backend automatically.
+Your app will connect to the local self-hosted Convex backend automatically.
 
 ## Project Structure
 
 ```
 partyroom/
 ├── apps/
-│   ├── web/         # Frontend application (SvelteKit)
+│   ├── media-worker/ # yt-dlp and FFmpeg worker
+│   ├── stem-worker/  # Local stem-separation worker
+│   ├── lyrics-worker/ # Local transcription and alignment worker
+│   └── web/          # Frontend application (SvelteKit)
 ├── packages/
-│   ├── backend/     # Convex backend functions and schema
+│   └── backend/      # Convex backend functions and schema
 ```
 
 ## Available Scripts
