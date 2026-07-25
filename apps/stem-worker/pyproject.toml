@@ -1,0 +1,16 @@
+[project]
+name = "partyroom-stem-worker"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "fastapi==0.116.1",
+  "httpx==0.28.1",
+  "uvicorn==0.35.0",
+  "partyroom-activity-worker",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+partyroom-activity-worker = { path = "../../packages/activity-worker-python" }

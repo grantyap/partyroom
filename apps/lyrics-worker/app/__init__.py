@@ -1,0 +1,1 @@
+"""Partyroom lyrics worker."""
