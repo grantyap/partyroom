@@ -3,7 +3,7 @@ import { convex } from "@convex-dev/better-auth/plugins";
 import { betterAuth } from "better-auth/minimal";
 import { components } from "./_generated/api";
 import { type DataModel } from "./_generated/dataModel";
-import { query, env } from "./_generated/server";
+import { query, env, QueryCtx } from "./_generated/server";
 import { anonymous } from "better-auth/plugins";
 import authConfig from "./auth.config";
 
@@ -38,3 +38,21 @@ export const getCurrentUser = query({
 });
 
 export type User = Awaited<ReturnType<typeof authComponent.getAuthUser>>;
+
+export async function getCurrentUserHelper(ctx: QueryCtx) {
+  try {
+    return await authComponent.getAuthUser(ctx);
+  } catch (error) {
+    const isConvexActAsUserError =
+      error instanceof Error && error.message.includes("ArgumentValidationError");
+    if (!isConvexActAsUserError) {
+      throw error;
+    }
+  }
+
+  const oldUser = await ctx.auth.getUserIdentity();
+  if (!oldUser) {
+    return null;
+  }
+  return { ...oldUser, _id: oldUser.subject };
+}

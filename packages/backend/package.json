@@ -15,6 +15,7 @@
     "better-auth": "catalog:",
     "convex": "catalog:",
     "dotenv": "catalog:",
+    "random-word-slugs": "^0.1.7",
     "zod": "catalog:"
   },
   "devDependencies": {

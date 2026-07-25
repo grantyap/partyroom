@@ -12,6 +12,7 @@ export const getMessage = query({
 
 export const sendMessage = mutation({
   args: {
+    room: v.id("rooms"),
     user: v.string(),
     body: v.string(),
   },
@@ -22,6 +23,7 @@ export const sendMessage = mutation({
     }
 
     await ctx.db.insert("messages", {
+      room: args.room,
       user: user._id,
       body: args.body,
     });
