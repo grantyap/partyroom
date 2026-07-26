@@ -62,7 +62,6 @@ class WorkerTests(unittest.IsolatedAsyncioTestCase):
                 attempt=1,
                 attempt_deadline=0,
                 schedule_deadline=0,
-                artifact_scope_id="scope-1",
                 artifact_slots=("file",),
             ),
             lambda **_values: asyncio.sleep(0),

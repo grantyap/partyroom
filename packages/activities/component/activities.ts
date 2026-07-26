@@ -165,7 +165,6 @@ const claimResult = v.union(
     attemptDeadline: v.number(),
     scheduleDeadline: v.number(),
     input: v.any(),
-    artifactScopeId: v.optional(v.id("artifactScopes")),
     artifactSlots: v.array(artifactSlot),
   }),
 );
@@ -310,7 +309,6 @@ function claimedActivity(
     attemptDeadline: lease.attemptDeadline,
     scheduleDeadline: activity.scheduleDeadline,
     input: activity.input,
-    artifactScopeId: activity.artifactScopeId,
     artifactSlots: activity.artifactSlots ?? [],
   };
 }

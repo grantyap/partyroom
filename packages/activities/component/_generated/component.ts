@@ -49,7 +49,6 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           activityId: string;
           activityType: string;
           activityVersion: number;
-          artifactScopeId?: string;
           artifactSlots: Array<string>;
           attempt: number;
           attemptDeadline: number;
@@ -182,10 +181,17 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         null,
         Name
       >;
+      attachWorkflow: FunctionReference<
+        "mutation",
+        "internal",
+        { scopeId: string; workflowId: string },
+        null,
+        Name
+      >;
       closeScope: FunctionReference<
         "mutation",
         "internal",
-        { keep: Array<string>; scopeId: string },
+        { scopeId: string },
         null,
         Name
       >;
@@ -213,6 +219,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         "internal",
         { artifactId: string },
         boolean,
+        Name
+      >;
+      getScopeForWorkflow: FunctionReference<
+        "query",
+        "internal",
+        { workflowId: string },
+        string | null,
         Name
       >;
       getUrl: FunctionReference<

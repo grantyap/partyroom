@@ -13,24 +13,10 @@ import {
   type GenericDataModel,
   type GenericMutationCtx,
   type RegisteredMutation,
+  type ReturnValueForOptionalValidator,
 } from "convex/server";
-import { v, type ObjectType, type PropertyValidators } from "convex/values";
+import { v, type ObjectType, type PropertyValidators, type Validator } from "convex/values";
 import type { ActivityManager, ArtifactScopeId } from "./client";
-import type { ArtifactId } from "./wire";
-
-export const artifactWorkflowResultValidator = v.object({
-  retainedArtifacts: v.array(v.string()),
-});
-
-export type ArtifactWorkflowResult = {
-  retainedArtifacts: ArtifactId[];
-};
-
-export function artifactWorkflowResult(
-  retainedArtifacts: readonly ArtifactId[],
-): ArtifactWorkflowResult {
-  return { retainedArtifacts: [...retainedArtifacts] };
-}
 
 export const managedWorkflowCompletionContextValidator = v.object({
   artifactScopeId: v.string(),
@@ -82,13 +68,7 @@ type CompletionOptions<Context> =
 
 type StartOptions<Context> = CompletionOptions<Context> & {
   artifactTtlMs?: number;
-  startAsync?: boolean;
 };
-
-type ManagedWorkflowArgs<F extends FunctionReference<"mutation", "internal">> =
-  FunctionArgs<F>["args"] extends infer Args extends Record<string, unknown>
-    ? Omit<Args, "artifactScopeId">
-    : never;
 
 export class ManagedWorkflowManager {
   constructor(
@@ -103,49 +83,27 @@ export class ManagedWorkflowManager {
    * version when its worker-facing contract changes, and bump protocolVersion
    * when the shared backend-to-worker transport changes incompatibly.
    */
-  define<const Args extends PropertyValidators>(config: {
+  define<
+    const Args extends PropertyValidators,
+    Returns extends Validator<unknown, "required", string> | void = void,
+  >(config: {
     args: Args;
+    returns?: Returns;
     workpoolOptions?: Parameters<WorkflowManager["define"]>[0]["workpoolOptions"];
   }): {
     handler(
       fn: (
         step: WorkflowCtx,
-        args: ObjectType<Args> & { artifactScopeId: ArtifactScopeId },
-      ) => Promise<ArtifactWorkflowResult>,
-    ): RegisteredMutation<
-      "internal",
-      WorkflowArgs<Args & { artifactScopeId: ReturnType<typeof v.string> }>,
-      WorkflowId
-    >;
+        args: ObjectType<Args>,
+      ) => Promise<ReturnValueForOptionalValidator<Returns>>,
+    ): RegisteredMutation<"internal", WorkflowArgs<Args>, WorkflowId>;
   } {
     const definition = this.workflows.define({
-      args: {
-        ...config.args,
-        artifactScopeId: v.string(),
-      },
-      returns: artifactWorkflowResultValidator,
+      args: config.args,
+      returns: config.returns,
       workpoolOptions: config.workpoolOptions,
-    }) as {
-      handler(
-        fn: (
-          step: WorkflowCtx,
-          args: ObjectType<Args> & { artifactScopeId: string },
-        ) => Promise<ArtifactWorkflowResult>,
-      ): RegisteredMutation<
-        "internal",
-        WorkflowArgs<Args & { artifactScopeId: ReturnType<typeof v.string> }>,
-        WorkflowId
-      >;
-    };
-    return {
-      handler: (fn) =>
-        definition.handler(
-          fn as (
-            step: WorkflowCtx,
-            args: ObjectType<Args> & { artifactScopeId: string },
-          ) => Promise<ArtifactWorkflowResult>,
-        ),
-    };
+    });
+    return definition;
   }
 
   async start<
@@ -154,9 +112,9 @@ export class ManagedWorkflowManager {
   >(
     ctx: WorkflowStartCtx,
     workflow: F,
-    args: ManagedWorkflowArgs<F>,
+    args: FunctionArgs<F>["args"],
     options?: StartOptions<Context>,
-  ): Promise<{ workflowId: WorkflowId; artifactScopeId: ArtifactScopeId }> {
+  ): Promise<WorkflowId> {
     const artifactScopeId = await this.activities.createArtifactScope(ctx, {
       ttlMs: options?.artifactTtlMs,
     });
@@ -166,20 +124,17 @@ export class ManagedWorkflowManager {
           context: options.context,
         }
       : undefined;
-    const workflowId = await this.workflows.start(
-      ctx,
-      workflow,
-      { ...args, artifactScopeId } as FunctionArgs<F>["args"],
-      {
-        onComplete: this.lifecycleCompletion,
-        context: {
-          artifactScopeId,
-          ...(completion ? { completion } : {}),
-        },
-        startAsync: options?.startAsync,
+    const workflowId = await this.workflows.start(ctx, workflow, args, {
+      onComplete: this.lifecycleCompletion,
+      context: {
+        artifactScopeId,
+        ...(completion ? { completion } : {}),
       },
-    );
-    return { workflowId, artifactScopeId };
+      // The scope must be attached before the workflow can schedule activities.
+      startAsync: true,
+    });
+    await this.activities.attachArtifactScopeToWorkflow(ctx, artifactScopeId, workflowId);
+    return workflowId;
   }
 }
 
@@ -190,22 +145,7 @@ export async function settleManagedWorkflow(
 ) {
   const artifactScopeId = args.context.artifactScopeId as ArtifactScopeId;
   if (args.result.kind === "success") {
-    const returnValue = args.result.returnValue;
-    if (
-      !returnValue ||
-      typeof returnValue !== "object" ||
-      !Array.isArray((returnValue as { retainedArtifacts?: unknown }).retainedArtifacts) ||
-      !(returnValue as { retainedArtifacts: unknown[] }).retainedArtifacts.every(
-        (artifactId) => typeof artifactId === "string",
-      )
-    ) {
-      throw new Error("Managed workflow did not return retainedArtifacts");
-    }
-    await activities.closeArtifactScope(
-      ctx,
-      artifactScopeId,
-      (returnValue as { retainedArtifacts: ArtifactId[] }).retainedArtifacts,
-    );
+    await activities.closeArtifactScope(ctx, artifactScopeId);
   } else {
     await activities.abandonArtifactScope(ctx, artifactScopeId);
   }

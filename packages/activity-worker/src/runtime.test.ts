@@ -226,7 +226,6 @@ describe("ActivityWorker", () => {
         return Response.json({
           ...claimBody(),
           activityType: "test.artifact",
-          artifactScopeId: "scope-1",
           artifactSlots: ["file"],
         });
       }

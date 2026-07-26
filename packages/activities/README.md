@@ -140,7 +140,7 @@ Artifact-producing output fields are declared once in the wire schema:
 output: wire.object({
   source: wire.artifact("intermediate"),
   final: wire.artifact("retained"),
-})
+});
 ```
 
 That declaration drives generated contracts, worker upload-slot validation,
@@ -150,11 +150,12 @@ scheduled with an artifact scope. Workers upload through
 URLs are not exposed.
 
 `ManagedWorkflowManager` binds the scope lifecycle to Convex Workflow. Starting
-a managed workflow creates a scope and injects its ID into the workflow
-arguments. The workflow returns `artifactWorkflowResult([...retained])`.
-Successful completion adopts that list and deletes every other artifact in
-bounded batches. Failure or cancellation abandons the scope and deletes all of
-its artifacts. Settlement retries durably if its completion mutation fails.
+a managed workflow creates a scope and binds it to the workflow ID without
+exposing the scope to application code. Successful completion keeps every
+`retained` artifact produced by an activity's final successful attempt and
+deletes every other artifact in bounded batches. Failure or cancellation
+deletes all artifacts in the scope. Settlement retries durably if its
+completion mutation fails.
 
 Scopes also expire independently, and an hourly component sweep removes old
 component-storage objects that were uploaded but never registered.
@@ -191,73 +192,61 @@ export const activities = {
 };
 ```
 
-Define the workflow through the configured managed manager. Its scope is
-available in the handler and is passed to every scheduled activity:
+Define the workflow through the configured managed manager. The handler
+receives only its declared application arguments:
 
 ```ts
 export const exampleWorkflow = managedWorkflow
   .define({ args: { sourceUrl: v.string() } })
-  .handler(async (step, { sourceUrl, artifactScopeId }) => {
-    const prepareId = await step.runMutation(
-      internal.example.activities.schedule,
-      {
-        kind: "prepare",
-        input: { sourceUrl },
-        workflowId: step.workflowId,
-        artifactScopeId,
-      },
-    );
+  .handler(async (step, { sourceUrl }) => {
+    const prepareId = await step.runMutation(internal.example.activities.schedule, {
+      kind: "prepare",
+      input: { sourceUrl },
+      workflowId: step.workflowId,
+    });
     const prepared = await step.awaitEvent({
       name: prepareId,
       validator: activities.prepare.output,
     });
 
-    const publishId = await step.runMutation(
-      internal.example.activities.schedule,
-      {
-        kind: "publish",
-        input: { normalizedUrl: await artifactUrl(prepared.normalized) },
-        workflowId: step.workflowId,
-        artifactScopeId,
-      },
-    );
-    const published = await step.awaitEvent({
+    const publishId = await step.runMutation(internal.example.activities.schedule, {
+      kind: "publish",
+      input: { normalizedUrl: await artifactUrl(prepared.normalized) },
+      workflowId: step.workflowId,
+    });
+    await step.awaitEvent({
       name: publishId,
       validator: activities.publish.output,
     });
-
-    return artifactWorkflowResult([published.final]);
   });
 ```
 
 The application scheduling mutation maps `kind` to its registry definition,
-calls `ActivityManager.schedule` with `artifactScopeId`, and configures the
-shared activity-completion mutation to send the workflow event. It is the
-domain-specific bridge for constructing activity inputs; it does not own
-artifact cleanup.
+calls `ActivityManager.scheduleForWorkflow` with `workflowId`, and configures
+the shared activity-completion mutation to send the workflow event. It is the
+domain-specific bridge for constructing activity inputs; the activities
+component resolves the private scope and owns cleanup.
 
 Start it through `managedWorkflow.start`, not the underlying
 `WorkflowManager.start`. The manager creates the scope and installs the
 universal terminal callback:
 
 ```ts
-const { workflowId, artifactScopeId } = await managedWorkflow.start(
+const workflowId = await managedWorkflow.start(
   ctx,
   internal.example.pipeline.exampleWorkflow,
   { sourceUrl },
   {
     onComplete: internal.example.pipeline.onComplete,
     context: { jobId },
-    startAsync: true,
   },
 );
 ```
 
 Worker handlers upload only declared slots through `context.uploadArtifact` or
-`context.upload_artifact`. A workflow author therefore makes two artifact
-decisions: disposition in the activity output and the retained list returned
-at successful workflow completion. Orphan, failure, cancellation, and terminal
-record cleanup are infrastructure behavior.
+`context.upload_artifact`. A workflow author therefore makes one artifact
+decision: its disposition in the activity output. Retry, orphan, failure,
+cancellation, and terminal cleanup are infrastructure behavior.
 
 ## Cancellation
 

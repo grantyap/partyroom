@@ -152,6 +152,7 @@ export type ActivityCompletionArgs<Context = unknown, Output = Value> = {
 
 type MutationCtx = Pick<GenericMutationCtx<GenericDataModel>, "runMutation">;
 type QueryCtx = Pick<GenericMutationCtx<GenericDataModel>, "runQuery">;
+type WorkflowMutationCtx = MutationCtx & QueryCtx;
 
 type ScheduleOptions<Definition extends ActivityDefinition, Context> = {
   onComplete?: FunctionReference<
@@ -216,15 +217,40 @@ export class ActivityManager {
     })) as ArtifactScopeId;
   }
 
-  async closeArtifactScope(
-    ctx: MutationCtx,
-    artifactScopeId: ArtifactScopeId,
-    keep: readonly ArtifactId[],
-  ) {
+  async closeArtifactScope(ctx: MutationCtx, artifactScopeId: ArtifactScopeId) {
     await ctx.runMutation(this.component.artifacts.closeScope, {
       scopeId: artifactScopeId as any,
-      keep: keep as any,
     });
+  }
+
+  async attachArtifactScopeToWorkflow(
+    ctx: MutationCtx,
+    artifactScopeId: ArtifactScopeId,
+    workflowId: WorkflowId,
+  ) {
+    await ctx.runMutation(this.component.artifacts.attachWorkflow, {
+      scopeId: artifactScopeId as any,
+      workflowId,
+    });
+  }
+
+  async scheduleForWorkflow<Definition extends ActivityDefinition, Context = unknown>(
+    ctx: WorkflowMutationCtx,
+    workflowId: WorkflowId,
+    definition: Definition,
+    input: ActivityInput<Definition>,
+    options?: Omit<ScheduleOptions<Definition, Context>, "artifactScopeId">,
+  ): Promise<ActivityId> {
+    const artifactScopeId = await ctx.runQuery(this.component.artifacts.getScopeForWorkflow, {
+      workflowId,
+    });
+    if (!artifactScopeId) {
+      throw new Error(`Workflow ${workflowId} has no managed artifact scope`);
+    }
+    return await this.schedule(ctx, definition, input, {
+      ...options,
+      artifactScopeId: artifactScopeId as ArtifactScopeId,
+    } as ScheduleOptions<Definition, Context>);
   }
 
   async abandonArtifactScope(ctx: MutationCtx, artifactScopeId: ArtifactScopeId) {
@@ -316,12 +342,9 @@ export type ActivityWorkflowContext = {
 
 export { protocolVersion };
 export {
-  artifactWorkflowResult,
-  artifactWorkflowResultValidator,
   ManagedWorkflowManager,
   managedWorkflowCompletionContextValidator,
   settleManagedWorkflow,
-  type ArtifactWorkflowResult,
   type ManagedWorkflowCompletionArgs,
 } from "./managedWorkflow";
 export { wire, type ArtifactDisposition, type ArtifactId, type WireSchema } from "./wire";

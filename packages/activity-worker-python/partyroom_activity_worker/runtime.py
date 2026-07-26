@@ -56,7 +56,6 @@ class ActivityInfo:
     attempt: int
     attempt_deadline: float
     schedule_deadline: float
-    artifact_scope_id: str | None = None
     artifact_slots: tuple[str, ...] = ()
 
 
@@ -422,7 +421,6 @@ class Worker:
                 attempt=claimed.attempt,
                 attempt_deadline=claimed.attempt_deadline,
                 schedule_deadline=claimed.schedule_deadline,
-                artifact_scope_id=claimed.artifact_scope_id,
                 artifact_slots=tuple(claimed.artifact_slots),
             ),
             renew,

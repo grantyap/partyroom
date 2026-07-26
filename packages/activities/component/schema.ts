@@ -70,10 +70,13 @@ export default defineSchema({
 
   artifactScopes: defineTable({
     state: v.union(v.literal("open"), v.literal("closed"), v.literal("abandoned")),
+    workflowId: v.optional(v.string()),
     expiresAt: v.number(),
     createdAt: v.number(),
     updatedAt: v.number(),
-  }).index("by_state_and_expires_at", ["state", "expiresAt"]),
+  })
+    .index("by_workflow_id", ["workflowId"])
+    .index("by_state_and_expires_at", ["state", "expiresAt"]),
 
   artifacts: defineTable({
     scopeId: v.id("artifactScopes"),
@@ -88,6 +91,7 @@ export default defineSchema({
   })
     .index("by_scope_and_state", ["scopeId", "state"])
     .index("by_activity_and_attempt", ["activityId", "attempt"])
+    .index("by_activity_attempt_and_slot", ["activityId", "attempt", "slot"])
     .index("by_storage_id", ["storageId"]),
 
   artifactGcState: defineTable({

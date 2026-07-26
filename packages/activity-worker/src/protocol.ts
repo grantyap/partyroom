@@ -25,7 +25,6 @@ export const claimedActivitySchema = z.object({
   attemptDeadline: z.number(),
   scheduleDeadline: z.number(),
   input: z.unknown(),
-  artifactScopeId: z.string().optional(),
   artifactSlots: z.array(z.string()),
 });
 

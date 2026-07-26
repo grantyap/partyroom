@@ -50,15 +50,12 @@ describe("activities component", () => {
   test("rejects claims from an incompatible worker protocol", async () => {
     const t = convexTest(schema, modules);
     await expect(
-      t.mutation(
-        api.activities.claim,
-        {
-          protocolVersion: 2,
-          taskQueue: "stems",
-          workerId: "old-worker",
-          supportedActivities: [{ name: "media.separate", version: 1 }],
-        } as never,
-      ),
+      t.mutation(api.activities.claim, {
+        protocolVersion: 2,
+        taskQueue: "stems",
+        workerId: "old-worker",
+        supportedActivities: [{ name: "media.separate", version: 1 }],
+      } as never),
     ).rejects.toThrow();
   });
 
@@ -294,17 +291,12 @@ describe("activities component", () => {
       storageId: finalStorageId,
     });
 
-    await expect(
-      t.mutation(api.artifacts.closeScope, {
-        scopeId,
-        keep: [intermediateId],
-      }),
-    ).rejects.toThrow("cannot be adopted");
-    await t.mutation(api.artifacts.closeScope, {
-      scopeId,
-      keep: [finalId],
+    await t.mutation(api.activities.complete, {
+      ...identity,
+      requestId: "complete-with-artifacts",
+      value: { artifactId: finalId },
     });
-    await t.mutation(api.artifacts.abandonScope, { scopeId });
+    await t.mutation(api.artifacts.closeScope, { scopeId });
     await t.mutation(internal.artifacts.cleanupScope, { scopeId });
 
     expect(await t.query(api.artifacts.getUrl, { artifactId: intermediateId })).toBeNull();
@@ -313,6 +305,62 @@ describe("activities component", () => {
       await t.run(async (ctx) => (await ctx.storage.get(intermediateStorageId)) !== null),
     ).toBe(false);
     expect(await t.run(async (ctx) => (await ctx.storage.get(finalStorageId)) !== null)).toBe(true);
+  });
+
+  test("binds a scope to one workflow and exposes the binding by workflow id", async () => {
+    const t = convexTest(schema, modules);
+    const scopeId = await t.mutation(api.artifacts.createScope, {});
+
+    await t.mutation(api.artifacts.attachWorkflow, {
+      scopeId,
+      workflowId: "workflow-1",
+    });
+
+    expect(await t.query(api.artifacts.getScopeForWorkflow, { workflowId: "workflow-1" })).toBe(
+      scopeId,
+    );
+    await expect(
+      t.mutation(api.artifacts.attachWorkflow, {
+        scopeId,
+        workflowId: "workflow-2",
+      }),
+    ).rejects.toThrow("already attached");
+  });
+
+  test("allows only one upload per activity attempt and artifact slot", async () => {
+    const t = convexTest(schema, modules);
+    const scopeId = await t.mutation(api.artifacts.createScope, {});
+    const activityId = await t.mutation(
+      api.activities.schedule,
+      scheduleArgs({
+        artifactScopeId: scopeId,
+        artifactSlots: ["final"],
+        artifactDefinitions: [{ slot: "final", disposition: "retained" }],
+      }),
+    );
+    const leased = await claim(t);
+    if (!leased) throw new Error("Expected a claimed activity");
+    const [firstStorageId, secondStorageId] = await t.run(async (ctx) => [
+      await ctx.storage.store(new Blob(["first"])),
+      await ctx.storage.store(new Blob(["second"])),
+    ]);
+    const identity = {
+      activityId,
+      attempt: leased.attempt,
+      leaseToken: leased.leaseToken,
+      slot: "final",
+    };
+    await t.mutation(api.artifacts.registerUpload, {
+      ...identity,
+      storageId: firstStorageId,
+    });
+
+    await expect(
+      t.mutation(api.artifacts.registerUpload, {
+        ...identity,
+        storageId: secondStorageId,
+      }),
+    ).rejects.toThrow("already registered artifact slot");
   });
 
   test("sweeps old uploads that were never registered from component storage", async () => {

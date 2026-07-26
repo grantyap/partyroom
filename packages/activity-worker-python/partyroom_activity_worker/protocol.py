@@ -27,7 +27,6 @@ class ClaimedActivity(ProtocolModel):
     attempt_deadline: float = Field(alias="attemptDeadline")
     schedule_deadline: float = Field(alias="scheduleDeadline")
     input: Any
-    artifact_scope_id: str | None = Field(default=None, alias="artifactScopeId")
     artifact_slots: list[str] = Field(default_factory=list, alias="artifactSlots")
 
 
