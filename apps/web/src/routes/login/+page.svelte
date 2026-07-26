@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto } from "$app/navigation";
+	import { page } from "$app/state";
 	import { authClient } from "$lib/auth-client";
 	import { loginSchema } from "$lib/components/auth/form-schema";
 	import LoginForm from "$lib/components/auth/login-form.svelte";
@@ -33,7 +34,8 @@
 			);
 
 			if (result.data) {
-				await goto("/app");
+				const target = page.url.searchParams.get("to") || "/app";
+				await goto(target);
 			}
 		},
 		resetForm: false,

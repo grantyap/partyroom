@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { page } from "$app/state";
 	import { Button } from "$lib/components/ui/button/index.js";
 	import * as Card from "$lib/components/ui/card/index.js";
 	import * as Field from "$lib/components/ui/field/index.js";
@@ -24,6 +25,11 @@
 	const errorMessages = $derived(
 		[$message ?? undefined, $errors._errors].filter((v) => !!v),
 	);
+
+	const loginURL = $derived.by(() => {
+		const to = page.url.searchParams.get("to") || "";
+		return to ? `/login?to=${encodeURIComponent(to)}` : "/login";
+	});
 </script>
 
 <div class={cn("flex flex-col gap-6", className)} {...restProps}>
@@ -115,7 +121,7 @@
 						{/if}
 						<Button type="submit">Create Account</Button>
 						<Field.Description class="text-center">
-							Already have an account? <a href="/login">Sign in</a>
+							Already have an account? <a href={loginURL}>Sign in</a>
 						</Field.Description>
 					</Field.Field>
 				</Field.Group>

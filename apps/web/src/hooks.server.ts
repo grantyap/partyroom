@@ -1,6 +1,6 @@
 import { getToken } from "@mmailaender/convex-better-auth-svelte/sveltekit";
+import { redirect, type Handle } from "@sveltejs/kit";
 import { withServerConvexToken } from "convex-svelte/sveltekit/server";
-import { error, type Handle } from "@sveltejs/kit";
 
 export const handle: Handle = async ({ event, resolve }) => {
   const token = getToken(event.cookies);
@@ -8,7 +8,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 
   return withServerConvexToken(token, () => {
     if (isAuthenticatedRoute(event.url.pathname) && !token) {
-      error(401);
+      redirect(302, `/login?to=${encodeURIComponent(event.url.pathname)}`);
     }
 
     return resolve(event);

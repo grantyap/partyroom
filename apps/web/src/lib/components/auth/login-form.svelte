@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { page } from "$app/state";
 	import { Button } from "$lib/components/ui/button/index.js";
 	import * as Card from "$lib/components/ui/card/index.js";
 	import {
@@ -14,6 +15,7 @@
 	import type { SuperForm } from "sveltekit-superforms";
 	import type { Infer } from "zod";
 	import type { loginSchema } from "./form-schema";
+
 	let {
 		class: className,
 		form,
@@ -28,6 +30,11 @@
 	const errorMessages = $derived(
 		[$message ?? undefined, $errors._errors].filter((v) => !!v),
 	);
+
+	const signUpURL = $derived.by(() => {
+		const to = page.url.searchParams.get("to") || "";
+		return to ? `/sign-up?to=${encodeURIComponent(to)}` : "/sign-up";
+	});
 </script>
 
 <div class={cn("flex flex-col gap-6", className)} {...restProps}>
@@ -110,7 +117,7 @@
 						{/if}
 						<Button type="submit">Login</Button>
 						<FieldDescription class="text-center">
-							Don't have an account? <a href="/sign-up">Sign up</a>
+							Don't have an account? <a href={signUpURL}>Sign up</a>
 						</FieldDescription>
 					</Field>
 				</FieldGroup>
