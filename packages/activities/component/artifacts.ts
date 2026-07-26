@@ -1,4 +1,3 @@
-import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
@@ -232,17 +231,21 @@ export const cleanupScope = internalMutation({
 });
 
 export const sweepUnregistered = internalMutation({
-  args: { paginationOpts: paginationOptsValidator },
+  args: { cursor: v.optional(v.string()) },
   returns: v.object({
-    continueCursor: v.string(),
+    cursor: v.optional(v.string()),
     isDone: v.boolean(),
     deleted: v.number(),
   }),
-  handler: async (ctx, { paginationOpts }) => {
-    const page = await ctx.db.system.query("_storage").order("asc").paginate(paginationOpts);
+  handler: async (ctx, { cursor }) => {
+    const cursorId = cursor ? ctx.db.system.normalizeId("_storage", cursor) : null;
+    const page = await ctx.db.system
+      .query("_storage")
+      .withIndex("by_id", cursorId ? (q) => q.gt("_id", cursorId) : undefined)
+      .take(CLEANUP_BATCH_SIZE);
     const cutoff = Date.now() - UNREGISTERED_GRACE_MS;
     let deleted = 0;
-    for (const storage of page.page) {
+    for (const storage of page) {
       if (storage._creationTime >= cutoff) continue;
       const registered = await ctx.db
         .query("artifacts")
@@ -252,9 +255,10 @@ export const sweepUnregistered = internalMutation({
       await ctx.storage.delete(storage._id);
       deleted += 1;
     }
+    const isDone = page.length < CLEANUP_BATCH_SIZE;
     return {
-      continueCursor: page.continueCursor,
-      isDone: page.isDone,
+      cursor: isDone ? undefined : page[page.length - 1]!._id,
+      isDone,
       deleted,
     };
   },
@@ -269,12 +273,9 @@ export const runStorageSweep = internalMutation({
       .withIndex("by_name", (q) => q.eq("name", "storage"))
       .unique();
     const result = await ctx.runMutation(internal.artifacts.sweepUnregistered, {
-      paginationOpts: {
-        cursor: state?.cursor ?? null,
-        numItems: CLEANUP_BATCH_SIZE,
-      },
+      cursor: state?.cursor,
     });
-    const cursor = result.isDone ? undefined : result.continueCursor;
+    const cursor = result.isDone ? undefined : result.cursor;
     if (state) {
       await ctx.db.patch(state._id, { cursor, updatedAt: Date.now() });
     } else {
@@ -283,6 +284,9 @@ export const runStorageSweep = internalMutation({
         cursor,
         updatedAt: Date.now(),
       });
+    }
+    if (!result.isDone) {
+      await ctx.scheduler.runAfter(0, internal.artifacts.runStorageSweep, {});
     }
     return null;
   },

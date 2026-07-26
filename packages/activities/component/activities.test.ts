@@ -315,17 +315,28 @@ describe("activities component", () => {
     expect(await t.run(async (ctx) => (await ctx.storage.get(finalStorageId)) !== null)).toBe(true);
   });
 
-  test("sweeps old uploads that were never registered", async () => {
+  test("sweeps old uploads that were never registered from component storage", async () => {
     const t = convexTest(schema, modules);
-    const storageId = await t.run(async (ctx) => await ctx.storage.store(new Blob(["orphan"])));
+    await t.run(async (ctx) => {
+      for (let index = 0; index < 101; index++) {
+        await ctx.storage.store(new Blob([`orphan-${index}`]));
+      }
+    });
     vi.advanceTimersByTime(24 * 60 * 60_000 + 1);
 
-    const result = await t.mutation(internal.artifacts.sweepUnregistered, {
-      paginationOpts: { cursor: null, numItems: 100 },
-    });
+    const result = await t.mutation(internal.artifacts.runStorageSweep, {});
 
-    expect(result.deleted).toBe(1);
-    expect(await t.run(async (ctx) => await ctx.storage.get(storageId))).toBeNull();
+    expect(result).toBeNull();
+    expect(
+      await t.run(async (ctx) => await ctx.db.system.query("_storage").take(200)),
+    ).toHaveLength(1);
+
+    vi.runOnlyPendingTimers();
+    await t.finishInProgressScheduledFunctions();
+
+    expect(
+      await t.run(async (ctx) => await ctx.db.system.query("_storage").take(200)),
+    ).toHaveLength(0);
   });
 
   test("removes terminal activity records after the retention window", async () => {
