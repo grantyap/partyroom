@@ -8,17 +8,17 @@ class AnalyzeMelodyInput(BaseModel):
 
 class AnalyzeMelodyOutput(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
-    storage_id: str = Field(alias="storageId")
+    artifact_id: str = Field(alias="artifactId")
     content_type: str = Field(alias="contentType")
     model: str
 
 analyze_melody = ActivityDefinition[AnalyzeMelodyInput, AnalyzeMelodyOutput](
     name="media.analyzeMelody",
-    version=1,
+    version=2,
     task_queue="annotations",
     input_model=AnalyzeMelodyInput,
     output_model=AnalyzeMelodyOutput,
-    artifact_slots=["storageId"],
+    artifact_slots=["artifactId"],
 )
 
 class AssembleAnnotationsInput(BaseModel):
@@ -32,16 +32,16 @@ class AssembleAnnotationsInput(BaseModel):
 
 class AssembleAnnotationsOutput(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
-    annotations_storage_id: str = Field(alias="annotationsStorageId")
-    midi_storage_id: str = Field(alias="midiStorageId")
-    music_xml_storage_id: str = Field(alias="musicXmlStorageId")
+    annotations_artifact_id: str = Field(alias="annotationsArtifactId")
+    midi_artifact_id: str = Field(alias="midiArtifactId")
+    music_xml_artifact_id: str = Field(alias="musicXmlArtifactId")
     content_type: str = Field(alias="contentType")
 
 assemble_annotations = ActivityDefinition[AssembleAnnotationsInput, AssembleAnnotationsOutput](
     name="media.assembleAnnotations",
-    version=1,
+    version=2,
     task_queue="annotations",
     input_model=AssembleAnnotationsInput,
     output_model=AssembleAnnotationsOutput,
-    artifact_slots=["annotationsStorageId","midiStorageId","musicXmlStorageId"],
+    artifact_slots=["annotationsArtifactId","midiArtifactId","musicXmlArtifactId"],
 )

@@ -1,11 +1,7 @@
 import { vResultValidator } from "@convex-dev/workpool";
 import { vWorkflowId } from "@convex-dev/workflow";
 import { mediaActivities } from "@partyroom/media-activities";
-import {
-  artifactWorkflowResult,
-  type ActivityOutput,
-  type ArtifactId,
-} from "@partyroom/activities";
+import { type ActivityOutput } from "@partyroom/activities";
 import { v } from "convex/values";
 import type { Validator } from "convex/values";
 import { internal } from "../_generated/api";
@@ -15,13 +11,13 @@ import type { OperationKind } from "./validators";
 
 export const mediaPipeline = managedWorkflow
   .define({ args: { jobId: v.id("mediaJobs") } })
-  .handler(async (step, { jobId, artifactScopeId }) => {
+  .handler(async (step, { jobId }) => {
     const runActivity = async <Kind extends OperationKind>(
       kind: Kind,
     ): Promise<ActivityOutput<(typeof mediaActivities)[Kind]>> => {
       const activityId = await step.runMutation(
         internal.media.activities.schedule,
-        { jobId, workflowId: step.workflowId, artifactScopeId, kind },
+        { jobId, workflowId: step.workflowId, kind },
         { name: `schedule-${kind}`, inline: true },
       );
       return await step.awaitEvent<ActivityOutput<(typeof mediaActivities)[Kind]>>({
@@ -54,7 +50,7 @@ export const mediaPipeline = managedWorkflow
           { jobId, assetId: claim.assetId },
           { inline: true },
         );
-        return artifactWorkflowResult([]);
+        return;
       }
       if (claim.mode === "waiting") {
         const assetId = await step.awaitEvent({
@@ -66,7 +62,7 @@ export const mediaPipeline = managedWorkflow
           { jobId, assetId },
           { inline: true },
         );
-        return artifactWorkflowResult([]);
+        return;
       }
 
       const download = await runActivity("download");
@@ -75,7 +71,7 @@ export const mediaPipeline = managedWorkflow
         {
           jobId,
           kind: "download",
-          artifactId: download.storageId,
+          artifactId: download.artifactId,
         },
         { name: "record-download", inline: true },
       );
@@ -85,7 +81,7 @@ export const mediaPipeline = managedWorkflow
         {
           jobId,
           kind: "extractAudio",
-          artifactId: extracted.storageId,
+          artifactId: extracted.artifactId,
         },
         { name: "record-extractAudio", inline: true },
       );
@@ -95,8 +91,8 @@ export const mediaPipeline = managedWorkflow
         {
           jobId,
           kind: "separate",
-          artifactId: separated.instrumentalStorageId,
-          secondaryArtifactId: separated.vocalsStorageId,
+          artifactId: separated.instrumentalArtifactId,
+          secondaryArtifactId: separated.vocalsArtifactId,
         },
         { name: "record-separate", inline: true },
       );
@@ -121,8 +117,8 @@ export const mediaPipeline = managedWorkflow
         {
           jobId,
           kind: "transcribe",
-          artifactId: transcription.storageId,
-          secondaryArtifactId: transcription.timedLyricsStorageId,
+          artifactId: transcription.lyricsArtifactId,
+          secondaryArtifactId: transcription.timedLyricsArtifactId,
         },
         { name: "record-transcribe", inline: true },
       );
@@ -131,24 +127,18 @@ export const mediaPipeline = managedWorkflow
         {
           jobId,
           kind: "mux",
-          artifactId: mux.storageId,
+          artifactId: mux.artifactId,
         },
         { name: "record-mux", inline: true },
       );
 
-      const retainedArtifacts: ArtifactId[] = [
-        separated.instrumentalStorageId,
-        transcription.storageId,
-        transcription.timedLyricsStorageId,
-        mux.storageId,
-      ];
       if (melody) {
         await step.runMutation(
           internal.media.jobs.recordStageResult,
           {
             jobId,
             kind: "analyzeMelody",
-            artifactId: melody.storageId,
+            artifactId: melody.artifactId,
           },
           { name: "record-analyzeMelody", inline: true },
         );
@@ -159,16 +149,11 @@ export const mediaPipeline = managedWorkflow
             {
               jobId,
               kind: "assembleAnnotations",
-              artifactId: annotations.annotationsStorageId,
-              secondaryArtifactId: annotations.midiStorageId,
-              tertiaryArtifactId: annotations.musicXmlStorageId,
+              artifactId: annotations.annotationsArtifactId,
+              secondaryArtifactId: annotations.midiArtifactId,
+              tertiaryArtifactId: annotations.musicXmlArtifactId,
             },
             { name: "record-assembleAnnotations", inline: true },
-          );
-          retainedArtifacts.push(
-            annotations.annotationsStorageId,
-            annotations.midiStorageId,
-            annotations.musicXmlStorageId,
           );
         } catch (error) {
           await step.runMutation(
@@ -186,7 +171,7 @@ export const mediaPipeline = managedWorkflow
         { jobId },
         { name: "finalize-asset", inline: true },
       );
-      return artifactWorkflowResult(retainedArtifacts);
+      return;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await step.runMutation(

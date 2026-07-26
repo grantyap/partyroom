@@ -18,14 +18,14 @@ type ActivityProgress = {
 };
 
 type ProgressAsset = {
-  sourceStorageId?: unknown;
-  extractedAudioStorageId?: unknown;
-  instrumentalStorageId?: unknown;
-  vocalsStorageId?: unknown;
-  lyricsStorageId?: unknown;
-  timedLyricsStorageId?: unknown;
-  melodyStorageId?: unknown;
-  finalStorageId?: unknown;
+  sourceArtifactId?: unknown;
+  extractedAudioArtifactId?: unknown;
+  instrumentalArtifactId?: unknown;
+  vocalsArtifactId?: unknown;
+  lyricsArtifactId?: unknown;
+  timedLyricsArtifactId?: unknown;
+  melodyArtifactId?: unknown;
+  finalArtifactId?: unknown;
   annotationsState?: "processing" | "ready" | "failed";
 };
 
@@ -34,14 +34,14 @@ function completedSteps(hasAsset: boolean, asset: ProgressAsset | null) {
     asset?.annotationsState === "ready" || asset?.annotationsState === "failed";
   return new Set<OperationKind>([
     ...(hasAsset ? (["resolve"] as const) : []),
-    ...(asset?.sourceStorageId ? (["download"] as const) : []),
-    ...(asset?.extractedAudioStorageId ? (["extractAudio"] as const) : []),
-    ...(asset?.instrumentalStorageId && asset.vocalsStorageId ? (["separate"] as const) : []),
-    ...(asset?.lyricsStorageId && asset.timedLyricsStorageId ? (["transcribe"] as const) : []),
-    ...(asset?.melodyStorageId || asset?.annotationsState === "failed"
+    ...(asset?.sourceArtifactId ? (["download"] as const) : []),
+    ...(asset?.extractedAudioArtifactId ? (["extractAudio"] as const) : []),
+    ...(asset?.instrumentalArtifactId && asset.vocalsArtifactId ? (["separate"] as const) : []),
+    ...(asset?.lyricsArtifactId && asset.timedLyricsArtifactId ? (["transcribe"] as const) : []),
+    ...(asset?.melodyArtifactId || asset?.annotationsState === "failed"
       ? (["analyzeMelody"] as const)
       : []),
-    ...(asset?.finalStorageId ? (["mux"] as const) : []),
+    ...(asset?.finalArtifactId ? (["mux"] as const) : []),
     ...(annotationsTerminal ? (["assembleAnnotations"] as const) : []),
   ]);
 }

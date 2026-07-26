@@ -83,11 +83,11 @@ export const mediaActivities = {
   }),
   download: activity({
     name: "media.download",
-    version: 1,
+    version: 2,
     queue: mediaQueues.media,
     input: wire.object({ jobId: wire.string }),
     output: wire.object({
-      storageId: wire.artifact("intermediate"),
+      artifactId: wire.artifact("intermediate"),
       duration: wire.number,
       fileName: wire.string,
       contentType: wire.string,
@@ -96,11 +96,11 @@ export const mediaActivities = {
   }),
   extractAudio: activity({
     name: "media.extractAudio",
-    version: 1,
+    version: 2,
     queue: mediaQueues.media,
     input: wire.object({ sourceUrl: wire.string }),
     output: wire.object({
-      storageId: wire.artifact("intermediate"),
+      artifactId: wire.artifact("intermediate"),
       duration: wire.number,
       contentType: wire.string,
     }),
@@ -108,12 +108,12 @@ export const mediaActivities = {
   }),
   separate: activity({
     name: "media.separate",
-    version: 1,
+    version: 2,
     queue: mediaQueues.stems,
     input: wire.object({ audioUrl: wire.string }),
     output: wire.object({
-      instrumentalStorageId: wire.artifact("retained"),
-      vocalsStorageId: wire.artifact("intermediate"),
+      instrumentalArtifactId: wire.artifact("retained"),
+      vocalsArtifactId: wire.artifact("intermediate"),
       contentType: wire.string,
       model: wire.string,
     }),
@@ -121,12 +121,12 @@ export const mediaActivities = {
   }),
   transcribe: activity({
     name: "media.transcribe",
-    version: 1,
+    version: 2,
     queue: mediaQueues.lyrics,
     input: wire.object({ audioUrl: wire.string }),
     output: wire.object({
-      storageId: wire.artifact("retained"),
-      timedLyricsStorageId: wire.artifact("retained"),
+      lyricsArtifactId: wire.artifact("retained"),
+      timedLyricsArtifactId: wire.artifact("retained"),
       contentType: wire.string,
       model: wire.string,
       language: wire.optional(wire.string),
@@ -135,11 +135,11 @@ export const mediaActivities = {
   }),
   analyzeMelody: activity({
     name: "media.analyzeMelody",
-    version: 1,
+    version: 2,
     queue: mediaQueues.annotations,
     input: wire.object({ audioUrl: wire.string }),
     output: wire.object({
-      storageId: wire.artifact("intermediate"),
+      artifactId: wire.artifact("intermediate"),
       contentType: wire.string,
       model: wire.string,
     }),
@@ -147,7 +147,7 @@ export const mediaActivities = {
   }),
   assembleAnnotations: activity({
     name: "media.assembleAnnotations",
-    version: 1,
+    version: 2,
     queue: mediaQueues.annotations,
     input: wire.object({
       lyricsUrl: wire.string,
@@ -158,20 +158,20 @@ export const mediaActivities = {
       title: wire.optional(wire.string),
     }),
     output: wire.object({
-      annotationsStorageId: wire.artifact("retained"),
-      midiStorageId: wire.artifact("retained"),
-      musicXmlStorageId: wire.artifact("retained"),
+      annotationsArtifactId: wire.artifact("retained"),
+      midiArtifactId: wire.artifact("retained"),
+      musicXmlArtifactId: wire.artifact("retained"),
       contentType: wire.string,
     }),
     startToCloseTimeoutMs: 15 * minute,
   }),
   mux: activity({
     name: "media.mux",
-    version: 1,
+    version: 2,
     queue: mediaQueues.media,
     input: wire.object({ videoUrl: wire.string, instrumentalUrl: wire.string }),
     output: wire.object({
-      storageId: wire.artifact("retained"),
+      artifactId: wire.artifact("retained"),
       duration: wire.number,
       contentType: wire.string,
     }),

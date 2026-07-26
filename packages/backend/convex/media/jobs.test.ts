@@ -88,51 +88,6 @@ describe("media jobs", () => {
     expect(remaining.decoyJob).not.toBeNull();
   });
 
-  test("cleans partial storage before retrying a failed cached asset", async () => {
-    const t = convexTest(schema, modules);
-    const roomId = await seedRoom(t);
-    const first = await createJob(t, roomId);
-    const firstClaim = await t.mutation(internal.media.jobs.claimAsset, {
-      jobId: first.jobId,
-      extractor: "youtube",
-      sourceId: "retry-cleanup",
-    });
-    const partialStorage = await t.run(async (ctx) => {
-      const storageId = await ctx.storage.store(new Blob(["partial"]));
-      await ctx.db.patch("mediaAssets", firstClaim.assetId, {
-        state: "failed",
-        activeJob: undefined,
-        sourceStorageId: storageId,
-      });
-      await ctx.db.patch("mediaJobs", first.jobId, {
-        state: "failed",
-        stage: "failed",
-      });
-      return storageId;
-    });
-    const retry = await createJob(t, roomId);
-
-    const retryClaim = await t.mutation(internal.media.jobs.claimAsset, {
-      jobId: retry.jobId,
-      extractor: "youtube",
-      sourceId: "retry-cleanup",
-    });
-
-    expect(retryClaim).toEqual({
-      mode: "owner",
-      assetId: firstClaim.assetId,
-    });
-    const result = await t.run(async (ctx) => ({
-      asset: await ctx.db.get("mediaAssets", firstClaim.assetId),
-      firstJob: await ctx.db.get("mediaJobs", first.jobId),
-      partial: await ctx.storage.get(partialStorage),
-    }));
-    expect(result.asset?.sourceStorageId).toBeUndefined();
-    expect(result.asset?.activeJob).toBe(retry.jobId);
-    expect(result.firstJob?.asset).toBeUndefined();
-    expect(result.partial).toBeNull();
-  });
-
   test("rejects stage writes from a job that no longer owns the asset", async () => {
     const t = convexTest(schema, modules);
     const roomId = await seedRoom(t);
@@ -143,18 +98,17 @@ describe("media jobs", () => {
       sourceId: "stale-owner",
     });
     const replacement = await createJob(t, roomId);
-    const output = await t.run(async (ctx) => {
+    await t.run(async (ctx) => {
       await ctx.db.patch("mediaAssets", claim.assetId, {
         activeJob: replacement.jobId,
       });
-      return await ctx.storage.store(new Blob(["stale output"]));
     });
 
     await expect(
       t.mutation(internal.media.jobs.recordStageResult, {
         jobId: first.jobId,
         kind: "download",
-        storageId: output,
+        artifactId: "stale-artifact",
       }),
     ).rejects.toThrow("no longer owns");
   });
@@ -169,22 +123,11 @@ describe("media jobs", () => {
       extractor: "youtube",
       sourceId: "debug-rerun-source",
     });
-    const [sourceStorageId, finalStorageId, lyricsStorageId] = await t.run(
-      async (ctx) =>
-        await Promise.all([
-          ctx.storage.store(new Blob(["source"])),
-          ctx.storage.store(new Blob(["video"])),
-          ctx.storage.store(new Blob(["WEBVTT"])),
-        ]),
-    );
     await t.run(async (ctx) => {
       await ctx.db.patch("mediaAssets", claim.assetId, {
         state: "ready",
         activeJob: undefined,
         annotationsState: "failed",
-        sourceStorageId,
-        finalStorageId,
-        lyricsStorageId,
       });
       await ctx.db.patch("mediaJobs", first.jobId, {
         state: "ready",
@@ -204,23 +147,17 @@ describe("media jobs", () => {
     expect(deleted).toEqual({
       deletedJobs: 1,
       deletedRoomMedia: 1,
-      deletedStorageObjects: 3,
+      deletedStorageObjects: 0,
     });
     const removed = await t.run(async (ctx) => ({
       asset: await ctx.db.get("mediaAssets", claim.assetId),
       job: await ctx.db.get("mediaJobs", first.jobId),
       association: await ctx.db.get("roomMedia", first.roomMediaId),
-      source: await ctx.storage.get(sourceStorageId),
-      finalVideo: await ctx.storage.get(finalStorageId),
-      lyrics: await ctx.storage.get(lyricsStorageId),
     }));
     expect(removed).toEqual({
       asset: null,
       job: null,
       association: null,
-      source: null,
-      finalVideo: null,
-      lyrics: null,
     });
 
     const rerun = await createJob(t, roomId, requestKey);
@@ -269,11 +206,10 @@ describe("media jobs", () => {
       extractor: "youtube",
       sourceId: "cached-delete",
     });
-    const finalStorageId = await t.run(async (ctx) => await ctx.storage.store(new Blob(["video"])));
     await t.run(async (ctx) => {
       await ctx.db.patch("mediaAssets", claim.assetId, {
         state: "ready",
-        finalStorageId,
+        finalArtifactId: "final-artifact",
       });
       await ctx.db.patch("mediaJobs", jobId, {
         state: "ready",
@@ -288,15 +224,13 @@ describe("media jobs", () => {
       association: await ctx.db.get("roomMedia", roomMediaId),
       job: await ctx.db.get("mediaJobs", jobId),
       asset: await ctx.db.get("mediaAssets", claim.assetId),
-      cachedVideo: await (await ctx.storage.get(finalStorageId))?.text(),
     }));
     expect(result.association).toBeNull();
     expect(result.job).toBeNull();
     expect(result.asset).not.toBeNull();
-    expect(result.cachedVideo).toBe("video");
   });
 
-  test("removes an unshared in-progress job and its partial cache", async () => {
+  test("removes an unshared in-progress job and its partial asset", async () => {
     const t = convexTest(schema, modules);
     const roomId = await seedRoom(t);
     const { jobId, roomMediaId } = await createJob(t, roomId);
@@ -305,28 +239,17 @@ describe("media jobs", () => {
       extractor: "youtube",
       sourceId: "partial-delete",
     });
-    const sourceStorageId = await t.run(
-      async (ctx) => await ctx.storage.store(new Blob(["partial"])),
-    );
-    await t.mutation(internal.media.jobs.recordStageResult, {
-      jobId,
-      kind: "download",
-      storageId: sourceStorageId,
-    });
-
     await t.run(async (ctx) => await removeFromRoomImpl(ctx, { roomId, roomMediaId }));
 
     const result = await t.run(async (ctx) => ({
       association: await ctx.db.get("roomMedia", roomMediaId),
       job: await ctx.db.get("mediaJobs", jobId),
       asset: await ctx.db.get("mediaAssets", claim.assetId),
-      partialSourceExists: !!(await ctx.storage.get(sourceStorageId)),
     }));
     expect(result).toEqual({
       association: null,
       job: null,
       asset: null,
-      partialSourceExists: false,
     });
   });
 
@@ -422,26 +345,26 @@ describe("media jobs", () => {
     await t.mutation(internal.media.jobs.recordStageResult, {
       jobId,
       kind: "separate",
-      storageId: instrumental,
-      secondaryStorageId: vocals,
+      artifactId: instrumental,
+      secondaryArtifactId: vocals,
     });
     await t.mutation(internal.media.jobs.recordStageResult, {
       jobId,
       kind: "transcribe",
-      storageId: lyrics,
-      secondaryStorageId: timedLyrics,
+      artifactId: lyrics,
+      secondaryArtifactId: timedLyrics,
     });
     await t.mutation(internal.media.jobs.recordStageResult, {
       jobId,
       kind: "analyzeMelody",
-      storageId: melody,
+      artifactId: melody,
     });
     await t.mutation(internal.media.jobs.recordStageResult, {
       jobId,
       kind: "assembleAnnotations",
-      storageId: annotations,
-      secondaryStorageId: midi,
-      tertiaryStorageId: musicXml,
+      artifactId: annotations,
+      secondaryArtifactId: midi,
+      tertiaryArtifactId: musicXml,
     });
 
     const asset = await t.run(async (ctx) => {
@@ -449,14 +372,14 @@ describe("media jobs", () => {
       return job?.asset ? await ctx.db.get("mediaAssets", job.asset) : null;
     });
     expect(asset).toMatchObject({
-      instrumentalStorageId: instrumental,
-      vocalsStorageId: vocals,
-      lyricsStorageId: lyrics,
-      timedLyricsStorageId: timedLyrics,
-      melodyStorageId: melody,
-      annotationsStorageId: annotations,
-      midiStorageId: midi,
-      musicXmlStorageId: musicXml,
+      instrumentalArtifactId: instrumental,
+      vocalsArtifactId: vocals,
+      lyricsArtifactId: lyrics,
+      timedLyricsArtifactId: timedLyrics,
+      melodyArtifactId: melody,
+      annotationsArtifactId: annotations,
+      midiArtifactId: midi,
+      musicXmlArtifactId: musicXml,
       annotationsState: "ready",
     });
   });
@@ -506,12 +429,12 @@ describe("media jobs", () => {
     await t.mutation(internal.media.jobs.recordStageResult, {
       jobId: first.jobId,
       kind: "transcribe",
-      storageId: lyrics,
+      artifactId: lyrics,
     });
     await t.mutation(internal.media.jobs.recordStageResult, {
       jobId: first.jobId,
       kind: "mux",
-      storageId: finalVideo,
+      artifactId: finalVideo,
     });
     await t.mutation(internal.media.jobs.markAnnotationsFailed, {
       jobId: first.jobId,

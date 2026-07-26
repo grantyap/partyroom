@@ -208,9 +208,9 @@ async function processDownload(
   }
 
   await reporter.progress("uploading", 0, "Uploading source", true);
-  const storageId = await uploadOutput(reporter, "storageId", outputPath);
+  const artifactId = await uploadOutput(reporter, "artifactId", outputPath);
   return {
-    storageId,
+    artifactId,
     duration: await probeDuration(outputPath, reporter),
     fileName: basename(outputPath),
     contentType: contentTypeFor(outputPath),
@@ -270,7 +270,7 @@ async function processExtractAudio(
   );
   await reporter.progress("uploading", 0, "Uploading extracted audio", true);
   return {
-    storageId: await uploadOutput(reporter, "storageId", output),
+    artifactId: await uploadOutput(reporter, "artifactId", output),
     duration,
     contentType: "audio/wav",
   };
@@ -325,7 +325,7 @@ async function processMux(
   );
   await reporter.progress("uploading", 0, "Uploading final media", true);
   return {
-    storageId: await uploadOutput(reporter, "storageId", output),
+    artifactId: await uploadOutput(reporter, "artifactId", output),
     duration,
     contentType: "video/mp4",
   };
@@ -372,7 +372,7 @@ export async function downloadActivity(
     reporter,
     directory,
   );
-  return { ...result, storageId: result.storageId as ArtifactId };
+  return { ...result, artifactId: result.artifactId as ArtifactId };
 }
 
 export async function extractAudioActivity(
@@ -388,7 +388,7 @@ export async function extractAudioActivity(
     reporter,
     directory,
   );
-  return { ...result, storageId: result.storageId as ArtifactId };
+  return { ...result, artifactId: result.artifactId as ArtifactId };
 }
 
 export async function muxActivity(
@@ -405,5 +405,5 @@ export async function muxActivity(
     reporter,
     directory,
   );
-  return { ...result, storageId: result.storageId as ArtifactId };
+  return { ...result, artifactId: result.artifactId as ArtifactId };
 }

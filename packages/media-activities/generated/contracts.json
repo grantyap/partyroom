@@ -38,7 +38,7 @@
   },
   "download": {
     "name": "media.download",
-    "version": 1,
+    "version": 2,
     "taskQueue": "media",
     "input": {
       "kind": "object",
@@ -51,7 +51,7 @@
     "output": {
       "kind": "object",
       "fields": {
-        "storageId": {
+        "artifactId": {
           "kind": "artifact",
           "disposition": "intermediate"
         },
@@ -67,14 +67,14 @@
       }
     },
     "artifacts": {
-      "storageId": {
+      "artifactId": {
         "disposition": "intermediate"
       }
     }
   },
   "extractAudio": {
     "name": "media.extractAudio",
-    "version": 1,
+    "version": 2,
     "taskQueue": "media",
     "input": {
       "kind": "object",
@@ -87,7 +87,7 @@
     "output": {
       "kind": "object",
       "fields": {
-        "storageId": {
+        "artifactId": {
           "kind": "artifact",
           "disposition": "intermediate"
         },
@@ -100,14 +100,14 @@
       }
     },
     "artifacts": {
-      "storageId": {
+      "artifactId": {
         "disposition": "intermediate"
       }
     }
   },
   "separate": {
     "name": "media.separate",
-    "version": 1,
+    "version": 2,
     "taskQueue": "stems",
     "input": {
       "kind": "object",
@@ -120,11 +120,11 @@
     "output": {
       "kind": "object",
       "fields": {
-        "instrumentalStorageId": {
+        "instrumentalArtifactId": {
           "kind": "artifact",
           "disposition": "retained"
         },
-        "vocalsStorageId": {
+        "vocalsArtifactId": {
           "kind": "artifact",
           "disposition": "intermediate"
         },
@@ -137,17 +137,17 @@
       }
     },
     "artifacts": {
-      "instrumentalStorageId": {
+      "instrumentalArtifactId": {
         "disposition": "retained"
       },
-      "vocalsStorageId": {
+      "vocalsArtifactId": {
         "disposition": "intermediate"
       }
     }
   },
   "transcribe": {
     "name": "media.transcribe",
-    "version": 1,
+    "version": 2,
     "taskQueue": "lyrics",
     "input": {
       "kind": "object",
@@ -160,11 +160,11 @@
     "output": {
       "kind": "object",
       "fields": {
-        "storageId": {
+        "lyricsArtifactId": {
           "kind": "artifact",
           "disposition": "retained"
         },
-        "timedLyricsStorageId": {
+        "timedLyricsArtifactId": {
           "kind": "artifact",
           "disposition": "retained"
         },
@@ -183,17 +183,17 @@
       }
     },
     "artifacts": {
-      "storageId": {
+      "lyricsArtifactId": {
         "disposition": "retained"
       },
-      "timedLyricsStorageId": {
+      "timedLyricsArtifactId": {
         "disposition": "retained"
       }
     }
   },
   "analyzeMelody": {
     "name": "media.analyzeMelody",
-    "version": 1,
+    "version": 2,
     "taskQueue": "annotations",
     "input": {
       "kind": "object",
@@ -206,7 +206,7 @@
     "output": {
       "kind": "object",
       "fields": {
-        "storageId": {
+        "artifactId": {
           "kind": "artifact",
           "disposition": "intermediate"
         },
@@ -219,14 +219,14 @@
       }
     },
     "artifacts": {
-      "storageId": {
+      "artifactId": {
         "disposition": "intermediate"
       }
     }
   },
   "assembleAnnotations": {
     "name": "media.assembleAnnotations",
-    "version": 1,
+    "version": 2,
     "taskQueue": "annotations",
     "input": {
       "kind": "object",
@@ -257,15 +257,15 @@
     "output": {
       "kind": "object",
       "fields": {
-        "annotationsStorageId": {
+        "annotationsArtifactId": {
           "kind": "artifact",
           "disposition": "retained"
         },
-        "midiStorageId": {
+        "midiArtifactId": {
           "kind": "artifact",
           "disposition": "retained"
         },
-        "musicXmlStorageId": {
+        "musicXmlArtifactId": {
           "kind": "artifact",
           "disposition": "retained"
         },
@@ -275,20 +275,20 @@
       }
     },
     "artifacts": {
-      "annotationsStorageId": {
+      "annotationsArtifactId": {
         "disposition": "retained"
       },
-      "midiStorageId": {
+      "midiArtifactId": {
         "disposition": "retained"
       },
-      "musicXmlStorageId": {
+      "musicXmlArtifactId": {
         "disposition": "retained"
       }
     }
   },
   "mux": {
     "name": "media.mux",
-    "version": 1,
+    "version": 2,
     "taskQueue": "media",
     "input": {
       "kind": "object",
@@ -304,7 +304,7 @@
     "output": {
       "kind": "object",
       "fields": {
-        "storageId": {
+        "artifactId": {
           "kind": "artifact",
           "disposition": "retained"
         },
@@ -317,7 +317,7 @@
       }
     },
     "artifacts": {
-      "storageId": {
+      "artifactId": {
         "disposition": "retained"
       }
     }

@@ -1,5 +1,5 @@
 import type { WorkflowId } from "@convex-dev/workflow";
-import { ActivityManager, type ArtifactId, type ArtifactScopeId } from "@partyroom/activities";
+import { ActivityManager, type ArtifactId } from "@partyroom/activities";
 import type { Doc, Id } from "../_generated/dataModel";
 import { components } from "../_generated/api";
 import type { MutationCtx } from "../_generated/server";
@@ -11,9 +11,6 @@ const activityManager = new ActivityManager(components.activities);
 
 export function hasTerminalAnnotations(asset: {
   annotationsState?: "processing" | "ready" | "failed";
-  annotationsStorageId?: Id<"_storage">;
-  midiStorageId?: Id<"_storage">;
-  musicXmlStorageId?: Id<"_storage">;
   annotationsArtifactId?: string;
   midiArtifactId?: string;
   musicXmlArtifactId?: string;
@@ -21,25 +18,11 @@ export function hasTerminalAnnotations(asset: {
   return (
     asset.annotationsState === "failed" ||
     (asset.annotationsState === "ready" &&
-      !!(asset.annotationsStorageId || asset.annotationsArtifactId) &&
-      !!(asset.midiStorageId || asset.midiArtifactId) &&
-      !!(asset.musicXmlStorageId || asset.musicXmlArtifactId))
+      !!asset.annotationsArtifactId &&
+      !!asset.midiArtifactId &&
+      !!asset.musicXmlArtifactId)
   );
 }
-
-export const assetStorageFields = [
-  "sourceStorageId",
-  "extractedAudioStorageId",
-  "instrumentalStorageId",
-  "vocalsStorageId",
-  "finalStorageId",
-  "lyricsStorageId",
-  "timedLyricsStorageId",
-  "melodyStorageId",
-  "annotationsStorageId",
-  "midiStorageId",
-  "musicXmlStorageId",
-] as const satisfies readonly (keyof Doc<"mediaAssets">)[];
 
 export const assetArtifactFields = [
   "sourceArtifactId",
@@ -55,14 +38,8 @@ export const assetArtifactFields = [
   "musicXmlArtifactId",
 ] as const satisfies readonly (keyof Doc<"mediaAssets">)[];
 
-async function deleteAssetStorage(ctx: MutationCtx, asset: Doc<"mediaAssets">) {
+async function deleteAssetArtifacts(ctx: MutationCtx, asset: Doc<"mediaAssets">) {
   let deleted = 0;
-  for (const field of assetStorageFields) {
-    const storageId = asset[field];
-    if (!storageId) continue;
-    await ctx.storage.delete(storageId as Id<"_storage">);
-    deleted += 1;
-  }
   for (const field of assetArtifactFields) {
     const artifactId = asset[field];
     if (!artifactId) continue;
@@ -74,7 +51,7 @@ async function deleteAssetStorage(ctx: MutationCtx, asset: Doc<"mediaAssets">) {
 }
 
 async function deleteIncompleteAsset(ctx: MutationCtx, asset: Doc<"mediaAssets">) {
-  await deleteAssetStorage(ctx, asset);
+  await deleteAssetArtifacts(ctx, asset);
   await ctx.db.delete(asset._id);
 }
 
@@ -189,8 +166,8 @@ export async function createOrJoinMedia(
       candidate.state === "ready" &&
       (!asset ||
         asset.state !== "ready" ||
-        !(asset.finalStorageId || asset.finalArtifactId) ||
-        !(asset.lyricsStorageId || asset.lyricsArtifactId) ||
+        !asset.finalArtifactId ||
+        !asset.lyricsArtifactId ||
         !hasTerminalAnnotations(asset))
     )
       continue;
@@ -251,18 +228,6 @@ export async function attachWorkflowToJob(
   await ctx.db.patch("mediaJobs", jobId, {
     workflowId,
     state: "processing",
-    updatedAt: Date.now(),
-  });
-}
-
-export async function attachArtifactScopeToJob(
-  ctx: MutationCtx,
-  jobId: Id<"mediaJobs">,
-  artifactScopeId: ArtifactScopeId,
-) {
-  await requireJob(ctx, jobId);
-  await ctx.db.patch("mediaJobs", jobId, {
-    artifactScopeId,
     updatedAt: Date.now(),
   });
 }
@@ -375,7 +340,7 @@ export async function deleteCompletedMediaAsset(ctx: MutationCtx, assetId: Id<"m
       await ctx.db.patch("mediaJobs", job._id, { asset: undefined });
     }
   }
-  const deletedStorageObjects = await deleteAssetStorage(ctx, asset);
+  const deletedStorageObjects = await deleteAssetArtifacts(ctx, asset);
   await ctx.db.delete("mediaAssets", assetId);
 
   return {
@@ -409,8 +374,8 @@ export async function claimAssetForJob(
     });
     if (
       existing.state === "ready" &&
-      (existing.finalStorageId || existing.finalArtifactId) &&
-      (existing.lyricsStorageId || existing.lyricsArtifactId) &&
+      existing.finalArtifactId &&
+      existing.lyricsArtifactId &&
       hasTerminalAnnotations(existing)
     )
       return { mode: "cached" as const, assetId: existing._id };
@@ -438,33 +403,22 @@ export async function claimAssetForJob(
         }
       }
     }
-    await deleteAssetStorage(ctx, existing);
+    await deleteAssetArtifacts(ctx, existing);
     await ctx.db.patch("mediaAssets", existing._id, {
       activeJob: args.jobId,
       state: "processing",
       annotationsState: "processing",
       annotationsError: undefined,
-      sourceStorageId: undefined,
       sourceArtifactId: undefined,
-      extractedAudioStorageId: undefined,
       extractedAudioArtifactId: undefined,
-      instrumentalStorageId: undefined,
       instrumentalArtifactId: undefined,
-      vocalsStorageId: undefined,
       vocalsArtifactId: undefined,
-      finalStorageId: undefined,
       finalArtifactId: undefined,
-      lyricsStorageId: undefined,
       lyricsArtifactId: undefined,
-      timedLyricsStorageId: undefined,
       timedLyricsArtifactId: undefined,
-      melodyStorageId: undefined,
       melodyArtifactId: undefined,
-      annotationsStorageId: undefined,
       annotationsArtifactId: undefined,
-      midiStorageId: undefined,
       midiArtifactId: undefined,
-      musicXmlStorageId: undefined,
       musicXmlArtifactId: undefined,
       title: args.title,
       duration: args.duration,
@@ -500,77 +454,42 @@ export async function recordStageResultForJob(
     artifactId,
     secondaryArtifactId,
     tertiaryArtifactId,
-    storageId,
-    secondaryStorageId,
-    tertiaryStorageId,
   }: {
     jobId: Id<"mediaJobs">;
     kind: OperationKind;
-    artifactId?: ArtifactId;
+    artifactId: ArtifactId;
     secondaryArtifactId?: ArtifactId;
     tertiaryArtifactId?: ArtifactId;
-    storageId?: Id<"_storage">;
-    secondaryStorageId?: Id<"_storage">;
-    tertiaryStorageId?: Id<"_storage">;
   },
 ) {
   const { asset } = await requireOwnedAsset(ctx, jobId);
-  if (!artifactId && !storageId) {
-    throw new Error("Stage result requires an artifact or storage ID");
-  }
   const patch =
     kind === "download"
-      ? artifactId
-        ? { sourceArtifactId: artifactId }
-        : { sourceStorageId: storageId }
+      ? { sourceArtifactId: artifactId }
       : kind === "extractAudio"
-        ? artifactId
-          ? { extractedAudioArtifactId: artifactId }
-          : { extractedAudioStorageId: storageId }
+        ? { extractedAudioArtifactId: artifactId }
         : kind === "separate"
-          ? artifactId
-            ? {
-                instrumentalArtifactId: artifactId,
-                vocalsArtifactId: secondaryArtifactId,
-              }
-            : {
-                instrumentalStorageId: storageId,
-                vocalsStorageId: secondaryStorageId,
-              }
+          ? {
+              instrumentalArtifactId: artifactId,
+              vocalsArtifactId: secondaryArtifactId,
+            }
           : kind === "transcribe"
-            ? artifactId
-              ? {
-                  lyricsArtifactId: artifactId,
-                  timedLyricsArtifactId: secondaryArtifactId,
-                }
-              : {
-                  lyricsStorageId: storageId,
-                  timedLyricsStorageId: secondaryStorageId,
-                }
+            ? {
+                lyricsArtifactId: artifactId,
+                timedLyricsArtifactId: secondaryArtifactId,
+              }
             : kind === "analyzeMelody"
-              ? artifactId
-                ? { melodyArtifactId: artifactId }
-                : { melodyStorageId: storageId }
+              ? { melodyArtifactId: artifactId }
               : kind === "assembleAnnotations"
-                ? artifactId
-                  ? {
-                      annotationsArtifactId: artifactId,
-                      midiArtifactId: secondaryArtifactId,
-                      musicXmlArtifactId: tertiaryArtifactId,
-                      annotationsState: "ready" as const,
-                      annotationsError: undefined,
-                    }
-                  : {
-                      annotationsStorageId: storageId,
-                      midiStorageId: secondaryStorageId,
-                      musicXmlStorageId: tertiaryStorageId,
-                      annotationsState: "ready" as const,
-                      annotationsError: undefined,
-                    }
+                ? {
+                    annotationsArtifactId: artifactId,
+                    midiArtifactId: secondaryArtifactId,
+                    musicXmlArtifactId: tertiaryArtifactId,
+                    annotationsState: "ready" as const,
+                    annotationsError: undefined,
+                  }
                 : kind === "mux"
-                  ? artifactId
-                    ? { finalArtifactId: artifactId }
-                    : { finalStorageId: storageId }
+                  ? { finalArtifactId: artifactId }
                   : {};
   await ctx.db.patch("mediaAssets", asset._id, {
     ...patch,
@@ -617,8 +536,8 @@ export async function completeJobFromAsset(
 ) {
   const asset = await ctx.db.get("mediaAssets", assetId);
   if (
-    !(asset?.finalStorageId || asset?.finalArtifactId) ||
-    !(asset.lyricsStorageId || asset.lyricsArtifactId) ||
+    !asset?.finalArtifactId ||
+    !asset.lyricsArtifactId ||
     !hasTerminalAnnotations(asset) ||
     asset.state !== "ready"
   )
@@ -628,10 +547,7 @@ export async function completeJobFromAsset(
 
 export async function finalizeAssetForJob(ctx: MutationCtx, jobId: Id<"mediaJobs">) {
   const { asset } = await requireOwnedAsset(ctx, jobId);
-  if (
-    !(asset.finalStorageId || asset.finalArtifactId) ||
-    !(asset.lyricsStorageId || asset.lyricsArtifactId)
-  ) {
+  if (!asset.finalArtifactId || !asset.lyricsArtifactId) {
     throw new Error("Media asset is missing its final video or WebVTT lyrics");
   }
   if (!hasTerminalAnnotations(asset)) {

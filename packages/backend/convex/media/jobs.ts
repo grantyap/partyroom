@@ -1,4 +1,5 @@
 import { v } from "convex/values";
+import { vWorkflowId } from "@convex-dev/workflow";
 import { ActivityManager, type ArtifactId } from "@partyroom/activities";
 import type { Id } from "../_generated/dataModel";
 import { components, internal } from "../_generated/api";
@@ -15,7 +16,6 @@ import { userHasRoomPermission } from "../rooms";
 import { mediaPipelineProgress } from "./progress";
 import {
   attachWorkflowToJob,
-  attachArtifactScopeToJob,
   claimAssetForJob,
   completeJobFromAsset,
   createOrJoinMedia,
@@ -30,15 +30,8 @@ import { mediaOperationKind, type OperationKind } from "./validators";
 
 const activityManager = new ActivityManager(components.activities);
 
-async function mediaArtifactUrl(
-  ctx: QueryCtx,
-  artifactId: string | undefined,
-  storageId: Id<"_storage"> | undefined,
-) {
-  if (artifactId) {
-    return await activityManager.getArtifactUrl(ctx, artifactId as ArtifactId);
-  }
-  return storageId ? await ctx.storage.getUrl(storageId) : null;
+async function mediaArtifactUrl(ctx: QueryCtx, artifactId: string | undefined) {
+  return artifactId ? await activityManager.getArtifactUrl(ctx, artifactId as ArtifactId) : null;
 }
 
 export { removeRoomMedia as removeFromRoomImpl } from "./service";
@@ -124,24 +117,22 @@ export const request = internalMutation({
   handler: async (ctx, args) => {
     const result = await createOrJoinMedia(ctx, args);
     if (!result.created) return result;
-    const { workflowId, artifactScopeId } = await managedWorkflow.start(
+    const workflowId = await managedWorkflow.start(
       ctx,
       internal.media.pipeline.mediaPipeline,
       { jobId: result.jobId },
       {
         onComplete: internal.media.pipeline.onPipelineComplete,
         context: { jobId: result.jobId },
-        startAsync: true,
       },
     );
-    await attachArtifactScopeToJob(ctx, result.jobId, artifactScopeId);
     await attachWorkflowToJob(ctx, result.jobId, workflowId);
     return result;
   },
 });
 
 export const attachWorkflow = internalMutation({
-  args: { jobId: v.id("mediaJobs"), workflowId: v.string() },
+  args: { jobId: v.id("mediaJobs"), workflowId: vWorkflowId },
   handler: async (ctx, { jobId, workflowId }) => await attachWorkflowToJob(ctx, jobId, workflowId),
 });
 
@@ -178,17 +169,14 @@ export const recordStageResult = internalMutation({
   args: {
     jobId: v.id("mediaJobs"),
     kind: mediaOperationKind,
-    artifactId: v.optional(v.string()),
+    artifactId: v.string(),
     secondaryArtifactId: v.optional(v.string()),
     tertiaryArtifactId: v.optional(v.string()),
-    storageId: v.optional(v.id("_storage")),
-    secondaryStorageId: v.optional(v.id("_storage")),
-    tertiaryStorageId: v.optional(v.id("_storage")),
   },
   handler: async (ctx, args) =>
     await recordStageResultForJob(ctx, {
       ...args,
-      artifactId: args.artifactId as ArtifactId | undefined,
+      artifactId: args.artifactId as ArtifactId,
       secondaryArtifactId: args.secondaryArtifactId as ArtifactId | undefined,
       tertiaryArtifactId: args.tertiaryArtifactId as ArtifactId | undefined,
     }),
@@ -250,11 +238,11 @@ export const getJob = query({
             _id: asset._id,
             title: asset.title,
             duration: asset.duration,
-            finalStorageId: asset.finalArtifactId ?? asset.finalStorageId,
-            lyricsStorageId: asset.lyricsArtifactId ?? asset.lyricsStorageId,
-            annotationsStorageId: asset.annotationsArtifactId ?? asset.annotationsStorageId,
-            midiStorageId: asset.midiArtifactId ?? asset.midiStorageId,
-            musicXmlStorageId: asset.musicXmlArtifactId ?? asset.musicXmlStorageId,
+            finalArtifactId: asset.finalArtifactId,
+            lyricsArtifactId: asset.lyricsArtifactId,
+            annotationsArtifactId: asset.annotationsArtifactId,
+            midiArtifactId: asset.midiArtifactId,
+            musicXmlArtifactId: asset.musicXmlArtifactId,
             annotationsState: asset.annotationsState,
             annotationsError: asset.annotationsError,
           }
@@ -296,30 +284,14 @@ export const listRoomMedia = query({
           title: asset?.title,
           duration: asset?.duration,
           errorMessage: job?.errorMessage,
-          sourceUrl: asset
-            ? await mediaArtifactUrl(ctx, asset.sourceArtifactId, asset.sourceStorageId)
-            : null,
-          instrumentalUrl: asset
-            ? await mediaArtifactUrl(ctx, asset.instrumentalArtifactId, asset.instrumentalStorageId)
-            : null,
-          finalUrl: asset
-            ? await mediaArtifactUrl(ctx, asset.finalArtifactId, asset.finalStorageId)
-            : null,
-          lyricsUrl: asset
-            ? await mediaArtifactUrl(ctx, asset.lyricsArtifactId, asset.lyricsStorageId)
-            : null,
-          timedLyricsUrl: asset
-            ? await mediaArtifactUrl(ctx, asset.timedLyricsArtifactId, asset.timedLyricsStorageId)
-            : null,
-          annotationsUrl: asset
-            ? await mediaArtifactUrl(ctx, asset.annotationsArtifactId, asset.annotationsStorageId)
-            : null,
-          midiUrl: asset
-            ? await mediaArtifactUrl(ctx, asset.midiArtifactId, asset.midiStorageId)
-            : null,
-          musicXmlUrl: asset
-            ? await mediaArtifactUrl(ctx, asset.musicXmlArtifactId, asset.musicXmlStorageId)
-            : null,
+          sourceUrl: asset ? await mediaArtifactUrl(ctx, asset.sourceArtifactId) : null,
+          instrumentalUrl: asset ? await mediaArtifactUrl(ctx, asset.instrumentalArtifactId) : null,
+          finalUrl: asset ? await mediaArtifactUrl(ctx, asset.finalArtifactId) : null,
+          lyricsUrl: asset ? await mediaArtifactUrl(ctx, asset.lyricsArtifactId) : null,
+          timedLyricsUrl: asset ? await mediaArtifactUrl(ctx, asset.timedLyricsArtifactId) : null,
+          annotationsUrl: asset ? await mediaArtifactUrl(ctx, asset.annotationsArtifactId) : null,
+          midiUrl: asset ? await mediaArtifactUrl(ctx, asset.midiArtifactId) : null,
+          musicXmlUrl: asset ? await mediaArtifactUrl(ctx, asset.musicXmlArtifactId) : null,
           annotationsState: asset?.annotationsState ?? "failed",
           annotationsError: asset?.annotationsError,
           createdAt: association.createdAt,

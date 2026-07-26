@@ -1,3 +1,4 @@
+import { vWorkflowId, type WorkflowId } from "@convex-dev/workflow";
 import type { ActivityCompletionArgs } from "@partyroom/activities";
 import { v } from "convex/values";
 import type { Id } from "../_generated/dataModel";
@@ -8,7 +9,7 @@ import { workflow } from "../activities/workflowManager";
 
 type Context = {
   jobId: Id<"mediaJobs">;
-  workflowId: string;
+  workflowId: WorkflowId;
   kind: OperationKind;
 };
 
@@ -17,7 +18,7 @@ export const onComplete = internalMutation({
     activityId: v.string(),
     context: v.object({
       jobId: v.id("mediaJobs"),
-      workflowId: v.string(),
+      workflowId: vWorkflowId,
       kind: mediaOperationKind,
     }),
     result: v.any(),
@@ -28,12 +29,12 @@ export const onComplete = internalMutation({
       ctx,
       args.result.kind === "success"
         ? {
-            workflowId: args.context.workflowId as any,
+            workflowId: args.context.workflowId,
             name: args.activityId,
             value: args.result.value,
           }
         : {
-            workflowId: args.context.workflowId as any,
+            workflowId: args.context.workflowId,
             name: args.activityId,
             error: args.result.kind === "failed" ? args.result.errorMessage : "Activity canceled",
           },

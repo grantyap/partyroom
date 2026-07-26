@@ -8,17 +8,17 @@ class TranscribeInput(BaseModel):
 
 class TranscribeOutput(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
-    storage_id: str = Field(alias="storageId")
-    timed_lyrics_storage_id: str = Field(alias="timedLyricsStorageId")
+    lyrics_artifact_id: str = Field(alias="lyricsArtifactId")
+    timed_lyrics_artifact_id: str = Field(alias="timedLyricsArtifactId")
     content_type: str = Field(alias="contentType")
     model: str
     language: str | None = None
 
 transcribe = ActivityDefinition[TranscribeInput, TranscribeOutput](
     name="media.transcribe",
-    version=1,
+    version=2,
     task_queue="lyrics",
     input_model=TranscribeInput,
     output_model=TranscribeOutput,
-    artifact_slots=["storageId","timedLyricsStorageId"],
+    artifact_slots=["lyricsArtifactId","timedLyricsArtifactId"],
 )

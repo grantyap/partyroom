@@ -62,8 +62,8 @@ async def analyze(context: ActivityContext, activity: AnalyzeMelodyInput) -> Ana
         await context.report_progress(0.95, "Uploading melody analysis")
         if output_path.stat().st_size > MAX_BYTES:
             raise ValueError("Output exceeds MAX_MEDIA_BYTES")
-        return AnalyzeMelodyOutput(storage_id=await context.upload_artifact(
-                                       "storageId", output_path, "application/json"),
+        return AnalyzeMelodyOutput(artifact_id=await context.upload_artifact(
+                                       "artifactId", output_path, "application/json"),
                                    content_type="application/json", model=MELODY_MODEL)
     finally:
         shutil.rmtree(directory, ignore_errors=True)
@@ -97,14 +97,14 @@ async def assemble(context: ActivityContext, activity: AssembleAnnotationsInput)
         ):
             raise ValueError("Output exceeds MAX_MEDIA_BYTES")
         return AssembleAnnotationsOutput(
-            annotations_storage_id=await context.upload_artifact(
-                "annotationsStorageId", jams_path, "application/json"
+            annotations_artifact_id=await context.upload_artifact(
+                "annotationsArtifactId", jams_path, "application/json"
             ),
-            midi_storage_id=await context.upload_artifact(
-                "midiStorageId", midi_path, "audio/midi"
+            midi_artifact_id=await context.upload_artifact(
+                "midiArtifactId", midi_path, "audio/midi"
             ),
-            music_xml_storage_id=await context.upload_artifact(
-                "musicXmlStorageId", musicxml_path,
+            music_xml_artifact_id=await context.upload_artifact(
+                "musicXmlArtifactId", musicxml_path,
                 "application/vnd.recordare.musicxml+xml"
             ),
             content_type="application/json",

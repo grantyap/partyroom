@@ -1,7 +1,7 @@
-import { ActivityManager, type ArtifactId, type ArtifactScopeId } from "@partyroom/activities";
+import { ActivityManager, type ArtifactId } from "@partyroom/activities";
+import { vWorkflowId } from "@convex-dev/workflow";
 import { mediaActivities } from "@partyroom/media-activities";
 import { v } from "convex/values";
-import type { Id } from "../_generated/dataModel";
 import { components, internal } from "../_generated/api";
 import { env, internalMutation } from "../_generated/server";
 import { mediaOperationKind } from "./validators";
@@ -11,17 +11,10 @@ import { getActivityJobState, recordScheduledActivity } from "./service";
 const manager = new ActivityManager(components.activities);
 
 async function artifactUrl(
-  ctx: Parameters<typeof manager.getArtifactUrl>[0] & {
-    storage: { getUrl(id: Id<"_storage">): Promise<string | null> };
-  },
+  ctx: Parameters<typeof manager.getArtifactUrl>[0],
   artifactId: string | undefined,
-  storageId: Id<"_storage"> | undefined,
 ) {
-  const url = artifactId
-    ? await manager.getArtifactUrl(ctx, artifactId as ArtifactId)
-    : storageId
-      ? await ctx.storage.getUrl(storageId)
-      : null;
+  const url = artifactId ? await manager.getArtifactUrl(ctx, artifactId as ArtifactId) : null;
   if (!url) throw new Error("Media artifact does not exist");
   return replaceUrlOrigin(url, env.WORKER_CONVEX_CLOUD_ORIGIN);
 }
@@ -29,13 +22,12 @@ async function artifactUrl(
 export const schedule = internalMutation({
   args: {
     jobId: v.id("mediaJobs"),
-    workflowId: v.string(),
-    artifactScopeId: v.string(),
+    workflowId: vWorkflowId,
     kind: mediaOperationKind,
   },
   returns: v.string(),
-  handler: async (ctx, { jobId, workflowId, artifactScopeId, kind }): Promise<string> => {
-    const { job, asset } = await getActivityJobState(ctx, jobId, kind);
+  handler: async (ctx, { jobId, workflowId, kind }): Promise<string> => {
+    const { asset } = await getActivityJobState(ctx, jobId, kind);
     const requireAsset = () => {
       if (!asset) throw new Error("Media job has no claimed asset");
       return asset;
@@ -46,11 +38,7 @@ export const schedule = internalMutation({
         ? { jobId }
         : kind === "extractAudio"
           ? {
-              sourceUrl: await artifactUrl(
-                ctx,
-                requireAsset().sourceArtifactId,
-                requireAsset().sourceStorageId,
-              ),
+              sourceUrl: await artifactUrl(ctx, requireAsset().sourceArtifactId),
             }
           : kind === "separate" || kind === "transcribe" || kind === "analyzeMelody"
             ? {
@@ -59,35 +47,16 @@ export const schedule = internalMutation({
                   kind === "separate"
                     ? requireAsset().extractedAudioArtifactId
                     : requireAsset().vocalsArtifactId,
-                  kind === "separate"
-                    ? requireAsset().extractedAudioStorageId
-                    : requireAsset().vocalsStorageId,
                 ),
               }
             : kind === "mux"
               ? {
-                  videoUrl: await artifactUrl(
-                    ctx,
-                    requireAsset().sourceArtifactId,
-                    requireAsset().sourceStorageId,
-                  ),
-                  instrumentalUrl: await artifactUrl(
-                    ctx,
-                    requireAsset().instrumentalArtifactId,
-                    requireAsset().instrumentalStorageId,
-                  ),
+                  videoUrl: await artifactUrl(ctx, requireAsset().sourceArtifactId),
+                  instrumentalUrl: await artifactUrl(ctx, requireAsset().instrumentalArtifactId),
                 }
               : {
-                  lyricsUrl: await artifactUrl(
-                    ctx,
-                    requireAsset().timedLyricsArtifactId,
-                    requireAsset().timedLyricsStorageId,
-                  ),
-                  melodyUrl: await artifactUrl(
-                    ctx,
-                    requireAsset().melodyArtifactId,
-                    requireAsset().melodyStorageId,
-                  ),
+                  lyricsUrl: await artifactUrl(ctx, requireAsset().timedLyricsArtifactId),
+                  melodyUrl: await artifactUrl(ctx, requireAsset().melodyArtifactId),
                   duration: requireAsset().duration!,
                   extractor: requireAsset().extractor,
                   sourceId: requireAsset().sourceId,
@@ -95,20 +64,16 @@ export const schedule = internalMutation({
                 };
 
     const definition = mediaActivities[kind];
-    if (job.artifactScopeId && job.artifactScopeId !== artifactScopeId) {
-      throw new Error("Workflow artifact scope does not match the media job");
-    }
-    if (!job.artifactScopeId) {
-      await ctx.db.patch("mediaJobs", jobId, {
-        artifactScopeId,
-        updatedAt: Date.now(),
-      });
-    }
-    const activityId: string = await manager.schedule(ctx, definition as any, input as any, {
-      onComplete: internal.media.activityCompletion.onComplete as any,
-      context: { jobId, workflowId, kind },
-      artifactScopeId: artifactScopeId as ArtifactScopeId,
-    });
+    const activityId: string = await manager.scheduleForWorkflow(
+      ctx,
+      workflowId,
+      definition as any,
+      input as any,
+      {
+        onComplete: internal.media.activityCompletion.onComplete as any,
+        context: { jobId, workflowId, kind },
+      },
+    );
     await recordScheduledActivity(ctx, {
       jobId,
       activityId,

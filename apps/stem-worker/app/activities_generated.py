@@ -8,16 +8,16 @@ class SeparateInput(BaseModel):
 
 class SeparateOutput(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
-    instrumental_storage_id: str = Field(alias="instrumentalStorageId")
-    vocals_storage_id: str = Field(alias="vocalsStorageId")
+    instrumental_artifact_id: str = Field(alias="instrumentalArtifactId")
+    vocals_artifact_id: str = Field(alias="vocalsArtifactId")
     content_type: str = Field(alias="contentType")
     model: str
 
 separate = ActivityDefinition[SeparateInput, SeparateOutput](
     name="media.separate",
-    version=1,
+    version=2,
     task_queue="stems",
     input_model=SeparateInput,
     output_model=SeparateOutput,
-    artifact_slots=["instrumentalStorageId","vocalsStorageId"],
+    artifact_slots=["instrumentalArtifactId","vocalsArtifactId"],
 )

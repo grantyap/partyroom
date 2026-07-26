@@ -186,12 +186,15 @@ async def transcribe_activity(context: ActivityContext, activity: TranscribeInpu
         await context.report_progress(0.92, "Uploading timed lyric artifacts")
         if vtt_path.stat().st_size > MAX_BYTES or lyrics_path.stat().st_size > MAX_BYTES:
             raise ValueError("Output exceeds MAX_MEDIA_BYTES")
-        storage_id = await context.upload_artifact("storageId", vtt_path, "text/vtt")
-        timed_lyrics_storage_id = await context.upload_artifact(
-            "timedLyricsStorageId", lyrics_path, "application/json"
+        lyrics_artifact_id = await context.upload_artifact(
+            "lyricsArtifactId", vtt_path, "text/vtt"
+        )
+        timed_lyrics_artifact_id = await context.upload_artifact(
+            "timedLyricsArtifactId", lyrics_path, "application/json"
         )
         return TranscribeOutput(
-            storage_id=storage_id, timed_lyrics_storage_id=timed_lyrics_storage_id,
+            lyrics_artifact_id=lyrics_artifact_id,
+            timed_lyrics_artifact_id=timed_lyrics_artifact_id,
             content_type="text/vtt", model=ASR_MODEL, language=language,
         )
     finally:

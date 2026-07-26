@@ -79,11 +79,11 @@ async def separate_activity(context: ActivityContext, activity: SeparateInput) -
         if output_path.stat().st_size > MAX_BYTES or vocals_path.stat().st_size > MAX_BYTES:
             raise ValueError("Output exceeds MAX_MEDIA_BYTES")
         return SeparateOutput(
-            instrumental_storage_id=await context.upload_artifact(
-                "instrumentalStorageId", output_path, "audio/flac"
+            instrumental_artifact_id=await context.upload_artifact(
+                "instrumentalArtifactId", output_path, "audio/flac"
             ),
-            vocals_storage_id=await context.upload_artifact(
-                "vocalsStorageId", vocals_path, "audio/flac"
+            vocals_artifact_id=await context.upload_artifact(
+                "vocalsArtifactId", vocals_path, "audio/flac"
             ),
             content_type="audio/flac",
             model=MODEL,
