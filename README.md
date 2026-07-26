@@ -20,21 +20,45 @@ bun install
 
 ## Convex Setup
 
-This project uses Convex as a backend. You'll need to set up Convex before running the app:
-
-```bash
-bun run dev:setup
-```
-
-Follow the prompts to create a new Convex project and connect it to your application.
-
-Copy environment variables from `packages/backend/.env.local` to `apps/*/.env`.
-
-Create the two root development secrets:
+Create the local environment files:
 
 ```bash
 cp .env.example .env
+cp apps/web/.env.example apps/web/.env
+cp packages/backend/.env.example packages/backend/.env.local
 ```
+
+Generate distinct values for the two secrets in `.env` and
+`BETTER_AUTH_SECRET` in `packages/backend/.env.local`. For example:
+
+```bash
+openssl rand -hex 32
+```
+
+Start the backend and generate its local admin key:
+
+```bash
+docker compose -f docker-compose.yaml -f docker-compose.dev.yaml up -d --wait backend
+docker compose -f docker-compose.yaml -f docker-compose.dev.yaml \
+  exec -T backend ./generate_admin_key.sh
+```
+
+Put the generated value in `CONVEX_SELF_HOSTED_ADMIN_KEY` in
+`packages/backend/.env.local`. Then restore the function settings from that
+file and push the backend:
+
+```bash
+cd packages/backend
+bunx convex env set SITE_URL http://localhost:5173
+bunx convex env set BETTER_AUTH_SECRET
+bunx convex env set WORKER_CONVEX_CLOUD_ORIGIN http://backend:3210
+cd ../..
+bun run dev:setup
+```
+
+The secret command prompts for the value; paste the `BETTER_AUTH_SECRET` from
+`packages/backend/.env.local`. Compose supplies `ACTIVITY_WORKER_TOKEN` and
+`WORKER_SIGNING_SECRET` directly from the root `.env`.
 
 Everything else, including local ports, worker addresses, resource limits, and
 model names, has a development default in the Compose files.
@@ -61,6 +85,12 @@ To stop the containers and permanently reset their local data:
 ```bash
 bun run dev:reset
 ```
+
+This removes the Convex database and downloaded model volumes. The replacement
+Convex backend generates a new admin key, so repeat the backend start, admin-key
+generation, three `convex env set` commands, and `dev:setup` steps above. Only
+`CONVEX_SELF_HOSTED_ADMIN_KEY` gets a new value; the other values are merely
+restored after their stored copies were erased.
 
 Open [http://localhost:5173](http://localhost:5173) in your browser to see the web application.
 Your app will connect to the local self-hosted Convex backend automatically.
