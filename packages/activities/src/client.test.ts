@@ -1,4 +1,4 @@
-import { describe, expect, expectTypeOf, test } from "vitest";
+import { describe, expect, expectTypeOf, test, vi } from "vitest";
 import type { WorkflowId } from "@convex-dev/workflow";
 import {
   ActivityManager,
@@ -9,6 +9,11 @@ import {
   type ActivityInput,
   type ActivityOutput,
 } from "./client";
+
+vi.mock("convex/server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("convex/server")>()),
+  createFunctionHandle: async (reference: unknown) => reference,
+}));
 
 describe("typed activity registry", () => {
   test("preserves queue names and activity input/output types", () => {
@@ -59,12 +64,16 @@ describe("typed activity registry", () => {
       artifacts: { getScopeForWorkflow: "get-scope" },
       activities: { schedule: "schedule" },
     };
-    const manager = new ActivityManager(component as never);
+    const manager = new ActivityManager(component as never, "activity-completion" as never);
     const runQuery = async () => "scope-1";
     const runMutation = async (_fn: unknown, args: unknown) => {
       expect(args).toMatchObject({
         artifactScopeId: "scope-1",
         artifactSlots: ["output"],
+        completion: {
+          fnHandle: "activity-completion",
+          context: { workflowId: "workflow-1" },
+        },
       });
       return "activity-1";
     };

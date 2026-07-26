@@ -11,6 +11,7 @@ import type { Infer, Validator, Value } from "convex/values";
 import type { ComponentApi } from "../component/_generated/component";
 import { protocolVersion } from "../protocol";
 import { artifactScopeForWorkflow, type ArtifactScopeId } from "./artifactLifecycle";
+import type { ActivityWorkflowCompletionArgs } from "./activityCompletion";
 import {
   wireArtifactDefinitions,
   wireValidator,
@@ -154,17 +155,29 @@ type MutationCtx = Pick<GenericMutationCtx<GenericDataModel>, "runMutation">;
 type QueryCtx = Pick<GenericMutationCtx<GenericDataModel>, "runQuery">;
 type WorkflowMutationCtx = MutationCtx & QueryCtx;
 
-type ScheduleOptions<Definition extends ActivityDefinition, Context> = {
-  onComplete?: FunctionReference<
-    "mutation",
-    FunctionVisibility,
-    ActivityCompletionArgs<Context, ActivityOutput<Definition>>
-  >;
-  context?: Context;
-};
+type ScheduleOptions<Definition extends ActivityDefinition, Context> =
+  | {
+      onComplete: FunctionReference<
+        "mutation",
+        FunctionVisibility,
+        ActivityCompletionArgs<Context, ActivityOutput<Definition>>
+      >;
+      context: Context;
+    }
+  | {
+      onComplete?: undefined;
+      context?: undefined;
+    };
 
 export class ActivityManager {
-  constructor(private readonly component: ComponentApi) {}
+  constructor(
+    private readonly component: ComponentApi,
+    private readonly lifecycleCompletion: FunctionReference<
+      "mutation",
+      "internal",
+      ActivityWorkflowCompletionArgs
+    >,
+  ) {}
 
   async schedule<Definition extends ActivityDefinition, Context = unknown>(
     ctx: WorkflowMutationCtx,
@@ -174,22 +187,32 @@ export class ActivityManager {
     options?: ScheduleOptions<Definition, Context>,
   ): Promise<ActivityId> {
     const artifactScopeId = await artifactScopeForWorkflow(this.component, ctx, workflowId);
-    return await this.scheduleInScope(ctx, artifactScopeId, definition, input, options);
+    return await this.scheduleInScope(ctx, workflowId, artifactScopeId, definition, input, options);
   }
 
   private async scheduleInScope<Definition extends ActivityDefinition, Context>(
     ctx: MutationCtx,
+    workflowId: WorkflowId,
     artifactScopeId: ArtifactScopeId,
     definition: Definition,
     input: ActivityInput<Definition>,
     options?: ScheduleOptions<Definition, Context>,
   ): Promise<ActivityId> {
-    const completion = options?.onComplete
+    const domainCompletion = options?.onComplete
       ? {
           fnHandle: (await createFunctionHandle(options.onComplete)) as FunctionHandle<"mutation">,
           context: options.context,
         }
       : undefined;
+    const completion = {
+      fnHandle: (await createFunctionHandle(
+        this.lifecycleCompletion,
+      )) as FunctionHandle<"mutation">,
+      context: {
+        workflowId,
+        ...(domainCompletion ? { completion: domainCompletion } : {}),
+      },
+    };
     const activityId = await ctx.runMutation(this.component.activities.schedule, {
       activityType: definition.name,
       activityVersion: definition.version,

@@ -6,7 +6,10 @@ const workflow = new WorkflowManager(components.workflow, {
   workpoolOptions: { maxParallelism: 10 },
 });
 
-export const activities = new ActivityManager(components.activities);
+export const activities: ActivityManager = new ActivityManager(
+  components.activities,
+  internal.activities.activityCompletion.onComplete,
+);
 
 export const managedWorkflow: ManagedWorkflowManager = new ManagedWorkflowManager(
   workflow,

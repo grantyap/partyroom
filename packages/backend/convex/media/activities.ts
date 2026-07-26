@@ -70,7 +70,7 @@ export const schedule = internalMutation({
       input as any,
       {
         onComplete: internal.media.activityCompletion.onComplete as any,
-        context: { jobId, workflowId, kind },
+        context: { jobId },
       },
     );
     await recordScheduledActivity(ctx, {

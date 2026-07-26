@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as activities_activityCompletion from "../activities/activityCompletion.js";
 import type * as activities_http from "../activities/http.js";
 import type * as activities_managedWorkflow from "../activities/managedWorkflow.js";
 import type * as activities_workflowManager from "../activities/workflowManager.js";
@@ -35,6 +36,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  "activities/activityCompletion": typeof activities_activityCompletion;
   "activities/http": typeof activities_http;
   "activities/managedWorkflow": typeof activities_managedWorkflow;
   "activities/workflowManager": typeof activities_workflowManager;

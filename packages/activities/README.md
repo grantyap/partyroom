@@ -223,18 +223,17 @@ export const exampleWorkflow = managedWorkflow
 ```
 
 The application scheduling mutation maps `kind` to its registry definition,
-calls the configured `activities.schedule` with `workflowId`, and configures
-the shared activity-completion mutation to send the workflow event:
+then calls the configured `activities.schedule` with `workflowId`:
 
 ```ts
-await activities.schedule(ctx, workflowId, exampleActivities[kind], input, {
-  onComplete: internal.example.activities.onComplete,
-  context: { workflowId, kind },
-});
+await activities.schedule(ctx, workflowId, exampleActivities[kind], input);
 ```
 
-It is the domain-specific bridge for constructing activity inputs; the
-activities component resolves the private scope and owns cleanup.
+It is only the domain-specific bridge for constructing activity inputs. The
+activities infrastructure always resumes the workflow, resolves the private
+scope, and owns cleanup. An optional `onComplete` callback may update
+application projections, but application code never owns the workflow-event
+wiring.
 
 Start it through `managedWorkflow.start`, not the underlying
 `WorkflowManager.start`. The manager creates the scope and installs the
