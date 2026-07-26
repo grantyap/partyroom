@@ -144,8 +144,9 @@ output: wire.object({
 ```
 
 That declaration drives generated contracts, worker upload-slot validation,
-and branded TypeScript output types. Artifact-producing activities must be
-scheduled with an artifact scope. Workers upload through
+and branded TypeScript output types. Artifact-producing activities are
+scheduled inside a managed workflow; its private scope is resolved
+automatically. Workers upload through
 `context.uploadArtifact` / `context.upload_artifact`; unrestricted worker upload
 URLs are not exposed.
 
@@ -166,7 +167,7 @@ Define each external activity with wire schemas. Artifact lifecycle is part of
 the output contract, so there is no separate cleanup registration:
 
 ```ts
-export const activities = {
+export const exampleActivities = {
   prepare: defineActivity({
     name: "example.prepare",
     version: 1,
@@ -206,7 +207,7 @@ export const exampleWorkflow = managedWorkflow
     });
     const prepared = await step.awaitEvent({
       name: prepareId,
-      validator: activities.prepare.output,
+      validator: exampleActivities.prepare.output,
     });
 
     const publishId = await step.runMutation(internal.example.activities.schedule, {
@@ -216,16 +217,24 @@ export const exampleWorkflow = managedWorkflow
     });
     await step.awaitEvent({
       name: publishId,
-      validator: activities.publish.output,
+      validator: exampleActivities.publish.output,
     });
   });
 ```
 
 The application scheduling mutation maps `kind` to its registry definition,
-calls `ActivityManager.scheduleForWorkflow` with `workflowId`, and configures
-the shared activity-completion mutation to send the workflow event. It is the
-domain-specific bridge for constructing activity inputs; the activities
-component resolves the private scope and owns cleanup.
+calls the configured `activities.schedule` with `workflowId`, and configures
+the shared activity-completion mutation to send the workflow event:
+
+```ts
+await activities.schedule(ctx, workflowId, exampleActivities[kind], input, {
+  onComplete: internal.example.activities.onComplete,
+  context: { workflowId, kind },
+});
+```
+
+It is the domain-specific bridge for constructing activity inputs; the
+activities component resolves the private scope and owns cleanup.
 
 Start it through `managedWorkflow.start`, not the underlying
 `WorkflowManager.start`. The manager creates the scope and installs the

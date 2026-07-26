@@ -10,6 +10,7 @@ import { createFunctionHandle } from "convex/server";
 import type { Infer, Validator, Value } from "convex/values";
 import type { ComponentApi } from "../component/_generated/component";
 import { protocolVersion } from "../protocol";
+import { artifactScopeForWorkflow, type ArtifactScopeId } from "./artifactLifecycle";
 import {
   wireArtifactDefinitions,
   wireValidator,
@@ -42,7 +43,6 @@ type AnyValidator = Validator<any, any, any>;
 export type ArtifactDefinitions = Readonly<
   Record<string, { readonly disposition: ArtifactDisposition }>
 >;
-export type ArtifactScopeId = string & { readonly __artifactScopeId: unique symbol };
 
 export type ActivityDefinition<
   Name extends string = string,
@@ -161,25 +161,29 @@ type ScheduleOptions<Definition extends ActivityDefinition, Context> = {
     ActivityCompletionArgs<Context, ActivityOutput<Definition>>
   >;
   context?: Context;
-} & ([Definition["artifactSlots"][number]] extends [never]
-  ? { artifactScopeId?: ArtifactScopeId }
-  : { artifactScopeId: ArtifactScopeId });
+};
 
 export class ActivityManager {
-  constructor(readonly component: ComponentApi) {}
+  constructor(private readonly component: ComponentApi) {}
 
   async schedule<Definition extends ActivityDefinition, Context = unknown>(
-    ctx: MutationCtx,
+    ctx: WorkflowMutationCtx,
+    workflowId: WorkflowId,
     definition: Definition,
     input: ActivityInput<Definition>,
-    ...optionsArgument: [Definition["artifactSlots"][number]] extends [never]
-      ? [options?: ScheduleOptions<Definition, Context>]
-      : [options: ScheduleOptions<Definition, Context>]
+    options?: ScheduleOptions<Definition, Context>,
   ): Promise<ActivityId> {
-    const options = optionsArgument[0];
-    if (definition.artifactSlots.length > 0 && !options?.artifactScopeId) {
-      throw new Error(`Activity ${definition.name} requires an artifact scope`);
-    }
+    const artifactScopeId = await artifactScopeForWorkflow(this.component, ctx, workflowId);
+    return await this.scheduleInScope(ctx, artifactScopeId, definition, input, options);
+  }
+
+  private async scheduleInScope<Definition extends ActivityDefinition, Context>(
+    ctx: MutationCtx,
+    artifactScopeId: ArtifactScopeId,
+    definition: Definition,
+    input: ActivityInput<Definition>,
+    options?: ScheduleOptions<Definition, Context>,
+  ): Promise<ActivityId> {
     const completion = options?.onComplete
       ? {
           fnHandle: (await createFunctionHandle(options.onComplete)) as FunctionHandle<"mutation">,
@@ -195,7 +199,7 @@ export class ActivityManager {
         maxConcurrentActivities: definition.queue.maxConcurrentActivities,
       },
       input,
-      artifactScopeId: options?.artifactScopeId as any,
+      artifactScopeId,
       artifactSlots: [...definition.artifactSlots],
       artifactDefinitions: Object.entries(definition.artifacts as ArtifactDefinitions).map(
         ([slot, artifact]) => ({
@@ -209,54 +213,6 @@ export class ActivityManager {
       scheduleToCloseTimeoutMs: definition.scheduleToCloseTimeoutMs,
     });
     return activityId as ActivityId;
-  }
-
-  async createArtifactScope(ctx: MutationCtx, options?: { ttlMs?: number }) {
-    return (await ctx.runMutation(this.component.artifacts.createScope, {
-      ttlMs: options?.ttlMs,
-    })) as ArtifactScopeId;
-  }
-
-  async closeArtifactScope(ctx: MutationCtx, artifactScopeId: ArtifactScopeId) {
-    await ctx.runMutation(this.component.artifacts.closeScope, {
-      scopeId: artifactScopeId as any,
-    });
-  }
-
-  async attachArtifactScopeToWorkflow(
-    ctx: MutationCtx,
-    artifactScopeId: ArtifactScopeId,
-    workflowId: WorkflowId,
-  ) {
-    await ctx.runMutation(this.component.artifacts.attachWorkflow, {
-      scopeId: artifactScopeId as any,
-      workflowId,
-    });
-  }
-
-  async scheduleForWorkflow<Definition extends ActivityDefinition, Context = unknown>(
-    ctx: WorkflowMutationCtx,
-    workflowId: WorkflowId,
-    definition: Definition,
-    input: ActivityInput<Definition>,
-    options?: Omit<ScheduleOptions<Definition, Context>, "artifactScopeId">,
-  ): Promise<ActivityId> {
-    const artifactScopeId = await ctx.runQuery(this.component.artifacts.getScopeForWorkflow, {
-      workflowId,
-    });
-    if (!artifactScopeId) {
-      throw new Error(`Workflow ${workflowId} has no managed artifact scope`);
-    }
-    return await this.schedule(ctx, definition, input, {
-      ...options,
-      artifactScopeId: artifactScopeId as ArtifactScopeId,
-    } as ScheduleOptions<Definition, Context>);
-  }
-
-  async abandonArtifactScope(ctx: MutationCtx, artifactScopeId: ArtifactScopeId) {
-    await ctx.runMutation(this.component.artifacts.abandonScope, {
-      scopeId: artifactScopeId as any,
-    });
   }
 
   async deleteArtifact(ctx: MutationCtx, artifactId: ArtifactId) {
@@ -341,10 +297,5 @@ export type ActivityWorkflowContext = {
 };
 
 export { protocolVersion };
-export {
-  ManagedWorkflowManager,
-  managedWorkflowCompletionContextValidator,
-  settleManagedWorkflow,
-  type ManagedWorkflowCompletionArgs,
-} from "./managedWorkflow";
+export { ManagedWorkflowManager } from "./managedWorkflow";
 export { wire, type ArtifactDisposition, type ArtifactId, type WireSchema } from "./wire";

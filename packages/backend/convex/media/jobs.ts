@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { vWorkflowId } from "@convex-dev/workflow";
-import { ActivityManager, type ArtifactId } from "@partyroom/activities";
+import { type ArtifactId } from "@partyroom/activities";
 import type { Id } from "../_generated/dataModel";
 import { components, internal } from "../_generated/api";
 import {
@@ -10,7 +10,7 @@ import {
   query,
   type QueryCtx,
 } from "../_generated/server";
-import { managedWorkflow } from "../activities/workflowManager";
+import { activities, managedWorkflow } from "../activities/workflowManager";
 import { getCurrentUserImpl } from "../auth";
 import { userHasRoomPermission } from "../rooms";
 import { mediaPipelineProgress } from "./progress";
@@ -28,10 +28,8 @@ import {
 } from "./service";
 import { mediaOperationKind, type OperationKind } from "./validators";
 
-const activityManager = new ActivityManager(components.activities);
-
 async function mediaArtifactUrl(ctx: QueryCtx, artifactId: string | undefined) {
-  return artifactId ? await activityManager.getArtifactUrl(ctx, artifactId as ArtifactId) : null;
+  return artifactId ? await activities.getArtifactUrl(ctx, artifactId as ArtifactId) : null;
 }
 
 export { removeRoomMedia as removeFromRoomImpl } from "./service";

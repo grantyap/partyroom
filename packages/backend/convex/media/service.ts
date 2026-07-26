@@ -1,13 +1,11 @@
 import type { WorkflowId } from "@convex-dev/workflow";
-import { ActivityManager, type ArtifactId } from "@partyroom/activities";
+import { type ArtifactId } from "@partyroom/activities";
 import type { Doc, Id } from "../_generated/dataModel";
-import { components } from "../_generated/api";
 import type { MutationCtx } from "../_generated/server";
-import { workflow } from "../activities/workflowManager";
+import { activities, cancelWorkflow, sendWorkflowEvent } from "../activities/workflowManager";
 import type { OperationKind } from "./validators";
 
 const mediaPipelineVersion = 3;
-const activityManager = new ActivityManager(components.activities);
 
 export function hasTerminalAnnotations(asset: {
   annotationsState?: "processing" | "ready" | "failed";
@@ -43,7 +41,7 @@ async function deleteAssetArtifacts(ctx: MutationCtx, asset: Doc<"mediaAssets">)
   for (const field of assetArtifactFields) {
     const artifactId = asset[field];
     if (!artifactId) continue;
-    if (await activityManager.deleteArtifact(ctx, artifactId as ArtifactId)) {
+    if (await activities.deleteArtifact(ctx, artifactId as ArtifactId)) {
       deleted += 1;
     }
   }
@@ -277,15 +275,13 @@ export async function removeRoomMedia(
 
   if (job.workflowId) {
     try {
-      await workflow.cancel(ctx, job.workflowId as WorkflowId);
+      await cancelWorkflow(ctx, job.workflowId as WorkflowId);
     } catch (error) {
       console.warn(`Unable to cancel media workflow ${job.workflowId}`, error);
     }
   }
   for (const activity of job.activeActivities ?? []) {
-    await ctx.runMutation(components.activities.activities.requestCancel, {
-      activityId: activity.activityId as any,
-    });
+    await activities.cancel(ctx, activity.activityId as any);
   }
 
   if (asset && asset.state !== "ready" && relatedJobs.length === 0) {
@@ -566,7 +562,7 @@ export async function finalizeAssetForJob(ctx: MutationCtx, jobId: Id<"mediaJobs
     if (waitingJob.state !== "queued" && waitingJob.state !== "processing") continue;
     await markJobReady(ctx, waitingJob._id, asset._id);
     if (waitingJob._id !== jobId && waitingJob.workflowId) {
-      await workflow.sendEvent(ctx, {
+      await sendWorkflowEvent(ctx, {
         workflowId: waitingJob.workflowId as WorkflowId,
         name: "asset-ready",
         value: asset._id,
@@ -611,7 +607,7 @@ export async function failMediaJob(
       waitingJob.workflowId &&
       waitingJob.state === "processing"
     ) {
-      await workflow.sendEvent(ctx, {
+      await sendWorkflowEvent(ctx, {
         workflowId: waitingJob.workflowId as WorkflowId,
         name: "asset-ready",
         error: args.errorMessage,

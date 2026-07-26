@@ -4,6 +4,7 @@
   "type": "module",
   "exports": {
     ".": "./src/client.ts",
+    "./internal": "./src/internal.ts",
     "./convex.config": "./component/convex.config.ts",
     "./_generated/component.js": "./component/_generated/component.ts"
   },

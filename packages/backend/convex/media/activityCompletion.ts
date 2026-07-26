@@ -5,7 +5,7 @@ import type { Id } from "../_generated/dataModel";
 import { internalMutation } from "../_generated/server";
 import { recordActivityTerminal } from "./service";
 import { mediaOperationKind, type OperationKind } from "./validators";
-import { workflow } from "../activities/workflowManager";
+import { sendWorkflowEvent } from "../activities/workflowManager";
 
 type Context = {
   jobId: Id<"mediaJobs">;
@@ -25,7 +25,7 @@ export const onComplete = internalMutation({
   },
   handler: async (ctx, args: ActivityCompletionArgs<Context>) => {
     await recordActivityTerminal(ctx, args.context.jobId, args.activityId);
-    await workflow.sendEvent(
+    await sendWorkflowEvent(
       ctx,
       args.result.kind === "success"
         ? {

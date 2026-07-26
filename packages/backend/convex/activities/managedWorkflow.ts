@@ -1,15 +1,13 @@
 import {
-  ActivityManager,
   managedWorkflowCompletionContextValidator,
   settleManagedWorkflow,
   type ManagedWorkflowCompletionArgs,
-} from "@partyroom/activities";
+} from "@partyroom/activities/internal";
 import { vResultValidator, vWorkflowId } from "@convex-dev/workflow";
 import { v } from "convex/values";
 import { components, internal } from "../_generated/api";
 import { internalMutation, type MutationCtx } from "../_generated/server";
 
-const activities = new ActivityManager(components.activities);
 const MAX_RETRY_DELAY_MS = 5 * 60_000;
 const MAX_SETTLEMENT_ATTEMPTS = 20;
 
@@ -21,7 +19,7 @@ const completionArgs = {
 
 async function settle(ctx: MutationCtx, args: ManagedWorkflowCompletionArgs, attempt: number) {
   try {
-    await settleManagedWorkflow(ctx, activities, args);
+    await settleManagedWorkflow(ctx, components.activities, args);
   } catch (error) {
     console.error(`Unable to settle managed workflow ${args.workflowId}`, error);
     if (attempt >= MAX_SETTLEMENT_ATTEMPTS) return;

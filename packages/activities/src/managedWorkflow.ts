@@ -16,7 +16,14 @@ import {
   type ReturnValueForOptionalValidator,
 } from "convex/server";
 import { v, type ObjectType, type PropertyValidators, type Validator } from "convex/values";
-import type { ActivityManager, ArtifactScopeId } from "./client";
+import type { ComponentApi } from "../component/_generated/component";
+import {
+  abandonArtifactScope,
+  attachArtifactScopeToWorkflow,
+  closeArtifactScope,
+  createArtifactScope,
+  type ArtifactScopeId,
+} from "./artifactLifecycle";
 
 export const managedWorkflowCompletionContextValidator = v.object({
   artifactScopeId: v.string(),
@@ -73,7 +80,7 @@ type StartOptions<Context> = CompletionOptions<Context> & {
 export class ManagedWorkflowManager {
   constructor(
     private readonly workflows: WorkflowManager,
-    private readonly activities: ActivityManager,
+    private readonly component: ComponentApi,
     private readonly lifecycleCompletion: FunctionReference<"mutation", "internal">,
   ) {}
 
@@ -115,7 +122,7 @@ export class ManagedWorkflowManager {
     args: FunctionArgs<F>["args"],
     options?: StartOptions<Context>,
   ): Promise<WorkflowId> {
-    const artifactScopeId = await this.activities.createArtifactScope(ctx, {
+    const artifactScopeId = await createArtifactScope(this.component, ctx, {
       ttlMs: options?.artifactTtlMs,
     });
     const completion = options?.onComplete
@@ -133,21 +140,21 @@ export class ManagedWorkflowManager {
       // The scope must be attached before the workflow can schedule activities.
       startAsync: true,
     });
-    await this.activities.attachArtifactScopeToWorkflow(ctx, artifactScopeId, workflowId);
+    await attachArtifactScopeToWorkflow(this.component, ctx, artifactScopeId, workflowId);
     return workflowId;
   }
 }
 
 export async function settleManagedWorkflow(
   ctx: MutationCtx,
-  activities: ActivityManager,
+  activities: ComponentApi,
   args: ManagedWorkflowCompletionArgs,
 ) {
   const artifactScopeId = args.context.artifactScopeId as ArtifactScopeId;
   if (args.result.kind === "success") {
-    await activities.closeArtifactScope(ctx, artifactScopeId);
+    await closeArtifactScope(activities, ctx, artifactScopeId);
   } else {
-    await activities.abandonArtifactScope(ctx, artifactScopeId);
+    await abandonArtifactScope(activities, ctx, artifactScopeId);
   }
 
   const completion = args.context.completion;

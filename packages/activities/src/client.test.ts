@@ -1,5 +1,7 @@
 import { describe, expect, expectTypeOf, test } from "vitest";
+import type { WorkflowId } from "@convex-dev/workflow";
 import {
+  ActivityManager,
   defineActivity,
   defineActivityRegistry,
   defineQueue,
@@ -40,5 +42,37 @@ describe("typed activity registry", () => {
       instrumentalStorageId: string;
       vocalsStorageId: string;
     }>();
+  });
+
+  test("schedules through a workflow without exposing its artifact scope", async () => {
+    const queue = defineQueue("media", { leaseDurationMs: 30_000 });
+    const activity = defineActivity({
+      name: "media.render",
+      version: 1,
+      queue,
+      input: wire.object({ sourceUrl: wire.string }),
+      output: wire.object({ output: wire.artifact("retained") }),
+      startToCloseTimeoutMs: 60_000,
+      scheduleToCloseTimeoutMs: 120_000,
+    });
+    const component = {
+      artifacts: { getScopeForWorkflow: "get-scope" },
+      activities: { schedule: "schedule" },
+    };
+    const manager = new ActivityManager(component as never);
+    const runQuery = async () => "scope-1";
+    const runMutation = async (_fn: unknown, args: unknown) => {
+      expect(args).toMatchObject({
+        artifactScopeId: "scope-1",
+        artifactSlots: ["output"],
+      });
+      return "activity-1";
+    };
+
+    await expect(
+      manager.schedule({ runQuery, runMutation } as never, "workflow-1" as WorkflowId, activity, {
+        sourceUrl: "https://example.com/source",
+      }),
+    ).resolves.toBe("activity-1");
   });
 });

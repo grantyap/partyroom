@@ -1,29 +1,35 @@
 import { describe, expect, test, vi } from "vitest";
 import type { WorkflowId } from "@convex-dev/workflow";
-import type { ActivityManager, ArtifactScopeId } from "./client";
 import { ManagedWorkflowManager, settleManagedWorkflow } from "./managedWorkflow";
 
-const scopeId = "scope-1" as ArtifactScopeId;
+const scopeId = "scope-1";
 const workflowId = "workflow-1" as WorkflowId;
+const component = {
+  artifacts: {
+    createScope: "create-scope",
+    attachWorkflow: "attach-workflow",
+    closeScope: "close-scope",
+    abandonScope: "abandon-scope",
+  },
+} as never;
 
 describe("managed artifact workflows", () => {
   test("creates and privately binds one artifact scope when starting a workflow", async () => {
-    const createArtifactScope = vi.fn(async () => scopeId);
-    const attachArtifactScopeToWorkflow = vi.fn(async () => undefined);
     const start = vi.fn(async () => workflowId);
     const manager = new ManagedWorkflowManager(
       { start } as never,
-      { createArtifactScope, attachArtifactScopeToWorkflow } as never,
+      component,
       "lifecycle-completion" as never,
     );
+    const runMutation = vi.fn(async (fn) => (fn === "create-scope" ? scopeId : undefined));
+    const ctx = { runMutation };
 
     await expect(
-      manager.start({} as never, "workflow" as never, { jobId: "job-1" } as never),
+      manager.start(ctx as never, "workflow" as never, { jobId: "job-1" } as never),
     ).resolves.toBe(workflowId);
 
-    expect(createArtifactScope).toHaveBeenCalledOnce();
     expect(start).toHaveBeenCalledWith(
-      {},
+      ctx,
       "workflow",
       { jobId: "job-1" },
       {
@@ -32,33 +38,32 @@ describe("managed artifact workflows", () => {
         startAsync: true,
       },
     );
-    expect(attachArtifactScopeToWorkflow).toHaveBeenCalledWith({}, scopeId, workflowId);
+    expect(runMutation).toHaveBeenNthCalledWith(1, "create-scope", {
+      ttlMs: undefined,
+    });
+    expect(runMutation).toHaveBeenNthCalledWith(2, "attach-workflow", {
+      scopeId,
+      workflowId,
+    });
   });
 
   test("closes the scope after successful workflow completion", async () => {
-    const closeArtifactScope = vi.fn(async () => undefined);
-    const abandonArtifactScope = vi.fn(async () => undefined);
     const runMutation = vi.fn(async () => undefined);
 
-    await settleManagedWorkflow(
-      { runMutation },
-      { closeArtifactScope, abandonArtifactScope } as unknown as ActivityManager,
-      {
-        workflowId,
-        result: { kind: "success", returnValue: null },
-        context: {
-          artifactScopeId: scopeId,
-          completion: {
-            fnHandle: "domain-completion",
-            context: { jobId: "job-1" },
-          },
+    await settleManagedWorkflow({ runMutation }, component, {
+      workflowId,
+      result: { kind: "success", returnValue: null },
+      context: {
+        artifactScopeId: scopeId,
+        completion: {
+          fnHandle: "domain-completion",
+          context: { jobId: "job-1" },
         },
       },
-    );
+    });
 
-    expect(closeArtifactScope).toHaveBeenCalledWith({ runMutation }, scopeId);
-    expect(abandonArtifactScope).not.toHaveBeenCalled();
-    expect(runMutation).toHaveBeenCalledWith("domain-completion", {
+    expect(runMutation).toHaveBeenNthCalledWith(1, "close-scope", { scopeId });
+    expect(runMutation).toHaveBeenNthCalledWith(2, "domain-completion", {
       workflowId,
       result: { kind: "success", returnValue: null },
       context: { jobId: "job-1" },
@@ -66,20 +71,15 @@ describe("managed artifact workflows", () => {
   });
 
   test("abandons the scope after workflow failure", async () => {
-    const closeArtifactScope = vi.fn(async () => undefined);
-    const abandonArtifactScope = vi.fn(async () => undefined);
+    const runMutation = vi.fn(async () => undefined);
 
-    await settleManagedWorkflow(
-      { runMutation: vi.fn() },
-      { closeArtifactScope, abandonArtifactScope } as unknown as ActivityManager,
-      {
-        workflowId,
-        result: { kind: "failed", error: "boom" },
-        context: { artifactScopeId: scopeId },
-      },
-    );
+    await settleManagedWorkflow({ runMutation }, component, {
+      workflowId,
+      result: { kind: "failed", error: "boom" },
+      context: { artifactScopeId: scopeId },
+    });
 
-    expect(abandonArtifactScope).toHaveBeenCalledWith(expect.anything(), scopeId);
-    expect(closeArtifactScope).not.toHaveBeenCalled();
+    expect(runMutation).toHaveBeenCalledOnce();
+    expect(runMutation).toHaveBeenCalledWith("abandon-scope", { scopeId });
   });
 });

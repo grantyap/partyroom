@@ -1,20 +1,19 @@
-import { ActivityManager, type ArtifactId } from "@partyroom/activities";
+import { type ArtifactId } from "@partyroom/activities";
 import { vWorkflowId } from "@convex-dev/workflow";
 import { mediaActivities } from "@partyroom/media-activities";
 import { v } from "convex/values";
-import { components, internal } from "../_generated/api";
+import { internal } from "../_generated/api";
 import { env, internalMutation } from "../_generated/server";
+import { activities } from "../activities/workflowManager";
 import { mediaOperationKind } from "./validators";
 import { replaceUrlOrigin } from "./urls";
 import { getActivityJobState, recordScheduledActivity } from "./service";
 
-const manager = new ActivityManager(components.activities);
-
 async function artifactUrl(
-  ctx: Parameters<typeof manager.getArtifactUrl>[0],
+  ctx: Parameters<typeof activities.getArtifactUrl>[0],
   artifactId: string | undefined,
 ) {
-  const url = artifactId ? await manager.getArtifactUrl(ctx, artifactId as ArtifactId) : null;
+  const url = artifactId ? await activities.getArtifactUrl(ctx, artifactId as ArtifactId) : null;
   if (!url) throw new Error("Media artifact does not exist");
   return replaceUrlOrigin(url, env.WORKER_CONVEX_CLOUD_ORIGIN);
 }
@@ -64,7 +63,7 @@ export const schedule = internalMutation({
                 };
 
     const definition = mediaActivities[kind];
-    const activityId: string = await manager.scheduleForWorkflow(
+    const activityId: string = await activities.schedule(
       ctx,
       workflowId,
       definition as any,
