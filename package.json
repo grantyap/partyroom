@@ -20,9 +20,12 @@
   },
   "type": "module",
   "scripts": {
-    "dev": "bun run dev:infra && turbo dev",
+    "dev": "bun run dev:require-mode docker && bun run dev:infra && turbo dev",
+    "dev:mac": "bun run dev:require-mode mac && bun run dev:infra:mac && turbo run dev dev:mac",
     "dev:infra": "docker compose -f docker-compose.yaml -f docker-compose.dev.yaml up -d --wait --build",
+    "dev:infra:mac": "docker compose -f docker-compose.yaml -f docker-compose.dev.yaml stop stem-worker lyrics-worker && docker compose -f docker-compose.yaml -f docker-compose.dev.yaml -f docker-compose.mac.yaml up -d --wait --build",
     "dev:down": "docker compose -f docker-compose.yaml -f docker-compose.dev.yaml down",
+    "dev:require-mode": "bun scripts/require-dev-mode.ts",
     "dev:reset": "docker compose -f docker-compose.yaml -f docker-compose.dev.yaml down --volumes",
     "generate:activities": "bun scripts/generate-activity-contracts.ts",
     "build": "turbo build",

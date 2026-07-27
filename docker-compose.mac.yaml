@@ -1,0 +1,12 @@
+services:
+  backend:
+    labels:
+      partyroom.dev.mode: mac
+
+  stem-worker:
+    profiles:
+      - docker-stem-worker
+
+  lyrics-worker:
+    profiles:
+      - docker-lyrics-worker
