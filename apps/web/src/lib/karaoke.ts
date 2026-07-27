@@ -7,6 +7,18 @@ export type LyricObservation = {
   confidence?: number;
 };
 
+export type LyricsTiming = "word" | "line";
+
+export type LyricsTrack = {
+  id: string;
+  label: string;
+  title?: string | null;
+  timing: LyricsTiming;
+  suggestedOffsetMs?: number;
+  content: { kind: "url"; url: string } | { kind: "inline"; observations: LyricObservation[] };
+  captionsUrl?: string | null;
+};
+
 export type KaraokeWord = {
   time: number;
   duration: number;
@@ -371,7 +383,7 @@ export function parseLyricObservations(value: unknown): LyricObservation[] {
 
 const endsSentence = (text: string) => /[.!?…]["')\]]?$/.test(text);
 
-export function groupLyricsIntoCues(
+function wordLyricsIntoCues(
   observations: LyricObservation[],
   {
     maxCharacters = 44,
@@ -423,18 +435,33 @@ export function groupLyricsIntoCues(
   return cues;
 }
 
+export function lyricsIntoCues(
+  observations: LyricObservation[],
+  timing: LyricsTiming,
+): KaraokeCue[] {
+  if (timing === "word") return wordLyricsIntoCues(observations);
+  return observations
+    .filter(
+      ({ time, duration, value }) =>
+        Number.isFinite(time) &&
+        time >= 0 &&
+        Number.isFinite(duration) &&
+        duration > 0 &&
+        value.trim(),
+    )
+    .sort((left, right) => left.time - right.time)
+    .map(({ time, duration, value }) => ({
+      start: time,
+      end: time + duration,
+      words: [{ time, duration, text: value.trim() }],
+    }));
+}
+
 export function findKaraokeCue(cues: KaraokeCue[], currentTime: number): number {
   if (cues.length === 0 || !Number.isFinite(currentTime)) return -1;
-  if (currentTime < cues[0].start) {
-    return cues[0].start - currentTime <= 4 ? 0 : -1;
-  }
-
   for (let index = cues.length - 1; index >= 0; index -= 1) {
     const cue = cues[index];
-    if (currentTime < cue.start) continue;
-    const next = cues[index + 1];
-    const visibleUntil = next?.start ?? cue.end + 1.5;
-    return currentTime <= visibleUntil ? index : -1;
+    if (currentTime >= cue.start && currentTime < cue.end) return index;
   }
   return -1;
 }

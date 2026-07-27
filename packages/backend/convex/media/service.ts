@@ -1,11 +1,11 @@
 import type { WorkflowId } from "@convex-dev/workflow";
 import { type ArtifactId } from "@partyroom/activities";
 import type { Doc, Id } from "../_generated/dataModel";
-import type { MutationCtx } from "../_generated/server";
+import type { MutationCtx, QueryCtx } from "../_generated/server";
 import { activities, cancelWorkflow, sendWorkflowEvent } from "../activities/workflowManager";
 import type { OperationKind } from "./validators";
 
-const mediaPipelineVersion = 3;
+const mediaPipelineVersion = 4;
 
 export function hasTerminalAnnotations(asset: {
   annotationsState?: "processing" | "ready" | "failed";
@@ -28,13 +28,22 @@ export const assetArtifactFields = [
   "instrumentalArtifactId",
   "vocalsArtifactId",
   "finalArtifactId",
-  "lyricsArtifactId",
-  "timedLyricsArtifactId",
   "melodyArtifactId",
   "annotationsArtifactId",
   "midiArtifactId",
   "musicXmlArtifactId",
 ] as const satisfies readonly (keyof Doc<"mediaAssets">)[];
+
+export async function getLyricTrack(
+  ctx: Pick<QueryCtx, "db">,
+  assetId: Id<"mediaAssets">,
+  source: string,
+) {
+  return await ctx.db
+    .query("mediaLyricTracks")
+    .withIndex("by_asset_and_source", (q) => q.eq("asset", assetId).eq("source", source))
+    .unique();
+}
 
 async function deleteAssetArtifacts(ctx: MutationCtx, asset: Doc<"mediaAssets">) {
   let deleted = 0;
@@ -48,7 +57,25 @@ async function deleteAssetArtifacts(ctx: MutationCtx, asset: Doc<"mediaAssets">)
   return deleted;
 }
 
+async function deleteLyricTracks(ctx: MutationCtx, assetId: Id<"mediaAssets">) {
+  const tracks = await ctx.db
+    .query("mediaLyricTracks")
+    .withIndex("by_asset", (q) => q.eq("asset", assetId))
+    .take(100);
+  let deletedArtifacts = 0;
+  for (const track of tracks) {
+    for (const artifactId of [track.textArtifactId, track.timedArtifactId]) {
+      if (artifactId && (await activities.deleteArtifact(ctx, artifactId as ArtifactId))) {
+        deletedArtifacts += 1;
+      }
+    }
+    await ctx.db.delete("mediaLyricTracks", track._id);
+  }
+  return deletedArtifacts;
+}
+
 async function deleteIncompleteAsset(ctx: MutationCtx, asset: Doc<"mediaAssets">) {
+  await deleteLyricTracks(ctx, asset._id);
   await deleteAssetArtifacts(ctx, asset);
   await ctx.db.delete(asset._id);
 }
@@ -179,7 +206,7 @@ export async function createOrJoinMedia(
       (!asset ||
         asset.state !== "ready" ||
         !asset.finalArtifactId ||
-        !asset.lyricsArtifactId ||
+        !(await getLyricTrack(ctx, asset._id, "generated"))?.textArtifactId ||
         !hasTerminalAnnotations(asset))
     )
       continue;
@@ -405,7 +432,8 @@ export async function deleteCompletedMediaAsset(ctx: MutationCtx, assetId: Id<"m
       await ctx.db.patch("mediaJobs", job._id, { asset: undefined });
     }
   }
-  const deletedStorageObjects = await deleteAssetArtifacts(ctx, asset);
+  const deletedStorageObjects =
+    (await deleteAssetArtifacts(ctx, asset)) + (await deleteLyricTracks(ctx, assetId));
   await ctx.db.delete("mediaAssets", assetId);
 
   return {
@@ -440,7 +468,7 @@ export async function claimAssetForJob(
     if (
       existing.state === "ready" &&
       existing.finalArtifactId &&
-      existing.lyricsArtifactId &&
+      (await getLyricTrack(ctx, existing._id, "generated"))?.textArtifactId &&
       hasTerminalAnnotations(existing)
     )
       return { mode: "cached" as const, assetId: existing._id };
@@ -479,8 +507,6 @@ export async function claimAssetForJob(
       instrumentalArtifactId: undefined,
       vocalsArtifactId: undefined,
       finalArtifactId: undefined,
-      lyricsArtifactId: undefined,
-      timedLyricsArtifactId: undefined,
       melodyArtifactId: undefined,
       annotationsArtifactId: undefined,
       midiArtifactId: undefined,
@@ -489,6 +515,7 @@ export async function claimAssetForJob(
       duration: args.duration,
       updatedAt: now,
     });
+    await deleteLyricTracks(ctx, existing._id);
     return { mode: "owner" as const, assetId: existing._id };
   }
 
@@ -538,24 +565,19 @@ export async function recordStageResultForJob(
               instrumentalArtifactId: artifactId,
               vocalsArtifactId: secondaryArtifactId,
             }
-          : kind === "transcribe"
-            ? {
-                lyricsArtifactId: artifactId,
-                timedLyricsArtifactId: secondaryArtifactId,
-              }
-            : kind === "analyzeMelody"
-              ? { melodyArtifactId: artifactId }
-              : kind === "assembleAnnotations"
-                ? {
-                    annotationsArtifactId: artifactId,
-                    midiArtifactId: secondaryArtifactId,
-                    musicXmlArtifactId: tertiaryArtifactId,
-                    annotationsState: "ready" as const,
-                    annotationsError: undefined,
-                  }
-                : kind === "mux"
-                  ? { finalArtifactId: artifactId }
-                  : {};
+          : kind === "analyzeMelody"
+            ? { melodyArtifactId: artifactId }
+            : kind === "assembleAnnotations"
+              ? {
+                  annotationsArtifactId: artifactId,
+                  midiArtifactId: secondaryArtifactId,
+                  musicXmlArtifactId: tertiaryArtifactId,
+                  annotationsState: "ready" as const,
+                  annotationsError: undefined,
+                }
+              : kind === "mux"
+                ? { finalArtifactId: artifactId }
+                : {};
   await ctx.db.patch("mediaAssets", asset._id, {
     ...patch,
     updatedAt: Date.now(),
@@ -600,9 +622,10 @@ export async function completeJobFromAsset(
   assetId: Id<"mediaAssets">,
 ) {
   const asset = await ctx.db.get("mediaAssets", assetId);
+  const generatedLyrics = asset ? await getLyricTrack(ctx, asset._id, "generated") : null;
   if (
     !asset?.finalArtifactId ||
-    !asset.lyricsArtifactId ||
+    !generatedLyrics?.textArtifactId ||
     !hasTerminalAnnotations(asset) ||
     asset.state !== "ready"
   )
@@ -612,7 +635,8 @@ export async function completeJobFromAsset(
 
 export async function finalizeAssetForJob(ctx: MutationCtx, jobId: Id<"mediaJobs">) {
   const { asset } = await requireOwnedAsset(ctx, jobId);
-  if (!asset.finalArtifactId || !asset.lyricsArtifactId) {
+  const generatedLyrics = await getLyricTrack(ctx, asset._id, "generated");
+  if (!asset.finalArtifactId || !generatedLyrics?.textArtifactId) {
     throw new Error("Media asset is missing its final video or WebVTT lyrics");
   }
   if (!hasTerminalAnnotations(asset)) {

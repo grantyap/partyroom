@@ -21,6 +21,7 @@ import type * as media_activities from "../media/activities.js";
 import type * as media_activityCompletion from "../media/activityCompletion.js";
 import type * as media_crypto from "../media/crypto.js";
 import type * as media_jobs from "../media/jobs.js";
+import type * as media_lrclib from "../media/lrclib.js";
 import type * as media_pipeline from "../media/pipeline.js";
 import type * as media_progress from "../media/progress.js";
 import type * as media_service from "../media/service.js";
@@ -49,6 +50,7 @@ declare const fullApi: ApiFromModules<{
   "media/activityCompletion": typeof media_activityCompletion;
   "media/crypto": typeof media_crypto;
   "media/jobs": typeof media_jobs;
+  "media/lrclib": typeof media_lrclib;
   "media/pipeline": typeof media_pipeline;
   "media/progress": typeof media_progress;
   "media/service": typeof media_service;

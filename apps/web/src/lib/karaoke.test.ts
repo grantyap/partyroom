@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
   findKaraokeCue,
-  groupLyricsIntoCues,
   karaokeWordProgress,
+  lyricsIntoCues,
   parseJamsDocument,
   parseKaraokeJams,
   parseLyricObservations,
@@ -157,13 +157,16 @@ describe("karaoke timing", () => {
   });
 
   test("groups words at sentence and timing boundaries", () => {
-    const cues = groupLyricsIntoCues([
-      { time: 0, duration: 0.3, value: "One" },
-      { time: 0.4, duration: 0.3, value: "two" },
-      { time: 0.8, duration: 0.3, value: "three." },
-      { time: 1.2, duration: 0.3, value: "Next" },
-      { time: 3.5, duration: 0.3, value: "Later" },
-    ]);
+    const cues = lyricsIntoCues(
+      [
+        { time: 0, duration: 0.3, value: "One" },
+        { time: 0.4, duration: 0.3, value: "two" },
+        { time: 0.8, duration: 0.3, value: "three." },
+        { time: 1.2, duration: 0.3, value: "Next" },
+        { time: 3.5, duration: 0.3, value: "Later" },
+      ],
+      "word",
+    );
 
     expect(cues.map((cue) => cue.words.map((word) => word.text))).toEqual([
       ["One", "two", "three."],
@@ -172,16 +175,45 @@ describe("karaoke timing", () => {
     ]);
   });
 
-  test("selects upcoming, active, and expired cues", () => {
-    const cues = groupLyricsIntoCues([
-      { time: 5, duration: 1, value: "First" },
-      { time: 8, duration: 1, value: "Second" },
+  test("normalizes line-synced lyrics into the shared cue shape", () => {
+    expect(
+      lyricsIntoCues(
+        [
+          { time: 4, duration: 2, value: " First line " },
+          { time: 7, duration: 3, value: "Second line" },
+        ],
+        "line",
+      ),
+    ).toEqual([
+      {
+        start: 4,
+        end: 6,
+        words: [{ time: 4, duration: 2, text: "First line" }],
+      },
+      {
+        start: 7,
+        end: 10,
+        words: [{ time: 7, duration: 3, text: "Second line" }],
+      },
     ]);
+  });
+
+  test("selects cues strictly within their offset-adjusted interval", () => {
+    const cues = lyricsIntoCues(
+      [
+        { time: 5, duration: 1, value: "First" },
+        { time: 8, duration: 1, value: "Second" },
+      ],
+      "line",
+    );
 
     expect(findKaraokeCue(cues, 0)).toBe(-1);
-    expect(findKaraokeCue(cues, 2)).toBe(0);
-    expect(findKaraokeCue(cues, 7)).toBe(0);
+    expect(findKaraokeCue(cues, 4.999)).toBe(-1);
+    expect(findKaraokeCue(cues, 5)).toBe(0);
+    expect(findKaraokeCue(cues, 6)).toBe(-1);
+    expect(findKaraokeCue(cues, 7)).toBe(-1);
     expect(findKaraokeCue(cues, 8)).toBe(1);
+    expect(findKaraokeCue(cues, 9)).toBe(-1);
     expect(findKaraokeCue(cues, 11)).toBe(-1);
   });
 

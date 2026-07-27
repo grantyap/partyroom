@@ -65,6 +65,65 @@ export const mediaPipeline = managedWorkflow
         return;
       }
 
+      const lrclibLyricsBranch = (async () => {
+        try {
+          await step.runMutation(
+            internal.media.jobs.recordLyricTrack,
+            {
+              jobId,
+              source: "lrclib",
+              label: "LRCLIB",
+              timing: "line",
+              state: "processing",
+            },
+            { name: "mark-lrclib-processing", inline: true },
+          );
+          const result = await step.runAction(
+            internal.media.lrclib.lookup,
+            {
+              jobId,
+              title: resolved.title ?? "Untitled media",
+              duration: resolved.duration,
+            },
+            {
+              name: "lookup-lrclib",
+              retry: { maxAttempts: 3, initialBackoffMs: 1_000, base: 2 },
+            },
+          );
+          await step.runMutation(
+            internal.media.jobs.recordLyricTrack,
+            {
+              jobId,
+              source: "lrclib",
+              label: "LRCLIB",
+              timing: "line",
+              state: result.state,
+              observations: result.observations,
+              metadata: {
+                providerId: result.id === undefined ? undefined : String(result.id),
+                trackName: result.trackName,
+                artistName: result.artistName,
+                albumName: result.albumName,
+              },
+            },
+            { name: "record-lrclib", inline: true },
+          );
+        } catch (error) {
+          await step.runMutation(
+            internal.media.jobs.recordLyricTrack,
+            {
+              jobId,
+              source: "lrclib",
+              label: "LRCLIB",
+              timing: "line",
+              state: "failed",
+              errorMessage: error instanceof Error ? error.message : String(error),
+            },
+            { name: "mark-lrclib-failed", inline: true },
+          );
+        }
+      })();
+
       const download = await runActivity("download");
       await step.runMutation(
         internal.media.jobs.recordStageResult,
@@ -100,12 +159,15 @@ export const mediaPipeline = managedWorkflow
       const transcriptionBranch = (async () => {
         const result = await runActivity("transcribe");
         await step.runMutation(
-          internal.media.jobs.recordStageResult,
+          internal.media.jobs.recordLyricTrack,
           {
             jobId,
-            kind: "transcribe",
-            artifactId: result.lyricsArtifactId,
-            secondaryArtifactId: result.timedLyricsArtifactId,
+            source: "generated",
+            label: "Generated",
+            timing: "word",
+            state: "ready",
+            textArtifactId: result.lyricsArtifactId,
+            timedArtifactId: result.timedLyricsArtifactId,
           },
           { name: "record-transcribe", inline: true },
         );
@@ -150,7 +212,39 @@ export const mediaPipeline = managedWorkflow
         return result;
       })();
 
-      const [, melody] = await Promise.all([transcriptionBranch, melodyBranch, muxBranch]);
+      const [, melody] = await Promise.all([
+        transcriptionBranch,
+        melodyBranch,
+        muxBranch,
+        lrclibLyricsBranch,
+      ]);
+
+      try {
+        const inputs = await step.runQuery(
+          internal.media.jobs.getLyricOffsetSuggestionInputs,
+          { jobId },
+          { name: "prepare-lyric-offset", inline: true },
+        );
+        if (inputs) {
+          const suggestedOffsetMs = await step.runAction(
+            internal.media.lrclib.suggestOffset,
+            { jobId, ...inputs },
+            { name: "suggest-lyric-offset" },
+          );
+          if (suggestedOffsetMs !== null) {
+            await step.runMutation(
+              internal.media.jobs.recordSuggestedLyricOffset,
+              { jobId, source: "lrclib", suggestedOffsetMs },
+              { name: "record-lyric-offset", inline: true },
+            );
+          }
+        }
+      } catch (error) {
+        console.warn("[lrclib] Unable to suggest lyrics offset", {
+          jobId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
 
       if (melody) {
         try {

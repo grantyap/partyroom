@@ -95,4 +95,38 @@ describe("media pipeline progress", () => {
       completedAt: 75_000,
     });
   });
+
+  test("reports the early LRCLIB workflow step independently", () => {
+    const steps = mediaPipelineStepStatuses({
+      hasAsset: true,
+      lrclibLyricsState: "processing",
+      lrclibLyricsTiming: { startedAt: 12_000 },
+      asset: null,
+      activities: [],
+      timings: [],
+    });
+
+    expect(steps.find((step) => step.kind === "fetchLyrics")).toMatchObject({
+      state: "running",
+      progress: 0,
+      startedAt: 12_000,
+    });
+  });
+
+  test("retains LRCLIB completion timing", () => {
+    const steps = mediaPipelineStepStatuses({
+      hasAsset: true,
+      lrclibLyricsState: "ready",
+      lrclibLyricsTiming: { startedAt: 12_000, completedAt: 14_500 },
+      asset: null,
+      activities: [],
+      timings: [],
+    });
+
+    expect(steps.find((step) => step.kind === "fetchLyrics")).toMatchObject({
+      state: "completed",
+      startedAt: 12_000,
+      completedAt: 14_500,
+    });
+  });
 });

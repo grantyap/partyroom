@@ -33,6 +33,7 @@
 	function stageLabel(stage: string) {
 		const labels: Record<string, string> = {
 			resolve: "Resolve source",
+			fetchLyrics: "Fetch synced lyrics",
 			download: "Download source",
 			extractAudio: "Extract audio",
 			separate: "Separate stems",
@@ -276,9 +277,7 @@
 					{#if media.finalUrl}
 						<KaraokeVideo
 							src={media.finalUrl}
-							timedLyricsUrl={media.timedLyricsUrl}
-							annotationsUrl={media.annotationsUrl}
-							captionsUrl={media.lyricsUrl}
+							lyrics={media.lyrics}
 							title={media.title}
 						/>
 					{/if}

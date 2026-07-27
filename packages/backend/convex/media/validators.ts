@@ -20,6 +20,26 @@ export const annotationState = v.union(
   v.literal("failed"),
 );
 
+export const lyricTrackState = v.union(
+  v.literal("processing"),
+  v.literal("ready"),
+  v.literal("not_found"),
+  v.literal("failed"),
+);
+
+export const lyricObservation = v.object({
+  time: v.number(),
+  duration: v.number(),
+  value: v.string(),
+});
+
+export const lyricTrackMetadata = v.object({
+  providerId: v.optional(v.string()),
+  trackName: v.optional(v.string()),
+  artistName: v.optional(v.string()),
+  albumName: v.optional(v.string()),
+});
+
 export const mediaOperationKind = v.union(
   v.literal("resolve"),
   v.literal("download"),

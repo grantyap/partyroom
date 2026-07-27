@@ -401,11 +401,14 @@ describe("media jobs", () => {
       artifactId: instrumental,
       secondaryArtifactId: vocals,
     });
-    await t.mutation(internal.media.jobs.recordStageResult, {
+    await t.mutation(internal.media.jobs.recordLyricTrack, {
       jobId,
-      kind: "transcribe",
-      artifactId: lyrics,
-      secondaryArtifactId: timedLyrics,
+      source: "generated",
+      label: "Generated",
+      timing: "word",
+      state: "ready",
+      textArtifactId: lyrics,
+      timedArtifactId: timedLyrics,
     });
     await t.mutation(internal.media.jobs.recordStageResult, {
       jobId,
@@ -420,20 +423,34 @@ describe("media jobs", () => {
       tertiaryArtifactId: musicXml,
     });
 
-    const asset = await t.run(async (ctx) => {
+    const { asset, generatedLyrics } = await t.run(async (ctx) => {
       const job = await ctx.db.get("mediaJobs", jobId);
-      return job?.asset ? await ctx.db.get("mediaAssets", job.asset) : null;
+      const asset = job?.asset ? await ctx.db.get("mediaAssets", job.asset) : null;
+      const generatedLyrics = asset
+        ? await ctx.db
+            .query("mediaLyricTracks")
+            .withIndex("by_asset_and_source", (q) =>
+              q.eq("asset", asset._id).eq("source", "generated"),
+            )
+            .unique()
+        : null;
+      return { asset, generatedLyrics };
     });
     expect(asset).toMatchObject({
       instrumentalArtifactId: instrumental,
       vocalsArtifactId: vocals,
-      lyricsArtifactId: lyrics,
-      timedLyricsArtifactId: timedLyrics,
       melodyArtifactId: melody,
       annotationsArtifactId: annotations,
       midiArtifactId: midi,
       musicXmlArtifactId: musicXml,
       annotationsState: "ready",
+    });
+    expect(generatedLyrics).toMatchObject({
+      source: "generated",
+      textArtifactId: lyrics,
+      timedArtifactId: timedLyrics,
+      timing: "word",
+      state: "ready",
     });
   });
 
@@ -479,10 +496,13 @@ describe("media jobs", () => {
         ctx.storage.store(new Blob(["video"])),
       ]),
     );
-    await t.mutation(internal.media.jobs.recordStageResult, {
+    await t.mutation(internal.media.jobs.recordLyricTrack, {
       jobId: first.jobId,
-      kind: "transcribe",
-      artifactId: lyrics,
+      source: "generated",
+      label: "Generated",
+      timing: "word",
+      state: "ready",
+      textArtifactId: lyrics,
     });
     await t.mutation(internal.media.jobs.recordStageResult, {
       jobId: first.jobId,

@@ -22,12 +22,19 @@ import {
   deleteCompletedMediaAsset,
   failMediaJob,
   finalizeAssetForJob,
+  getLyricTrack,
   markJobAnnotationsFailed,
   recordStageResultForJob,
   requeueRoomMedia,
   removeRoomMedia,
 } from "./service";
-import { mediaOperationKind, type OperationKind } from "./validators";
+import {
+  lyricTrackMetadata,
+  lyricTrackState,
+  lyricObservation,
+  mediaOperationKind,
+  type OperationKind,
+} from "./validators";
 
 async function mediaArtifactUrl(ctx: QueryCtx, artifactId: string | undefined) {
   return artifactId ? await activities.getArtifactUrl(ctx, artifactId as ArtifactId) : null;
@@ -209,6 +216,104 @@ export const markAnnotationsFailed = internalMutation({
     await markJobAnnotationsFailed(ctx, jobId, errorMessage),
 });
 
+export const recordLyricTrack = internalMutation({
+  args: {
+    jobId: v.id("mediaJobs"),
+    source: v.string(),
+    label: v.string(),
+    timing: v.union(v.literal("word"), v.literal("line")),
+    state: lyricTrackState,
+    textArtifactId: v.optional(v.string()),
+    timedArtifactId: v.optional(v.string()),
+    observations: v.optional(v.array(lyricObservation)),
+    metadata: v.optional(lyricTrackMetadata),
+    errorMessage: v.optional(v.string()),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const job = await ctx.db.get("mediaJobs", args.jobId);
+    if (!job?.asset) throw new Error("Media job has no claimed asset");
+    const asset = await ctx.db.get("mediaAssets", job.asset);
+    if (!asset || asset.activeJob !== job._id) {
+      throw new Error("Media job no longer owns its claimed asset");
+    }
+    const existing = await getLyricTrack(ctx, asset._id, args.source);
+    const now = Date.now();
+    const value = {
+      asset: asset._id,
+      source: args.source,
+      label: args.label,
+      timing: args.timing,
+      state: args.state,
+      textArtifactId: args.textArtifactId,
+      timedArtifactId: args.timedArtifactId,
+      observations: args.observations,
+      metadata: args.metadata,
+      error: args.errorMessage?.slice(0, 2_000),
+      updatedAt: now,
+    };
+    if (existing) await ctx.db.patch("mediaLyricTracks", existing._id, value);
+    else await ctx.db.insert("mediaLyricTracks", { ...value, createdAt: now });
+    return null;
+  },
+});
+
+export const getLyricOffsetSuggestionInputs = internalQuery({
+  args: { jobId: v.id("mediaJobs") },
+  returns: v.union(
+    v.null(),
+    v.object({
+      generatedLyricsUrl: v.string(),
+      referenceObservations: v.array(lyricObservation),
+    }),
+  ),
+  handler: async (ctx, { jobId }) => {
+    const job = await ctx.db.get("mediaJobs", jobId);
+    if (!job?.asset) return null;
+    const asset = await ctx.db.get("mediaAssets", job.asset);
+    if (!asset || asset.activeJob !== job._id) return null;
+    const [generated, lrclib] = await Promise.all([
+      getLyricTrack(ctx, asset._id, "generated"),
+      getLyricTrack(ctx, asset._id, "lrclib"),
+    ]);
+    if (
+      generated?.state !== "ready" ||
+      !generated.timedArtifactId ||
+      lrclib?.state !== "ready" ||
+      !lrclib.observations?.length
+    ) {
+      return null;
+    }
+    const generatedLyricsUrl = await mediaArtifactUrl(ctx, generated.timedArtifactId);
+    return generatedLyricsUrl
+      ? { generatedLyricsUrl, referenceObservations: lrclib.observations }
+      : null;
+  },
+});
+
+export const recordSuggestedLyricOffset = internalMutation({
+  args: {
+    jobId: v.id("mediaJobs"),
+    source: v.string(),
+    suggestedOffsetMs: v.number(),
+  },
+  returns: v.null(),
+  handler: async (ctx, { jobId, source, suggestedOffsetMs }) => {
+    const job = await ctx.db.get("mediaJobs", jobId);
+    if (!job?.asset) return null;
+    const asset = await ctx.db.get("mediaAssets", job.asset);
+    if (!asset || asset.activeJob !== job._id) return null;
+    const track = await getLyricTrack(ctx, asset._id, source);
+    if (track) {
+      await ctx.db.patch("mediaLyricTracks", track._id, {
+        suggestedOffsetMs,
+        updatedAt: Date.now(),
+      });
+    }
+    return null;
+  },
+});
+
 export const completeFromAsset = internalMutation({
   args: { jobId: v.id("mediaJobs"), assetId: v.id("mediaAssets") },
   handler: async (ctx, { jobId, assetId }) => await completeJobFromAsset(ctx, jobId, assetId),
@@ -240,12 +345,30 @@ export const getJob = query({
     const job = await ctx.db.get("mediaJobs", jobId);
     if (!job) throw new Error("Media job not found");
     const asset = job.asset ? await ctx.db.get("mediaAssets", job.asset) : null;
+    const lyricTracks = asset
+      ? await ctx.db
+          .query("mediaLyricTracks")
+          .withIndex("by_asset", (q) => q.eq("asset", asset._id))
+          .take(20)
+      : [];
+    const generatedLyrics = lyricTracks.find(({ source }) => source === "generated");
+    const lrclibLyrics = lyricTracks.find(({ source }) => source === "lrclib");
     const activities = await activityStatuses(ctx, job.activeActivities);
     return {
       _id: job._id,
       state: job.state,
       steps: mediaPipelineStepStatuses({
         hasAsset: !!job.asset,
+        hasGeneratedLyrics: !!generatedLyrics?.timedArtifactId,
+        lrclibLyricsState: lrclibLyrics?.state,
+        lrclibLyricsTiming: lrclibLyrics
+          ? {
+              startedAt: lrclibLyrics.createdAt,
+              ...(lrclibLyrics.state === "processing"
+                ? {}
+                : { completedAt: lrclibLyrics.updatedAt }),
+            }
+          : undefined,
         asset,
         activities,
         timings: job.stepTimings ?? [],
@@ -258,7 +381,6 @@ export const getJob = query({
             title: asset.title,
             duration: asset.duration,
             finalArtifactId: asset.finalArtifactId,
-            lyricsArtifactId: asset.lyricsArtifactId,
             annotationsArtifactId: asset.annotationsArtifactId,
             midiArtifactId: asset.midiArtifactId,
             musicXmlArtifactId: asset.musicXmlArtifactId,
@@ -285,13 +407,60 @@ export const listRoomMedia = query({
         const job = await ctx.db.get("mediaJobs", association.job);
         const assetId = association.asset ?? job?.asset;
         const asset = assetId ? await ctx.db.get("mediaAssets", assetId) : null;
+        const lyricTracks = asset
+          ? await ctx.db
+              .query("mediaLyricTracks")
+              .withIndex("by_asset", (q) => q.eq("asset", asset._id))
+              .take(20)
+          : [];
         const activities = await activityStatuses(ctx, job?.activeActivities);
+        const generatedLyrics = lyricTracks.find(({ source }) => source === "generated");
+        const lrclibLyrics = lyricTracks.find(({ source }) => source === "lrclib");
+        const annotationsUrl = asset
+          ? await mediaArtifactUrl(ctx, asset.annotationsArtifactId)
+          : null;
+        const lyrics = (
+          await Promise.all(
+            lyricTracks.map(async (track) => {
+              if (track.state !== "ready") return null;
+              const timedUrl = track.observations?.length
+                ? null
+                : await mediaArtifactUrl(ctx, track.timedArtifactId);
+              if (!track.observations?.length && !timedUrl) return null;
+              return {
+                id: track.source,
+                label: track.label,
+                timing: track.timing,
+                suggestedOffsetMs: track.suggestedOffsetMs,
+                content: track.observations?.length
+                  ? { kind: "inline" as const, observations: track.observations }
+                  : { kind: "url" as const, url: timedUrl! },
+                captionsUrl: await mediaArtifactUrl(ctx, track.textArtifactId),
+                title:
+                  [track.metadata?.trackName, track.metadata?.artistName]
+                    .filter(Boolean)
+                    .join(" — ") ||
+                  (track.source === "generated" ? "Automatically generated lyrics" : track.label),
+              };
+            }),
+          )
+        ).filter((track) => track !== null);
         return {
           _id: association._id,
           jobId: association.job,
           state: job?.state ?? "failed",
           steps: mediaPipelineStepStatuses({
             hasAsset: !!job?.asset,
+            hasGeneratedLyrics: !!generatedLyrics?.timedArtifactId,
+            lrclibLyricsState: lrclibLyrics?.state,
+            lrclibLyricsTiming: lrclibLyrics
+              ? {
+                  startedAt: lrclibLyrics.createdAt,
+                  ...(lrclibLyrics.state === "processing"
+                    ? {}
+                    : { completedAt: lrclibLyrics.updatedAt }),
+                }
+              : undefined,
             asset,
             activities,
             timings: job?.stepTimings ?? [],
@@ -302,9 +471,8 @@ export const listRoomMedia = query({
           sourceUrl: asset ? await mediaArtifactUrl(ctx, asset.sourceArtifactId) : null,
           instrumentalUrl: asset ? await mediaArtifactUrl(ctx, asset.instrumentalArtifactId) : null,
           finalUrl: asset ? await mediaArtifactUrl(ctx, asset.finalArtifactId) : null,
-          lyricsUrl: asset ? await mediaArtifactUrl(ctx, asset.lyricsArtifactId) : null,
-          timedLyricsUrl: asset ? await mediaArtifactUrl(ctx, asset.timedLyricsArtifactId) : null,
-          annotationsUrl: asset ? await mediaArtifactUrl(ctx, asset.annotationsArtifactId) : null,
+          lyrics,
+          annotationsUrl,
           midiUrl: asset ? await mediaArtifactUrl(ctx, asset.midiArtifactId) : null,
           musicXmlUrl: asset ? await mediaArtifactUrl(ctx, asset.musicXmlArtifactId) : null,
           annotationsState: asset?.annotationsState ?? "failed",

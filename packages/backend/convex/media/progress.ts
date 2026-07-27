@@ -1,7 +1,10 @@
 import type { OperationKind } from "./validators";
 
-export const mediaPipelineSteps: readonly OperationKind[] = [
+export type PipelineStepKind = OperationKind | "fetchLyrics";
+
+export const mediaPipelineSteps: readonly PipelineStepKind[] = [
   "resolve",
+  "fetchLyrics",
   "download",
   "extractAudio",
   "separate",
@@ -26,8 +29,6 @@ type ProgressAsset = {
   extractedAudioArtifactId?: unknown;
   instrumentalArtifactId?: unknown;
   vocalsArtifactId?: unknown;
-  lyricsArtifactId?: unknown;
-  timedLyricsArtifactId?: unknown;
   melodyArtifactId?: unknown;
   finalArtifactId?: unknown;
   annotationsState?: "processing" | "ready" | "failed";
@@ -36,7 +37,7 @@ type ProgressAsset = {
 export type PipelineStepState = "pending" | "queued" | "running" | "completed" | "failed";
 
 export type PipelineStepStatus = {
-  kind: OperationKind;
+  kind: PipelineStepKind;
   state: PipelineStepState;
   progress: number;
   message?: string;
@@ -48,7 +49,7 @@ export type PipelineStepStatus = {
 function stepStatus(
   status: Omit<PipelineStepStatus, "message" | "attempt" | "startedAt" | "completedAt">,
   activity?: ActivityProgress,
-  timing?: { startedAt: number; completedAt: number },
+  timing?: { startedAt: number; completedAt?: number },
 ): PipelineStepStatus {
   return {
     ...status,
@@ -61,21 +62,25 @@ function stepStatus(
         : {}),
     ...(activity?.completedAt !== undefined
       ? { completedAt: activity.completedAt }
-      : timing
+      : timing?.completedAt !== undefined
         ? { completedAt: timing.completedAt }
         : {}),
   };
 }
 
-function completedSteps(hasAsset: boolean, asset: ProgressAsset | null) {
+function completedSteps(
+  hasAsset: boolean,
+  hasGeneratedLyrics: boolean,
+  asset: ProgressAsset | null,
+) {
   const annotationsTerminal =
     asset?.annotationsState === "ready" || asset?.annotationsState === "failed";
-  return new Set<OperationKind>([
+  return new Set<PipelineStepKind>([
     ...(hasAsset ? (["resolve"] as const) : []),
     ...(asset?.sourceArtifactId ? (["download"] as const) : []),
     ...(asset?.extractedAudioArtifactId ? (["extractAudio"] as const) : []),
     ...(asset?.instrumentalArtifactId && asset.vocalsArtifactId ? (["separate"] as const) : []),
-    ...(asset?.lyricsArtifactId && asset.timedLyricsArtifactId ? (["transcribe"] as const) : []),
+    ...(hasGeneratedLyrics ? (["transcribe"] as const) : []),
     ...(asset?.melodyArtifactId || asset?.annotationsState === "failed"
       ? (["analyzeMelody"] as const)
       : []),
@@ -86,11 +91,17 @@ function completedSteps(hasAsset: boolean, asset: ProgressAsset | null) {
 
 export function mediaPipelineStepStatuses({
   hasAsset,
+  hasGeneratedLyrics = false,
+  lrclibLyricsState,
+  lrclibLyricsTiming,
   asset,
   activities,
   timings,
 }: {
   hasAsset: boolean;
+  hasGeneratedLyrics?: boolean;
+  lrclibLyricsState?: "processing" | "ready" | "not_found" | "failed";
+  lrclibLyricsTiming?: { startedAt: number; completedAt?: number };
   asset: ProgressAsset | null;
   activities: ActivityProgress[];
   timings: Array<{
@@ -99,7 +110,7 @@ export function mediaPipelineStepStatuses({
     completedAt: number;
   }>;
 }): PipelineStepStatus[] {
-  const completed = completedSteps(hasAsset, asset);
+  const completed = completedSteps(hasAsset, hasGeneratedLyrics, asset);
   const timingByKind = new Map(timings.map((timing) => [timing.kind, timing]));
   const activeByKind = new Map<OperationKind, ActivityProgress>();
   for (const activity of activities) {
@@ -110,6 +121,18 @@ export function mediaPipelineStepStatuses({
   }
 
   return mediaPipelineSteps.map((kind) => {
+    if (kind === "fetchLyrics") {
+      if (lrclibLyricsState === "processing") {
+        return stepStatus({ kind, state: "running", progress: 0 }, undefined, lrclibLyricsTiming);
+      }
+      if (lrclibLyricsState === "failed" || lrclibLyricsState === "not_found") {
+        return stepStatus({ kind, state: "failed", progress: 1 }, undefined, lrclibLyricsTiming);
+      }
+      if (lrclibLyricsState === "ready") {
+        return stepStatus({ kind, state: "completed", progress: 1 }, undefined, lrclibLyricsTiming);
+      }
+      return { kind, state: "pending", progress: 0 };
+    }
     const activity = activeByKind.get(kind);
     const timing = timingByKind.get(kind);
     const annotationFailed =

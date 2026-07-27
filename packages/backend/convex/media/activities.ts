@@ -7,7 +7,7 @@ import { env, internalMutation } from "../_generated/server";
 import { activities } from "../activities/workflowManager";
 import { mediaOperationKind } from "./validators";
 import { replaceUrlOrigin } from "./urls";
-import { getActivityJobState, recordScheduledActivity } from "./service";
+import { getActivityJobState, getLyricTrack, recordScheduledActivity } from "./service";
 
 async function artifactUrl(
   ctx: Parameters<typeof activities.getArtifactUrl>[0],
@@ -31,6 +31,10 @@ export const schedule = internalMutation({
       if (!asset) throw new Error("Media job has no claimed asset");
       return asset;
     };
+    const generatedLyrics =
+      kind === "assembleAnnotations" && asset
+        ? await getLyricTrack(ctx, asset._id, "generated")
+        : null;
 
     const input =
       kind === "resolve" || kind === "download"
@@ -54,7 +58,7 @@ export const schedule = internalMutation({
                   instrumentalUrl: await artifactUrl(ctx, requireAsset().instrumentalArtifactId),
                 }
               : {
-                  lyricsUrl: await artifactUrl(ctx, requireAsset().timedLyricsArtifactId),
+                  lyricsUrl: await artifactUrl(ctx, generatedLyrics?.timedArtifactId),
                   melodyUrl: await artifactUrl(ctx, requireAsset().melodyArtifactId),
                   duration: requireAsset().duration!,
                   extractor: requireAsset().extractor,
