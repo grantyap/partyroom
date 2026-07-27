@@ -13,7 +13,7 @@ import {
 import { activities, managedWorkflow } from "../activities/workflowManager";
 import { getCurrentUserImpl } from "../auth";
 import { userHasRoomPermission } from "../rooms";
-import { mediaPipelineProgress } from "./progress";
+import { mediaPipelineStepStatuses } from "./progress";
 import {
   attachWorkflowToJob,
   claimAssetForJob,
@@ -24,6 +24,7 @@ import {
   finalizeAssetForJob,
   markJobAnnotationsFailed,
   recordStageResultForJob,
+  requeueRoomMedia,
   removeRoomMedia,
 } from "./service";
 import { mediaOperationKind, type OperationKind } from "./validators";
@@ -49,6 +50,8 @@ async function activityStatuses(
         attempt: status?.attempt ?? 0,
         progress: status?.progress,
         message: status?.progressMessage,
+        startedAt: status?.startedAt,
+        completedAt: status?.completedAt,
       };
     }),
   );
@@ -142,6 +145,26 @@ export const removeFromRoom = mutation({
   },
 });
 
+export const reprocess = mutation({
+  args: { roomId: v.id("rooms"), roomMediaId: v.id("roomMedia") },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await requireRoomAccess(ctx, args.roomId);
+    const jobId = await requeueRoomMedia(ctx, args);
+    const workflowId = await managedWorkflow.start(
+      ctx,
+      internal.media.pipeline.mediaPipeline,
+      { jobId },
+      {
+        onComplete: internal.media.pipeline.onPipelineComplete,
+        context: { jobId },
+      },
+    );
+    await attachWorkflowToJob(ctx, jobId, workflowId);
+    return null;
+  },
+});
+
 export const deleteCompletedAsset = internalMutation({
   args: { assetId: v.id("mediaAssets") },
   returns: v.object({
@@ -221,14 +244,12 @@ export const getJob = query({
     return {
       _id: job._id,
       state: job.state,
-      stage: job.stage,
-      progress: mediaPipelineProgress({
-        jobState: job.state,
+      steps: mediaPipelineStepStatuses({
         hasAsset: !!job.asset,
         asset,
         activities,
+        timings: job.stepTimings ?? [],
       }),
-      activities,
       errorCode: job.errorCode,
       errorMessage: job.errorMessage,
       asset: asset
@@ -269,16 +290,12 @@ export const listRoomMedia = query({
           _id: association._id,
           jobId: association.job,
           state: job?.state ?? "failed",
-          stage: job?.stage ?? "failed",
-          progress: job
-            ? mediaPipelineProgress({
-                jobState: job.state,
-                hasAsset: !!job.asset,
-                asset,
-                activities,
-              })
-            : 0,
-          activities,
+          steps: mediaPipelineStepStatuses({
+            hasAsset: !!job?.asset,
+            asset,
+            activities,
+            timings: job?.stepTimings ?? [],
+          }),
           title: asset?.title,
           duration: asset?.duration,
           errorMessage: job?.errorMessage,

@@ -1,5 +1,6 @@
 import json
 import math
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -71,11 +72,18 @@ def frames_to_notes(frames: list[PitchFrame], frame_duration: float) -> list[Not
     return notes
 
 
-def analyze_audio(audio_path: Path, *, hop_length: int = 512) -> dict[str, Any]:
+def analyze_audio(
+    audio_path: Path,
+    *,
+    hop_length: int = 512,
+    stage_changed: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
     import librosa
 
     sample_rate = 22_050
     audio, _ = librosa.load(audio_path, sr=sample_rate, mono=True)
+    if stage_changed is not None:
+        stage_changed("decoded")
     frequencies, voiced_flags, voiced_probabilities = librosa.pyin(
         audio,
         fmin=librosa.note_to_hz("C2"),
@@ -85,6 +93,8 @@ def analyze_audio(audio_path: Path, *, hop_length: int = 512) -> dict[str, Any]:
         hop_length=hop_length,
         fill_na=0.0,
     )
+    if stage_changed is not None:
+        stage_changed("pitch")
     times = librosa.times_like(frequencies, sr=sample_rate, hop_length=hop_length)
     frames = [
         PitchFrame(
@@ -99,6 +109,8 @@ def analyze_audio(audio_path: Path, *, hop_length: int = 512) -> dict[str, Any]:
     ]
     frame_duration = hop_length / sample_rate
     notes = frames_to_notes(frames, frame_duration)
+    if stage_changed is not None:
+        stage_changed("notes")
     audio_duration = len(audio) / sample_rate
     bounded_notes = [
         Note(
@@ -129,11 +141,20 @@ def analyze_audio(audio_path: Path, *, hop_length: int = 512) -> dict[str, Any]:
     }
 
 
-def write_melody_analysis(audio_path: Path, output_path: Path) -> None:
+def write_melody_analysis(
+    audio_path: Path,
+    output_path: Path,
+    stage_changed: Callable[[str], None] | None = None,
+) -> None:
     output_path.write_text(
         json.dumps(
-            analyze_audio(audio_path), ensure_ascii=False, indent=2, sort_keys=True
+            analyze_audio(audio_path, stage_changed=stage_changed),
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
         )
         + "\n",
         encoding="utf-8",
     )
+    if stage_changed is not None:
+        stage_changed("written")

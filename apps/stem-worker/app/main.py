@@ -1,14 +1,15 @@
-import json
 import os
 import shutil
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 import httpx
 from fastapi import FastAPI
-from partyroom_activity_worker import ActivityContext, Worker
+from partyroom_activity_worker import ActivityContext, Worker, replace_url_origin
 
 from .activities_generated import SeparateInput, SeparateOutput, separate
 from .model import ensure_model
+from .separation import run_separator
 
 WORK_DIR = Path(os.getenv("WORK_DIR", "/work"))
 MODEL_DIR = Path(os.getenv("MODEL_DIR", "/models"))
@@ -16,6 +17,7 @@ MODEL = os.getenv("STEM_MODEL", "Kim_Vocal_2.onnx")
 MAX_BYTES = int(os.getenv("MAX_MEDIA_BYTES", str(2 * 1024 * 1024 * 1024)))
 API_URL = os.environ["ACTIVITY_WORKER_API_URL"].rstrip("/") + "/"
 TOKEN = os.environ["ACTIVITY_WORKER_TOKEN"]
+ARTIFACT_ORIGIN = os.getenv("ACTIVITY_ARTIFACT_ORIGIN")
 
 worker = Worker(
     api_url=API_URL,
@@ -23,22 +25,38 @@ worker = Worker(
     worker_id=os.getenv("ACTIVITY_WORKER_ID", "stem-worker"),
     task_queue="stems",
     max_concurrent_activities=int(os.getenv("STEM_WORKER_CONCURRENCY", "1")),
+    artifact_origin=ARTIFACT_ORIGIN,
 )
 
 
-async def download(url: str, destination: Path) -> None:
+def artifact_url(url: str) -> str:
+    return replace_url_origin(url, ARTIFACT_ORIGIN) if ARTIFACT_ORIGIN else url
+
+
+async def download(
+    url: str,
+    destination: Path,
+    on_progress: Callable[[int, int], Awaitable[None]] | None = None,
+) -> None:
     size = 0
-    async with httpx.AsyncClient(timeout=httpx.Timeout(60, read=300), follow_redirects=True) as client:
-        async with client.stream("GET", url) as response:
+    async with httpx.AsyncClient(
+        timeout=httpx.Timeout(60, read=300), follow_redirects=True
+    ) as client:
+        async with client.stream("GET", artifact_url(url)) as response:
             response.raise_for_status()
-            if int(response.headers.get("content-length", "0")) > MAX_BYTES:
+            total = int(response.headers.get("content-length", "0"))
+            if total > MAX_BYTES:
                 raise ValueError("Input exceeds MAX_MEDIA_BYTES")
+            if on_progress is not None:
+                await on_progress(0, total)
             with destination.open("wb") as output:
                 async for chunk in response.aiter_bytes():
                     size += len(chunk)
                     if size > MAX_BYTES:
                         raise ValueError("Input exceeds MAX_MEDIA_BYTES")
                     output.write(chunk)
+                    if on_progress is not None:
+                        await on_progress(size, total)
 
 
 @worker.activity(separate)
@@ -50,16 +68,15 @@ async def separate_activity(context: ActivityContext, activity: SeparateInput) -
     directory.mkdir(parents=True, exist_ok=True)
     try:
         await context.report_progress(0, "Downloading extracted audio")
-        await download(activity.audio_url, input_path)
-        await context.report_progress(0.1, f"Preparing separation model {MODEL}")
-        await ensure_model(MODEL_DIR, MODEL, context.run_process)
-        await context.report_progress(0.15, f"Separating instrumental with {MODEL}")
-        result = await context.run_process(
-            "audio-separator", str(input_path), "--model_filename", MODEL,
-            "--model_file_dir", str(MODEL_DIR), "--output_dir", str(directory),
-            "--output_format", "FLAC", "--custom_output_names",
-            json.dumps({"Instrumental": "instrumental", "Vocals": "vocals"}),
+        await download(
+            activity.audio_url,
+            input_path,
+            context.progress_reporter(0, 0.25, "Downloading extracted audio"),
         )
+        await context.report_progress(0.25, f"Preparing separation model {MODEL}")
+        await ensure_model(MODEL_DIR, MODEL, context.run_process)
+        await context.report_progress(0.5, f"Separating stems with {MODEL}")
+        result = await run_separator(context, input_path, MODEL, MODEL_DIR, directory)
         output = (result.stdout + result.stderr).decode(errors="replace")
         if not output_path.exists():
             candidates = list(directory.glob("*Instrumental*.flac")) + list(directory.glob("*instrumental*.flac"))
@@ -75,15 +92,25 @@ async def separate_activity(context: ActivityContext, activity: SeparateInput) -
                     f"audio-separator did not produce a vocal stem: {output[-4000:]}"
                 )
             vocals_path = candidates[0]
-        await context.report_progress(0.95, "Uploading separated stems")
+        await context.report_progress(0.75, "Uploading separated stems")
         if output_path.stat().st_size > MAX_BYTES or vocals_path.stat().st_size > MAX_BYTES:
             raise ValueError("Output exceeds MAX_MEDIA_BYTES")
         return SeparateOutput(
             instrumental_artifact_id=await context.upload_artifact(
-                "instrumentalArtifactId", output_path, "audio/flac"
+                "instrumentalArtifactId",
+                output_path,
+                "audio/flac",
+                on_progress=context.progress_reporter(
+                    0.75, 0.875, "Uploading instrumental stem"
+                ),
             ),
             vocals_artifact_id=await context.upload_artifact(
-                "vocalsArtifactId", vocals_path, "audio/flac"
+                "vocalsArtifactId",
+                vocals_path,
+                "audio/flac",
+                on_progress=context.progress_reporter(
+                    0.875, 1, "Uploading vocal stem"
+                ),
             ),
             content_type="audio/flac",
             model=MODEL,

@@ -97,9 +97,34 @@ export const mediaPipeline = managedWorkflow
         { name: "record-separate", inline: true },
       );
 
-      const [transcription, melody, mux] = await Promise.all([
-        runActivity("transcribe"),
-        runActivity("analyzeMelody").catch(async (error) => {
+      const transcriptionBranch = (async () => {
+        const result = await runActivity("transcribe");
+        await step.runMutation(
+          internal.media.jobs.recordStageResult,
+          {
+            jobId,
+            kind: "transcribe",
+            artifactId: result.lyricsArtifactId,
+            secondaryArtifactId: result.timedLyricsArtifactId,
+          },
+          { name: "record-transcribe", inline: true },
+        );
+        return result;
+      })();
+      const melodyBranch = (async () => {
+        try {
+          const result = await runActivity("analyzeMelody");
+          await step.runMutation(
+            internal.media.jobs.recordStageResult,
+            {
+              jobId,
+              kind: "analyzeMelody",
+              artifactId: result.artifactId,
+            },
+            { name: "record-analyzeMelody", inline: true },
+          );
+          return result;
+        } catch (error) {
           await step.runMutation(
             internal.media.jobs.markAnnotationsFailed,
             {
@@ -109,39 +134,25 @@ export const mediaPipeline = managedWorkflow
             { name: "mark-melody-failed", inline: true },
           );
           return null;
-        }),
-        runActivity("mux"),
-      ]);
-      await step.runMutation(
-        internal.media.jobs.recordStageResult,
-        {
-          jobId,
-          kind: "transcribe",
-          artifactId: transcription.lyricsArtifactId,
-          secondaryArtifactId: transcription.timedLyricsArtifactId,
-        },
-        { name: "record-transcribe", inline: true },
-      );
-      await step.runMutation(
-        internal.media.jobs.recordStageResult,
-        {
-          jobId,
-          kind: "mux",
-          artifactId: mux.artifactId,
-        },
-        { name: "record-mux", inline: true },
-      );
-
-      if (melody) {
+        }
+      })();
+      const muxBranch = (async () => {
+        const result = await runActivity("mux");
         await step.runMutation(
           internal.media.jobs.recordStageResult,
           {
             jobId,
-            kind: "analyzeMelody",
-            artifactId: melody.artifactId,
+            kind: "mux",
+            artifactId: result.artifactId,
           },
-          { name: "record-analyzeMelody", inline: true },
+          { name: "record-mux", inline: true },
         );
+        return result;
+      })();
+
+      const [, melody] = await Promise.all([transcriptionBranch, melodyBranch, muxBranch]);
+
+      if (melody) {
         try {
           const annotations = await runActivity("assembleAnnotations");
           await step.runMutation(

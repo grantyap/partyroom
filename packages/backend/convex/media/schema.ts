@@ -43,6 +43,15 @@ export const mediaTables = {
     activeActivities: v.optional(
       v.array(v.object({ activityId: v.string(), kind: mediaOperationKind })),
     ),
+    stepTimings: v.optional(
+      v.array(
+        v.object({
+          kind: mediaOperationKind,
+          startedAt: v.number(),
+          completedAt: v.number(),
+        }),
+      ),
+    ),
     errorCode: v.optional(v.string()),
     errorMessage: v.optional(v.string()),
     createdAt: v.number(),

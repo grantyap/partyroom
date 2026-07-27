@@ -25,6 +25,9 @@ class FakeContext:
         self.command = command
         callback = options["on_stdout_line"]
         await callback(  # type: ignore[operator]
+            PROGRESS_PREFIX + json.dumps({"stage": "loadingModel"})
+        )
+        await callback(  # type: ignore[operator]
             PROGRESS_PREFIX + json.dumps({"completed": 1, "total": 2})
         )
         Path(command[-1]).write_text(
@@ -48,7 +51,10 @@ class TranscriptionProcessTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(context.command[1:3], ("-m", "app.transcription_process"))
         self.assertEqual(
             context.progress,
-            [(0.5, "Transcribed and aligned chunk 1 of 2")],
+            [
+                (0.375, "Loading Qwen/Qwen3-ASR-0.6B"),
+                (0.625, "Transcribed and aligned chunk 1 of 2"),
+            ],
         )
 
 

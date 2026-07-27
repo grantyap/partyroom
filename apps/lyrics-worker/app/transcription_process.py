@@ -27,12 +27,19 @@ def main() -> None:
             flush=True,
         )
 
+    def stage_changed(stage: str) -> None:
+        print(
+            PROGRESS_PREFIX + json.dumps({"stage": stage}),
+            flush=True,
+        )
+
     language = transcribe_to_artifacts(
         input_path,
         vtt_path,
         lyrics_path,
         threading.Event(),
         progress,
+        stage_changed,
     )
     write_text_atomic(
         result_path,

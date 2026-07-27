@@ -122,15 +122,29 @@ export async function recordActivityTerminal(
   ctx: MutationCtx,
   jobId: Id<"mediaJobs">,
   activityId: string,
+  timing?: { startedAt: number; completedAt: number },
 ) {
   const job = await ctx.db.get("mediaJobs", jobId);
   if (!job?.activeActivities) return;
+  const terminalActivity = job.activeActivities.find(
+    (activity) => activity.activityId === activityId,
+  );
   const activeActivities = job.activeActivities.filter(
     (activity) => activity.activityId !== activityId,
   );
   if (activeActivities.length === job.activeActivities.length) return;
+  const stepTimings =
+    timing && terminalActivity
+      ? [
+          ...(job.stepTimings ?? []).filter(
+            (stepTiming) => stepTiming.kind !== terminalActivity.kind,
+          ),
+          { kind: terminalActivity.kind, ...timing },
+        ]
+      : job.stepTimings;
   await ctx.db.patch("mediaJobs", jobId, {
     activeActivities,
+    stepTimings,
     updatedAt: Date.now(),
   });
 }
@@ -228,6 +242,61 @@ export async function attachWorkflowToJob(
     state: "processing",
     updatedAt: Date.now(),
   });
+}
+
+export async function requeueRoomMedia(
+  ctx: MutationCtx,
+  {
+    roomId,
+    roomMediaId,
+  }: {
+    roomId: Id<"rooms">;
+    roomMediaId: Id<"roomMedia">;
+  },
+) {
+  const association = await ctx.db.get("roomMedia", roomMediaId);
+  if (!association || association.room !== roomId) throw new Error("Room media item not found");
+
+  const job = await ctx.db.get("mediaJobs", association.job);
+  if (!job) throw new Error("Media job not found");
+  if (job.state === "queued" || job.state === "processing") {
+    throw new Error("Media is already being processed");
+  }
+
+  if (job.asset) {
+    const asset = await ctx.db.get("mediaAssets", job.asset);
+    if (asset?.activeJob && asset.activeJob !== job._id) {
+      throw new Error("Media is already being processed");
+    }
+    if (asset) {
+      await ctx.db.patch("mediaAssets", asset._id, {
+        state: "failed",
+        activeJob: undefined,
+        updatedAt: Date.now(),
+      });
+    }
+  }
+
+  const associations = await ctx.db
+    .query("roomMedia")
+    .withIndex("by_job", (q) => q.eq("job", job._id))
+    .collect();
+  await Promise.all(
+    associations.map((row) => ctx.db.patch("roomMedia", row._id, { asset: undefined })),
+  );
+  await ctx.db.patch("mediaJobs", job._id, {
+    state: "queued",
+    stage: "queued",
+    progress: 0,
+    asset: undefined,
+    workflowId: undefined,
+    activeActivities: [],
+    stepTimings: [],
+    errorCode: undefined,
+    errorMessage: undefined,
+    updatedAt: Date.now(),
+  });
+  return job._id;
 }
 
 export async function removeRoomMedia(

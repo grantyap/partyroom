@@ -5,7 +5,7 @@ import type { Id } from "../_generated/dataModel";
 import schema from "../schema";
 import { modules } from "../test.setup";
 import { removeFromRoomImpl } from "./jobs";
-import { recordActivityTerminal } from "./service";
+import { recordActivityTerminal, requeueRoomMedia } from "./service";
 
 async function seedRoom(t: ReturnType<typeof convexTest>) {
   return await t.run(async (ctx) => {
@@ -39,11 +39,64 @@ describe("media jobs", () => {
           { activityId: "running", kind: "transcribe" },
         ],
       });
-      await recordActivityTerminal(ctx, jobId, "finished");
+      await recordActivityTerminal(ctx, jobId, "finished", {
+        startedAt: 10_000,
+        completedAt: 75_000,
+      });
     });
 
     const job = await t.run(async (ctx) => await ctx.db.get("mediaJobs", jobId));
     expect(job?.activeActivities).toEqual([{ activityId: "running", kind: "transcribe" }]);
+    expect(job?.stepTimings).toEqual([
+      { kind: "download", startedAt: 10_000, completedAt: 75_000 },
+    ]);
+  });
+
+  test("requeues terminal media and clears stale output references", async () => {
+    const t = convexTest(schema, modules);
+    const roomId = await seedRoom(t);
+    const { jobId, roomMediaId } = await createJob(t, roomId);
+    const claim = await t.mutation(internal.media.jobs.claimAsset, {
+      jobId,
+      extractor: "youtube",
+      sourceId: "reprocess",
+    });
+    await t.run(async (ctx) => {
+      await ctx.db.patch("mediaAssets", claim.assetId, {
+        state: "ready",
+        activeJob: undefined,
+        finalArtifactId: "stale-output",
+      });
+      await ctx.db.patch("mediaJobs", jobId, {
+        state: "ready",
+        stage: "ready",
+        progress: 1,
+        asset: claim.assetId,
+        workflowId: "completed-workflow",
+        errorCode: "OLD_ERROR",
+        errorMessage: "Old error",
+      });
+      await ctx.db.patch("roomMedia", roomMediaId, { asset: claim.assetId });
+      await requeueRoomMedia(ctx, { roomId, roomMediaId });
+    });
+
+    const result = await t.run(async (ctx) => ({
+      job: await ctx.db.get("mediaJobs", jobId),
+      association: await ctx.db.get("roomMedia", roomMediaId),
+      asset: await ctx.db.get("mediaAssets", claim.assetId),
+    }));
+    expect(result.job).toMatchObject({
+      state: "queued",
+      stage: "queued",
+      progress: 0,
+      activeActivities: [],
+    });
+    expect(result.job?.asset).toBeUndefined();
+    expect(result.job?.workflowId).toBeUndefined();
+    expect(result.job?.errorCode).toBeUndefined();
+    expect(result.job?.errorMessage).toBeUndefined();
+    expect(result.association?.asset).toBeUndefined();
+    expect(result.asset?.state).toBe("failed");
   });
 
   test("deletes every room association that directly references a completed asset", async () => {

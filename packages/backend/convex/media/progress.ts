@@ -15,6 +15,10 @@ type ActivityProgress = {
   kind: OperationKind;
   state: string;
   progress?: number;
+  message?: string;
+  attempt?: number;
+  startedAt?: number;
+  completedAt?: number;
 };
 
 type ProgressAsset = {
@@ -28,6 +32,40 @@ type ProgressAsset = {
   finalArtifactId?: unknown;
   annotationsState?: "processing" | "ready" | "failed";
 };
+
+export type PipelineStepState = "pending" | "queued" | "running" | "completed" | "failed";
+
+export type PipelineStepStatus = {
+  kind: OperationKind;
+  state: PipelineStepState;
+  progress: number;
+  message?: string;
+  attempt?: number;
+  startedAt?: number;
+  completedAt?: number;
+};
+
+function stepStatus(
+  status: Omit<PipelineStepStatus, "message" | "attempt" | "startedAt" | "completedAt">,
+  activity?: ActivityProgress,
+  timing?: { startedAt: number; completedAt: number },
+): PipelineStepStatus {
+  return {
+    ...status,
+    ...(activity?.message !== undefined ? { message: activity.message } : {}),
+    ...(activity?.attempt !== undefined ? { attempt: activity.attempt } : {}),
+    ...(activity?.startedAt !== undefined
+      ? { startedAt: activity.startedAt }
+      : timing
+        ? { startedAt: timing.startedAt }
+        : {}),
+    ...(activity?.completedAt !== undefined
+      ? { completedAt: activity.completedAt }
+      : timing
+        ? { completedAt: timing.completedAt }
+        : {}),
+  };
+}
 
 function completedSteps(hasAsset: boolean, asset: ProgressAsset | null) {
   const annotationsTerminal =
@@ -46,36 +84,61 @@ function completedSteps(hasAsset: boolean, asset: ProgressAsset | null) {
   ]);
 }
 
-export function mediaPipelineProgress({
-  jobState,
+export function mediaPipelineStepStatuses({
   hasAsset,
   asset,
   activities,
+  timings,
 }: {
-  jobState: string;
   hasAsset: boolean;
   asset: ProgressAsset | null;
   activities: ActivityProgress[];
-}) {
-  if (jobState === "ready") return 1;
-
+  timings: Array<{
+    kind: OperationKind;
+    startedAt: number;
+    completedAt: number;
+  }>;
+}): PipelineStepStatus[] {
   const completed = completedSteps(hasAsset, asset);
-  const activeProgress = new Map<OperationKind, number>();
+  const timingByKind = new Map(timings.map((timing) => [timing.kind, timing]));
+  const activeByKind = new Map<OperationKind, ActivityProgress>();
   for (const activity of activities) {
-    if (activity.state === "completed") {
-      activeProgress.set(activity.kind, 1);
-      continue;
+    const existing = activeByKind.get(activity.kind);
+    if (!existing || (activity.attempt ?? 0) >= (existing.attempt ?? 0)) {
+      activeByKind.set(activity.kind, activity);
     }
-    if (activity.state !== "running" || activity.progress === undefined) continue;
-    activeProgress.set(
-      activity.kind,
-      Math.max(activeProgress.get(activity.kind) ?? 0, Math.min(1, Math.max(0, activity.progress))),
-    );
   }
 
-  const total = mediaPipelineSteps.reduce(
-    (sum, kind) => sum + (completed.has(kind) ? 1 : (activeProgress.get(kind) ?? 0)),
-    0,
-  );
-  return total / mediaPipelineSteps.length;
+  return mediaPipelineSteps.map((kind) => {
+    const activity = activeByKind.get(kind);
+    const timing = timingByKind.get(kind);
+    const annotationFailed =
+      asset?.annotationsState === "failed" &&
+      ((kind === "analyzeMelody" && !asset.melodyArtifactId) || kind === "assembleAnnotations");
+
+    if (annotationFailed) {
+      return stepStatus({ kind, state: "failed", progress: 1 }, activity, timing);
+    }
+    if (completed.has(kind) || activity?.state === "completed") {
+      return stepStatus({ kind, state: "completed", progress: 1 }, activity, timing);
+    }
+    if (activity) {
+      const state: PipelineStepState =
+        activity.state === "running"
+          ? "running"
+          : activity.state === "failed" || activity.state === "canceled"
+            ? "failed"
+            : "queued";
+      return stepStatus(
+        {
+          kind,
+          state,
+          progress: Math.min(1, Math.max(0, activity.progress ?? 0)),
+        },
+        activity,
+        timing,
+      );
+    }
+    return { kind, state: "pending", progress: 0 };
+  });
 }
