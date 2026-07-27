@@ -1,11 +1,11 @@
 <script lang="ts">
+	import KaraokeVideo from "$lib/components/karaoke-video.svelte";
 	import { Button } from "$lib/components/ui/button";
 	import { Input } from "$lib/components/ui/input";
 	import { Progress } from "$lib/components/ui/progress";
-	import KaraokeVideo from "$lib/components/karaoke-video.svelte";
+	import { RotateCcw, Timer, Trash2 } from "@lucide/svelte";
 	import { api } from "@partyroom/backend/convex/_generated/api";
 	import type { Id } from "@partyroom/backend/convex/_generated/dataModel";
-	import { RotateCcw, Timer, Trash2 } from "@lucide/svelte";
 	import { useAction, useMutation, useQuery } from "convex-svelte";
 	import { onMount } from "svelte";
 
@@ -81,6 +81,29 @@
 				: step.state === "running"
 					? elapsed
 					: null;
+	}
+
+	function mediaElapsed(
+		steps: Array<{
+			startedAt?: number;
+			completedAt?: number;
+		}>,
+		isProcessing: boolean,
+	) {
+		const startedSteps = steps.filter(
+			(step): step is typeof step & { startedAt: number } =>
+				step.startedAt !== undefined,
+		);
+		if (startedSteps.length === 0) return null;
+
+		const startedAt = Math.min(...startedSteps.map((step) => step.startedAt));
+		const completedAt = Math.max(
+			...startedSteps.map((step) => step.completedAt ?? step.startedAt),
+		);
+
+		return formatElapsed(
+			(isProcessing ? currentTime : completedAt) - startedAt,
+		);
 	}
 
 	function formatDuration(seconds?: number) {
@@ -173,6 +196,10 @@
 	{:else}
 		<ul class="space-y-4">
 			{#each roomMedia.data ?? [] as media (media._id)}
+				{@const elapsed = mediaElapsed(
+					media.steps,
+					media.state === "processing",
+				)}
 				<li class="space-y-3 rounded-lg border p-4">
 					<div class="flex items-start justify-between gap-4">
 						<div>
@@ -187,6 +214,15 @@
 							</p>
 						</div>
 						<div class="flex items-center gap-2">
+							{#if elapsed}
+								<span
+									class="flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-xs tabular-nums text-muted-foreground"
+									title="Total elapsed processing time"
+								>
+									<Timer class="size-3" aria-hidden="true" />
+									{elapsed}
+								</span>
+							{/if}
 							<span class="rounded-full bg-muted px-2 py-1 text-xs capitalize"
 								>{media.state}</span
 							>
