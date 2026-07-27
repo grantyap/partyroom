@@ -5,6 +5,7 @@ from .runtime import (
     ApplicationError,
     ManagedProcessResult,
     Worker,
+    replace_url_origin,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "ApplicationError",
     "ManagedProcessResult",
     "Worker",
+    "replace_url_origin",
 ]

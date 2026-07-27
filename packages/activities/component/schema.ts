@@ -53,6 +53,7 @@ export default defineSchema({
     lastErrorType: v.optional(v.string()),
     lastErrorMessage: v.optional(v.string()),
     createdAt: v.number(),
+    startedAt: v.optional(v.number()),
     updatedAt: v.number(),
     completedAt: v.optional(v.number()),
   })

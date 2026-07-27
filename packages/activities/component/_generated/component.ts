@@ -100,6 +100,8 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           attempt: number;
           attemptDeadline?: number;
           cancelRequested: boolean;
+          completedAt?: number;
+          createdAt: number;
           deliveryState?: "pending" | "delivered";
           lastErrorMessage?: string;
           lastErrorType?: string;
@@ -113,6 +115,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             | { errorMessage: string; errorType: string; kind: "failed" }
             | { kind: "canceled" };
           scheduleDeadline: number;
+          startedAt?: number;
           state: "scheduled" | "running" | "completed" | "failed" | "canceled";
           taskQueue: string;
         },

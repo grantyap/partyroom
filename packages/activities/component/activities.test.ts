@@ -80,7 +80,11 @@ describe("activities component", () => {
     expect(await claim(t, "worker-2")).toBeNull();
 
     const stored = await t.query(api.activities.get, { activityId: firstId });
-    expect(stored).toMatchObject({ state: "running", attempt: 1 });
+    expect(stored).toMatchObject({
+      state: "running",
+      attempt: 1,
+      startedAt: expect.any(Number),
+    });
   });
 
   test("renews only the current fenced attempt", async () => {
@@ -170,6 +174,8 @@ describe("activities component", () => {
     expect(await t.query(api.activities.get, { activityId })).toMatchObject({
       state: "completed",
       attempt: 2,
+      startedAt: expect.any(Number),
+      completedAt: expect.any(Number),
       result: {
         kind: "success",
         value: { instrumentalStorageId: "instrumental" },

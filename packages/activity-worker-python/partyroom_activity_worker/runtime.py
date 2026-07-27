@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Generic, TypeVar, cast
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 from pydantic import BaseModel
@@ -72,12 +73,14 @@ class ActivityContext:
         info: ActivityInfo,
         renew: Callable[..., Awaitable[None]],
         cancellation: asyncio.Event,
-        upload_artifact: Callable[[str, Path, str], Awaitable[str]] | None = None,
+        upload_artifact: Callable[..., Awaitable[str]] | None = None,
     ) -> None:
         self.info = info
         self._renew = renew
         self._cancellation = cancellation
         self._upload_artifact = upload_artifact
+        self._last_reported_progress = 0.0
+        self._progress_lock = asyncio.Lock()
 
     @property
     def is_cancelled(self) -> bool:
@@ -90,16 +93,67 @@ class ActivityContext:
         await self._renew(heartbeat_details=details)
 
     async def report_progress(self, progress: float, message: str | None = None) -> None:
-        await self._renew(progress=max(0.0, min(1.0, progress)), progress_message=message)
+        async with self._progress_lock:
+            progress = max(
+                self._last_reported_progress, max(0.0, min(1.0, progress))
+            )
+            await self._renew(progress=progress, progress_message=message)
+            self._last_reported_progress = progress
+
+    def progress_reporter(
+        self,
+        start: float,
+        end: float,
+        message: str | Callable[[int, int], str],
+        *,
+        min_interval: float = 0.5,
+        min_delta: float = 0.005,
+    ) -> Callable[[int, int], Awaitable[None]]:
+        """Map completed units into a throttled, monotonic activity progress range."""
+        last_progress = -1.0
+        last_reported_at = 0.0
+
+        async def report(completed: int, total: int) -> None:
+            nonlocal last_progress, last_reported_at
+            if total <= 0:
+                return
+            fraction = max(0.0, min(1.0, completed / total))
+            progress = start + (end - start) * fraction
+            now = time.monotonic()
+            finished = completed >= total
+            if (
+                not finished
+                and last_progress >= 0
+                and (
+                    progress - last_progress < min_delta
+                    or now - last_reported_at < min_interval
+                )
+            ):
+                return
+            progress_message = (
+                message(completed, total) if callable(message) else message
+            )
+            await self.report_progress(progress, progress_message)
+            last_progress = progress
+            last_reported_at = now
+
+        return report
 
     async def upload_artifact(
-        self, slot: str, source: Path, content_type: str
+        self,
+        slot: str,
+        source: Path,
+        content_type: str,
+        *,
+        on_progress: Callable[[int, int], Awaitable[None]] | None = None,
     ) -> str:
         if slot not in self.info.artifact_slots:
             raise ValueError(f"Activity does not declare artifact slot {slot}")
         if self._upload_artifact is None:
             raise RuntimeError("Artifact uploading is unavailable")
-        return await self._upload_artifact(slot, source, content_type)
+        if on_progress is None:
+            return await self._upload_artifact(slot, source, content_type)
+        return await self._upload_artifact(slot, source, content_type, on_progress)
 
     async def run_process(
         self,
@@ -172,6 +226,22 @@ class ActivityContext:
 Handler = Callable[[ActivityContext, BaseModel], Awaitable[BaseModel]]
 
 
+def replace_url_origin(url: str, origin: str) -> str:
+    source = urlsplit(url)
+    replacement = urlsplit(origin)
+    if not replacement.scheme or not replacement.netloc:
+        raise ValueError("artifact_origin must include a scheme and host")
+    return urlunsplit(
+        (
+            replacement.scheme,
+            replacement.netloc,
+            source.path,
+            source.query,
+            source.fragment,
+        )
+    )
+
+
 class Worker:
     def __init__(
         self,
@@ -183,6 +253,7 @@ class Worker:
         max_concurrent_activities: int = 1,
         idle_poll_interval: float = 1.0,
         request_timeout: float = 10.0,
+        artifact_origin: str | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         if not worker_id.strip():
@@ -197,6 +268,7 @@ class Worker:
         self.max_concurrent_activities = max(1, max_concurrent_activities)
         self.idle_poll_interval = max(0.1, idle_poll_interval)
         self.request_timeout = max(1.0, request_timeout)
+        self.artifact_origin = artifact_origin
         self.transport = transport
         self._handlers: dict[str, tuple[ActivityDefinition[Any, Any], Handler]] = {}
         self._tasks: list[asyncio.Task[None]] = []
@@ -371,7 +443,10 @@ class Worker:
                     print(f"Unable to renew activity {claimed.activity_id}: {error}")
 
         async def upload_artifact(
-            slot: str, source: Path, content_type: str
+            slot: str,
+            source: Path,
+            content_type: str,
+            on_progress: Callable[[int, int], Awaitable[None]] | None = None,
         ) -> str:
             if self._client is None:
                 raise RuntimeError("Worker is not started")
@@ -385,18 +460,28 @@ class Worker:
             upload_url = prepared.get("uploadUrl")
             if not upload_url:
                 raise ValueError("Artifact upload URL response is missing uploadUrl")
+            if self.artifact_origin:
+                upload_url = replace_url_origin(str(upload_url), self.artifact_origin)
+
+            total_bytes = source.stat().st_size
 
             async def chunks() -> AsyncIterator[bytes]:
+                uploaded_bytes = 0
+                if on_progress is not None:
+                    await on_progress(0, total_bytes)
                 with source.open("rb") as body:
                     while chunk := await asyncio.to_thread(body.read, 1024 * 1024):
+                        uploaded_bytes += len(chunk)
                         yield chunk
+                        if on_progress is not None:
+                            await on_progress(uploaded_bytes, total_bytes)
 
             response = await self._client.post(
                 str(upload_url),
                 content=chunks(),
                 headers={
                     "Content-Type": content_type,
-                    "Content-Length": str(source.stat().st_size),
+                    "Content-Length": str(total_bytes),
                 },
                 timeout=httpx.Timeout(60, write=600),
             )

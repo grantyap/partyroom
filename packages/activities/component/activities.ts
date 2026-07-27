@@ -266,6 +266,7 @@ export const claim = mutation({
     await ctx.db.patch(activity._id, {
       state: "running",
       attempt,
+      startedAt: activity.startedAt ?? now,
       workerId: args.workerId,
       leaseToken,
       leaseExpiresAt,
@@ -753,6 +754,9 @@ export const get = query({
       lastErrorType: v.optional(v.string()),
       lastErrorMessage: v.optional(v.string()),
       deliveryState: v.optional(v.union(v.literal("pending"), v.literal("delivered"))),
+      createdAt: v.number(),
+      startedAt: v.optional(v.number()),
+      completedAt: v.optional(v.number()),
     }),
   ),
   handler: async (ctx, { activityId }) => {
@@ -777,6 +781,9 @@ export const get = query({
       lastErrorType: activity.lastErrorType,
       lastErrorMessage: activity.lastErrorMessage,
       deliveryState: activity.deliveryState,
+      createdAt: activity.createdAt,
+      startedAt: activity.startedAt,
+      completedAt: activity.completedAt,
     };
   },
 });
