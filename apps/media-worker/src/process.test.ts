@@ -1,10 +1,40 @@
 import { describe, expect, test } from "bun:test";
 import {
+  parseYtDlpMetadata,
   reportFinalUpload,
   ytDlpDownloadCommand,
   ytDlpDownloadProgress,
   YtDlpProgressAggregator,
 } from "./process";
+
+describe("parseYtDlpMetadata", () => {
+  test("parses the validated fields used by the media pipeline", () => {
+    expect(
+      parseYtDlpMetadata(
+        JSON.stringify({
+          id: "source-id",
+          extractor_key: "Youtube",
+          title: "Example",
+          duration: 120,
+          ignored: true,
+        }),
+      ),
+    ).toMatchObject({
+      id: "source-id",
+      extractor_key: "Youtube",
+      title: "Example",
+      duration: 120,
+    });
+  });
+
+  test("rejects malformed or incomplete metadata", () => {
+    expect(() => parseYtDlpMetadata("{")).toThrow();
+    expect(() => parseYtDlpMetadata('{"id":"source-id"}')).toThrow();
+    expect(() =>
+      parseYtDlpMetadata('{"id":"source-id","extractor":"generic","duration":"120"}'),
+    ).toThrow();
+  });
+});
 
 describe("YtDlpProgressAggregator", () => {
   test("weights sequential video and audio formats by their byte sizes", () => {
@@ -103,6 +133,7 @@ describe("ytDlpDownloadProgress", () => {
     expect(ytDlpDownloadProgress("[download] Destination: source.webm")).toBeUndefined();
     expect(ytDlpDownloadProgress("download:250|NA")).toBeUndefined();
     expect(ytDlpDownloadProgress("download:NA|1000")).toBeUndefined();
+    expect(ytDlpDownloadProgress("download:video||1000")).toBeUndefined();
     expect(ytDlpDownloadProgress("download:250|0")).toBeUndefined();
   });
 

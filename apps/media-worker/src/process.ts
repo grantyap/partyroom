@@ -1,5 +1,6 @@
 import { basename, extname, join } from "node:path";
 import { type ActivityContext, type ArtifactId } from "@partyroom/activity-worker";
+import { z } from "zod";
 import { assertSafeSourceUrl } from "./network";
 
 const maxDuration = Number(process.env.MAX_MEDIA_DURATION_SECONDS ?? 1_200);
@@ -43,18 +44,62 @@ type ProcessReporter = MediaActivityReporter;
 type LineHandler = (line: string) => void | Promise<void>;
 
 const ytDlpFormatsPrefix = "partyroom-formats:";
-type YtDlpMetadata = {
-  id?: string;
-  extractor_key?: string;
-  extractor?: string;
-  title?: string;
-  duration?: number;
-};
-type YtDlpSelectedFormat = {
-  format_id?: unknown;
-  filesize?: unknown;
-  filesize_approx?: unknown;
-};
+const jsonOutputSchema = z.string().transform((value, context): unknown => {
+  try {
+    return JSON.parse(value);
+  } catch {
+    context.addIssue({ code: "custom", message: "Invalid JSON" });
+    return z.NEVER;
+  }
+});
+const ytDlpMetadataSchema = z
+  .object({
+    id: z.string().min(1),
+    extractor_key: z.string().min(1).nullish(),
+    extractor: z.string().min(1).nullish(),
+    title: z.string().nullish(),
+    duration: z.number().finite().nonnegative().nullish(),
+  })
+  .passthrough()
+  .refine((metadata) => metadata.extractor_key || metadata.extractor, {
+    message: "yt-dlp did not return a stable extractor identity",
+    path: ["extractor"],
+  });
+const ytDlpSelectedFormatsSchema = z.array(
+  z
+    .object({
+      format_id: z.string().min(1),
+      filesize: z.number().finite().positive().nullish(),
+      filesize_approx: z.number().finite().positive().nullish(),
+    })
+    .passthrough()
+    .transform((format) => ({
+      id: format.format_id,
+      size: format.filesize ?? format.filesize_approx ?? undefined,
+    })),
+);
+const byteCountSchema = z
+  .string()
+  .regex(/^\d+$/)
+  .transform(Number)
+  .pipe(z.number().finite().nonnegative());
+const totalByteCountSchema = z
+  .string()
+  .regex(/^\d+$/)
+  .transform(Number)
+  .pipe(z.number().finite().positive());
+const ytDlpProgressFieldsSchema = z.union([
+  z
+    .tuple([z.string().min(1), byteCountSchema, totalByteCountSchema])
+    .transform(([formatId, downloaded, total]) => ({ formatId, downloaded, total })),
+  z
+    .tuple([byteCountSchema, totalByteCountSchema])
+    .transform(([downloaded, total]) => ({ formatId: undefined, downloaded, total })),
+]);
+
+export function parseYtDlpMetadata(output: string) {
+  return jsonOutputSchema.pipe(ytDlpMetadataSchema).parse(output);
+}
 
 async function resolveSource(sourceUrl: string, reporter: ProcessReporter) {
   await assertSafeSourceUrl(sourceUrl);
@@ -66,10 +111,7 @@ async function resolveSource(sourceUrl: string, reporter: ProcessReporter) {
     },
     reporter,
   );
-  const metadata = JSON.parse(metadataJson) as YtDlpMetadata;
-  if (!metadata.id || !(metadata.extractor_key || metadata.extractor)) {
-    throw new Error("yt-dlp did not return a stable extractor identity");
-  }
+  const metadata = parseYtDlpMetadata(metadataJson);
   if (metadata.duration && metadata.duration > maxDuration) {
     throw new Error("Media exceeds MAX_MEDIA_DURATION_SECONDS");
   }
@@ -101,15 +143,10 @@ export function ytDlpDownloadProgress(line: string) {
 
 function parseYtDlpProgress(line: string) {
   if (!line.startsWith("download:")) return undefined;
-  const fields = line.slice("download:".length).split("|");
-  const [formatId, downloadedText, totalText] =
-    fields.length === 2 ? [undefined, ...fields] : fields;
-  const downloaded = Number(downloadedText);
-  const total = Number(totalText);
-  if (!Number.isFinite(downloaded) || !Number.isFinite(total) || total <= 0) {
-    return undefined;
-  }
-  return { formatId, downloaded, total };
+  const parsed = ytDlpProgressFieldsSchema.safeParse(
+    line.slice("download:".length).split("|"),
+  );
+  return parsed.success ? parsed.data : undefined;
 }
 
 /**
@@ -139,21 +176,10 @@ export class YtDlpProgressAggregator {
   configure(line: string) {
     if (!line.startsWith(ytDlpFormatsPrefix)) return false;
     this.configured = true;
-    try {
-      const parsed = JSON.parse(line.slice(ytDlpFormatsPrefix.length)) as unknown;
-      this.selectedFormats = Array.isArray(parsed)
-        ? parsed.flatMap((format: YtDlpSelectedFormat) => {
-            if (typeof format !== "object" || format === null) return [];
-            const id = typeof format.format_id === "string" ? format.format_id : undefined;
-            if (!id) return [];
-            const candidate = Number(format.filesize ?? format.filesize_approx);
-            const size = Number.isFinite(candidate) && candidate > 0 ? candidate : undefined;
-            return [{ id, size }];
-          })
-        : [];
-    } catch {
-      this.selectedFormats = [];
-    }
+    const parsed = jsonOutputSchema
+      .pipe(ytDlpSelectedFormatsSchema)
+      .safeParse(line.slice(ytDlpFormatsPrefix.length));
+    this.selectedFormats = parsed.success ? parsed.data : [];
     return true;
   }
 

@@ -9,7 +9,8 @@
   },
   "dependencies": {
     "@partyroom/activity-worker": "workspace:*",
-    "@partyroom/media-activities": "workspace:*"
+    "@partyroom/media-activities": "workspace:*",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@types/bun": "latest",
