@@ -56,6 +56,8 @@
 		if (status === "queued") return "Queued";
 		if (status === "completed") return "Done";
 		if (status === "failed") return "Unavailable";
+		if (status === "canceled") return "Canceled";
+		if (status === "skipped") return "Not needed";
 		return "Waiting";
 	}
 
@@ -266,7 +268,7 @@
 								{@const timingLabel = stepTimingLabel(step)}
 								<li class="rounded-md border bg-muted/20 p-2.5">
 									<div class="flex items-center justify-between gap-3 text-xs">
-										<span class="font-medium">{stageLabel(step.kind)}</span>
+										<span class="font-medium">{step.label ?? stageLabel(step.kind)}</span>
 										{#if timingLabel}
 											<span
 												class="flex items-center gap-1 tabular-nums text-muted-foreground"
@@ -284,7 +286,7 @@
 										<div class="flex gap-2 items-center mt-2">
 											<Progress
 												value={step.progress * 100}
-												aria-label={`${stageLabel(step.kind)} ${Math.round(step.progress * 100)}%`}
+												aria-label={`${step.label ?? stageLabel(step.kind)} ${Math.round(step.progress * 100)}%`}
 												class="flex-1"
 											/>
 											<output
