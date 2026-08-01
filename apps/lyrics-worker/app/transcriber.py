@@ -1,13 +1,7 @@
-import os
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-
-@dataclass(frozen=True)
-class AlignedWord:
-    text: str
-    start_time: float
-    end_time: float
+from .aligner import AlignedWord, resolve_pytorch_device
 
 
 @dataclass(frozen=True)
@@ -24,15 +18,6 @@ class Transcriber(Protocol):
         language: str | None,
         return_time_stamps: bool,
     ) -> list[Any]: ...
-
-    def align(
-        self,
-        *,
-        audio: tuple[Any, int],
-        text: str,
-        language: str,
-    ) -> list[AlignedWord]: ...
-
 
 class MlxTranscriber:
     def __init__(
@@ -77,26 +62,6 @@ class MlxTranscriber:
             )
         ]
 
-    def align(
-        self,
-        *,
-        audio: tuple[Any, int],
-        text: str,
-        language: str,
-    ) -> list[AlignedWord]:
-        samples, sample_rate = audio
-        if sample_rate != 16_000:
-            raise ValueError("MLX forced alignment requires 16 kHz audio")
-        return [
-            AlignedWord(
-                text=str(word.text),
-                start_time=float(word.start_time),
-                end_time=float(word.end_time),
-            )
-            for word in self._aligner.align(samples, text, language)
-        ]
-
-
 class PytorchTranscriber:
     def __init__(
         self,
@@ -104,23 +69,15 @@ class PytorchTranscriber:
         asr_model: str,
         aligner_model: str,
         max_new_tokens: int,
+        device: str,
     ) -> None:
-        import torch
         from qwen_asr import Qwen3ASRModel
 
-        requested_device = os.getenv("LYRICS_DEVICE", "auto")
-        device = (
-            "cuda:0"
-            if requested_device == "auto" and torch.cuda.is_available()
-            else requested_device
-        )
-        if device == "auto":
-            device = "cpu"
-        dtype = torch.bfloat16 if device.startswith("cuda") else torch.float32
+        resolved_device, dtype = resolve_pytorch_device(device)
         self._model = Qwen3ASRModel.from_pretrained(
             asr_model,
             dtype=dtype,
-            device_map=device,
+            device_map=resolved_device,
             max_inference_batch_size=1,
             max_new_tokens=max_new_tokens,
             forced_aligner=aligner_model,
@@ -140,32 +97,13 @@ class PytorchTranscriber:
             return_time_stamps=return_time_stamps,
         )
 
-    def align(
-        self,
-        *,
-        audio: tuple[Any, int],
-        text: str,
-        language: str,
-    ) -> list[AlignedWord]:
-        aligner = self._model.forced_aligner
-        if aligner is None:
-            raise RuntimeError("Qwen forced aligner is not loaded")
-        return [
-            AlignedWord(
-                text=str(word.text),
-                start_time=float(word.start_time),
-                end_time=float(word.end_time),
-            )
-            for word in aligner.align(audio=audio, text=text, language=language)[0]
-        ]
-
-
 def create_transcriber(
     backend: str,
     *,
     asr_model: str,
     aligner_model: str,
     max_new_tokens: int,
+    device: str = "auto",
 ) -> Transcriber:
     if backend == "mlx":
         return MlxTranscriber(
@@ -179,4 +117,5 @@ def create_transcriber(
         asr_model=asr_model,
         aligner_model=aligner_model,
         max_new_tokens=max_new_tokens,
+        device=device,
     )

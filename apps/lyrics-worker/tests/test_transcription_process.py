@@ -1,5 +1,7 @@
 import json
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -36,6 +38,25 @@ class FakeContext:
 
 
 class TranscriptionProcessTest(unittest.IsolatedAsyncioTestCase):
+    async def test_child_import_preserves_current_work_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            work_directory = Path(directory) / "work"
+            attempt_directory = work_directory / "activity-1"
+            attempt_directory.mkdir(parents=True)
+            transcript = attempt_directory / "generated.txt"
+            transcript.write_text("Generated lyrics", encoding="utf-8")
+
+            subprocess.run(
+                [sys.executable, "-c", "import app.transcription_process"],
+                check=True,
+                env={**os.environ, "WORK_DIR": str(work_directory)},
+            )
+
+            self.assertEqual(
+                transcript.read_text(encoding="utf-8"),
+                "Generated lyrics",
+            )
+
     async def test_managed_child_reports_progress_and_language(self) -> None:
         context = FakeContext()
         with tempfile.TemporaryDirectory() as directory:

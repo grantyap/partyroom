@@ -3,6 +3,7 @@ import types
 import unittest
 from unittest.mock import patch
 
+from app.aligner import MlxForcedAligner, create_aligner
 from app.transcriber import MlxTranscriber, create_transcriber
 
 
@@ -71,17 +72,13 @@ class TranscriberTest(unittest.TestCase):
             transcriber._session.request["forced_aligner"], transcriber._aligner
         )
 
-    def test_mlx_adapter_aligns_external_transcript(self) -> None:
+    def test_mlx_aligner_is_independent_from_transcription(self) -> None:
         module = types.ModuleType("mlx_qwen3_asr")
         module.Session = FakeSession  # type: ignore[attr-defined]
         module.ForcedAligner = FakeAligner  # type: ignore[attr-defined]
         with patch.dict(sys.modules, {"mlx_qwen3_asr": module}):
-            transcriber = MlxTranscriber(
-                asr_model="asr",
-                aligner_model="aligner",
-                max_new_tokens=512,
-            )
-            words = transcriber.align(
+            aligner = MlxForcedAligner(model="aligner")
+            words = aligner.align(
                 audio=("samples", 16_000),  # type: ignore[arg-type]
                 text="LRCLIB",
                 language="English",
@@ -92,7 +89,7 @@ class TranscriberTest(unittest.TestCase):
             [("LRCLIB", 1.25, 1.75)],
         )
         self.assertEqual(
-            transcriber._aligner.request,
+            aligner._aligner.request,
             ("samples", "LRCLIB", "English"),
         )
 
@@ -104,6 +101,8 @@ class TranscriberTest(unittest.TestCase):
                 aligner_model="aligner",
                 max_new_tokens=512,
             )
+        with self.assertRaisesRegex(ValueError, "Unsupported lyrics backend"):
+            create_aligner("unknown", model="aligner")
 
 
 if __name__ == "__main__":
