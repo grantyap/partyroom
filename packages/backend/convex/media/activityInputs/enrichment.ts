@@ -65,7 +65,7 @@ export const alignLyrics = defineActivityInput({
     const lyrics = await getLyricTrack(ctx, asset._id, "lrclib");
     return {
       audioUrl: await artifactUrl(ctx, asset.vocalsArtifactId),
-      lyrics: (lyrics?.observations ?? [])
+      transcript: (lyrics?.observations ?? [])
         .map(({ value }) => value.trim())
         .filter((value) => value && !/^(?:\.{3}|…+)$/.test(value))
         .join("\n"),

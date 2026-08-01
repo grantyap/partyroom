@@ -193,7 +193,7 @@
   },
   "alignLyrics": {
     "name": "media.alignLyrics",
-    "version": 1,
+    "version": 2,
     "taskQueue": "lyrics",
     "input": {
       "kind": "object",
@@ -201,7 +201,7 @@
         "audioUrl": {
           "kind": "string"
         },
-        "lyrics": {
+        "transcript": {
           "kind": "string"
         },
         "language": {

@@ -26,7 +26,7 @@ transcribe = ActivityDefinition[TranscribeInput, TranscribeOutput](
 class AlignLyricsInput(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
     audio_url: str = Field(alias="audioUrl")
-    lyrics: str
+    transcript: str
     language: str
 
 class AlignLyricsOutput(BaseModel):
@@ -38,7 +38,7 @@ class AlignLyricsOutput(BaseModel):
 
 align_lyrics = ActivityDefinition[AlignLyricsInput, AlignLyricsOutput](
     name="media.alignLyrics",
-    version=1,
+    version=2,
     task_queue="lyrics",
     input_model=AlignLyricsInput,
     output_model=AlignLyricsOutput,

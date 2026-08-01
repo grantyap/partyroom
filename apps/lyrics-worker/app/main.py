@@ -219,7 +219,7 @@ async def align_lyrics_activity(
             input_path,
             context.progress_reporter(0, 0.25, "Downloading vocal stem"),
         )
-        write_text_atomic(transcript_path, activity.lyrics)
+        write_text_atomic(transcript_path, activity.transcript)
         await run_alignment(
             context,
             input_path,
