@@ -13,7 +13,7 @@ import {
 } from "../_generated/server";
 import { activities, cancelWorkflow, managedWorkflow } from "../activities/workflowManager";
 import { getLyricTrack } from "./service";
-import { lyricObservation } from "./validators";
+import { lyricObservation, type MediaEnrichmentOperationKind } from "./validators";
 
 async function requireCurrentEnrichment(
   ctx: Pick<QueryCtx, "db">,
@@ -184,6 +184,49 @@ export const recordGeneratedLyrics = internalMutation({
   },
 });
 
+export const shouldAlignLrclibLyrics = internalQuery({
+  args: {
+    enrichmentId: v.id("mediaEnrichments"),
+    workflowId: vWorkflowId,
+  },
+  returns: v.boolean(),
+  handler: async (ctx, { enrichmentId, workflowId }) => {
+    const { asset } = await requireCurrentEnrichment(ctx, enrichmentId, workflowId);
+    if (asset.duration !== undefined && asset.duration > 300) return false;
+    const track = await getLyricTrack(ctx, asset._id, "lrclib");
+    return (
+      track?.state === "ready" &&
+      track.timing === "line" &&
+      !!track.observations?.some(
+        ({ value }) => value.trim() && !/^(?:\.{3}|…+)$/.test(value.trim()),
+      )
+    );
+  },
+});
+
+export const recordAlignedLrclibLyrics = internalMutation({
+  args: {
+    enrichmentId: v.id("mediaEnrichments"),
+    workflowId: vWorkflowId,
+    timedArtifactId: v.string(),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const { asset } = await requireCurrentEnrichment(ctx, args.enrichmentId, args.workflowId);
+    const track = await getLyricTrack(ctx, asset._id, "lrclib");
+    if (!track || track.state !== "ready" || track.timing !== "line") return null;
+    await ctx.db.patch("mediaLyricTracks", track._id, {
+      timing: "word",
+      timedArtifactId: args.timedArtifactId,
+      observations: undefined,
+      suggestedOffsetMs: 0,
+      error: undefined,
+      updatedAt: Date.now(),
+    });
+    return null;
+  },
+});
+
 export const recordMelody = internalMutation({
   args: {
     enrichmentId: v.id("mediaEnrichments"),
@@ -320,12 +363,18 @@ export const complete = internalMutation({
 export const mediaEnrichment = managedWorkflow
   .define({ args: { enrichmentId: v.id("mediaEnrichments") } })
   .handler(async (step, { enrichmentId }) => {
-    const runActivity = async <Kind extends "transcribe" | "analyzeMelody" | "assembleAnnotations">(
+    const runActivity = async <Kind extends MediaEnrichmentOperationKind>(
       kind: Kind,
+      options?: { language?: string },
     ): Promise<ActivityOutput<(typeof mediaActivities)[Kind]>> => {
       const activityId = await step.runMutation(
         internal.media.enrichmentActivities.schedule,
-        { enrichmentId, workflowId: step.workflowId, kind },
+        {
+          enrichmentId,
+          workflowId: step.workflowId,
+          kind,
+          language: options?.language,
+        },
         { name: `schedule-${kind}`, inline: true },
       );
       return await step.awaitEvent<ActivityOutput<(typeof mediaActivities)[Kind]>>({
@@ -356,6 +405,7 @@ export const mediaEnrichment = managedWorkflow
         },
         { name: "record-generated-lyrics", inline: true },
       );
+      return result.language;
     })();
     const melodyBranch = (async () => {
       try {
@@ -380,7 +430,34 @@ export const mediaEnrichment = managedWorkflow
       }
     })();
 
-    const [, hasMelody] = await Promise.all([transcriptionBranch, melodyBranch]);
+    const [language, hasMelody] = await Promise.all([transcriptionBranch, melodyBranch]);
+
+    if (
+      language &&
+      (await step.runQuery(
+        internal.media.enrichment.shouldAlignLrclibLyrics,
+        { enrichmentId, workflowId: step.workflowId },
+        { name: "prepare-lrclib-alignment", inline: true },
+      ))
+    ) {
+      try {
+        const aligned = await runActivity("alignLyrics", { language });
+        await step.runMutation(
+          internal.media.enrichment.recordAlignedLrclibLyrics,
+          {
+            enrichmentId,
+            workflowId: step.workflowId,
+            timedArtifactId: aligned.timedLyricsArtifactId,
+          },
+          { name: "record-aligned-lrclib-lyrics", inline: true },
+        );
+      } catch (error) {
+        console.warn("[lrclib] Unable to align lyrics", {
+          enrichmentId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
 
     try {
       const inputs = await step.runQuery(

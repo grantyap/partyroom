@@ -135,6 +135,23 @@ export const mediaActivities = {
     }),
     startToCloseTimeoutMs: 60 * minute,
   }),
+  alignLyrics: activity({
+    name: "media.alignLyrics",
+    version: 1,
+    queue: mediaQueues.lyrics,
+    input: wire.object({
+      audioUrl: wire.string,
+      lyrics: wire.string,
+      language: wire.string,
+    }),
+    output: wire.object({
+      timedLyricsArtifactId: wire.artifact("retained"),
+      contentType: wire.string,
+      model: wire.string,
+      language: wire.string,
+    }),
+    startToCloseTimeoutMs: 60 * minute,
+  }),
   analyzeMelody: activity({
     name: "media.analyzeMelody",
     version: 2,

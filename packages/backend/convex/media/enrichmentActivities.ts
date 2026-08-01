@@ -7,12 +7,7 @@ import { env, internalMutation } from "../_generated/server";
 import { activities } from "../activities/workflowManager";
 import { getLyricTrack } from "./service";
 import { replaceUrlOrigin } from "./urls";
-
-const enrichmentOperationKind = v.union(
-  v.literal("transcribe"),
-  v.literal("analyzeMelody"),
-  v.literal("assembleAnnotations"),
-);
+import { mediaEnrichmentOperationKind } from "./validators";
 
 async function artifactUrl(
   ctx: Parameters<typeof activities.getArtifactUrl>[0],
@@ -27,18 +22,24 @@ export const schedule = internalMutation({
   args: {
     enrichmentId: v.id("mediaEnrichments"),
     workflowId: vWorkflowId,
-    kind: enrichmentOperationKind,
+    kind: mediaEnrichmentOperationKind,
+    language: v.optional(v.string()),
   },
   returns: v.string(),
-  handler: async (ctx, { enrichmentId, workflowId, kind }) => {
+  handler: async (ctx, { enrichmentId, workflowId, kind, language }) => {
     const enrichment = await ctx.db.get("mediaEnrichments", enrichmentId);
     if (!enrichment || enrichment.workflowId !== workflowId) {
       throw new Error("Media enrichment workflow is no longer current");
     }
     const asset = await ctx.db.get("mediaAssets", enrichment.asset);
     if (!asset) throw new Error("Media enrichment references a missing asset");
-    const generatedLyrics =
-      kind === "assembleAnnotations" ? await getLyricTrack(ctx, asset._id, "generated") : null;
+    if (kind === "alignLyrics" && !language) {
+      throw new Error("Lyrics alignment requires a detected language");
+    }
+    const [generatedLyrics, lrclibLyrics] = await Promise.all([
+      kind === "assembleAnnotations" ? getLyricTrack(ctx, asset._id, "generated") : null,
+      kind === "alignLyrics" ? getLyricTrack(ctx, asset._id, "lrclib") : null,
+    ]);
     const input =
       kind === "assembleAnnotations"
         ? {
@@ -49,9 +50,18 @@ export const schedule = internalMutation({
             sourceId: asset.sourceId,
             title: asset.title,
           }
-        : {
-            audioUrl: await artifactUrl(ctx, asset.vocalsArtifactId),
-          };
+        : kind === "alignLyrics"
+          ? {
+              audioUrl: await artifactUrl(ctx, asset.vocalsArtifactId),
+              lyrics: (lrclibLyrics?.observations ?? [])
+                .map(({ value }) => value.trim())
+                .filter((value) => value && !/^(?:\.{3}|…+)$/.test(value))
+                .join("\n"),
+              language: language!,
+            }
+          : {
+              audioUrl: await artifactUrl(ctx, asset.vocalsArtifactId),
+            };
     const activityId: string = await activities.schedule(
       ctx,
       workflowId,

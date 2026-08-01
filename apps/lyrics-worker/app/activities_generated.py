@@ -22,3 +22,25 @@ transcribe = ActivityDefinition[TranscribeInput, TranscribeOutput](
     output_model=TranscribeOutput,
     artifact_slots=["lyricsArtifactId","timedLyricsArtifactId"],
 )
+
+class AlignLyricsInput(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    audio_url: str = Field(alias="audioUrl")
+    lyrics: str
+    language: str
+
+class AlignLyricsOutput(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    timed_lyrics_artifact_id: str = Field(alias="timedLyricsArtifactId")
+    content_type: str = Field(alias="contentType")
+    model: str
+    language: str
+
+align_lyrics = ActivityDefinition[AlignLyricsInput, AlignLyricsOutput](
+    name="media.alignLyrics",
+    version=1,
+    task_queue="lyrics",
+    input_model=AlignLyricsInput,
+    output_model=AlignLyricsOutput,
+    artifact_slots=["timedLyricsArtifactId"],
+)

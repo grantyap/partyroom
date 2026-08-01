@@ -6,7 +6,7 @@ const root = resolve(import.meta.dir, "..");
 
 const pythonTargets = {
   "apps/stem-worker/app/activities_generated.py": ["separate"],
-  "apps/lyrics-worker/app/activities_generated.py": ["transcribe"],
+  "apps/lyrics-worker/app/activities_generated.py": ["transcribe", "alignLyrics"],
   "apps/annotations-worker/app/activities_generated.py": ["analyzeMelody", "assembleAnnotations"],
 } as const;
 

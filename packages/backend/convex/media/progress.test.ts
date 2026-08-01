@@ -146,4 +146,63 @@ describe("media pipeline progress", () => {
       startedAt: 20_000,
     });
   });
+
+  test("reports LRCLIB forced alignment as its own timed step", () => {
+    const running = mediaPipelineStepStatuses({
+      hasAsset: true,
+      lrclibLyricsState: "ready",
+      lrclibLyricsTimingKind: "line",
+      enrichmentState: "processing",
+      asset: { finalArtifactId: "playable-video" },
+      activities: [
+        {
+          kind: "alignLyrics",
+          state: "running",
+          progress: 0.4,
+          startedAt: 30_000,
+        },
+      ],
+      timings: [],
+    });
+    expect(running.find((step) => step.kind === "alignLyrics")).toMatchObject({
+      state: "running",
+      progress: 0.4,
+      startedAt: 30_000,
+    });
+
+    const completed = mediaPipelineStepStatuses({
+      hasAsset: true,
+      lrclibLyricsState: "ready",
+      lrclibLyricsTimingKind: "word",
+      enrichmentState: "processing",
+      asset: { finalArtifactId: "playable-video" },
+      activities: [],
+      timings: [
+        {
+          kind: "alignLyrics",
+          startedAt: 30_000,
+          completedAt: 42_000,
+        },
+      ],
+    });
+    expect(completed.find((step) => step.kind === "alignLyrics")).toMatchObject({
+      state: "completed",
+      startedAt: 30_000,
+      completedAt: 42_000,
+    });
+  });
+
+  test("treats native word-timed LRCLIB lyrics as already aligned", () => {
+    const steps = mediaPipelineStepStatuses({
+      hasAsset: true,
+      lrclibLyricsState: "ready",
+      lrclibLyricsTimingKind: "word",
+      enrichmentState: "processing",
+      asset: null,
+      activities: [],
+      timings: [],
+    });
+
+    expect(steps.find((step) => step.kind === "alignLyrics")?.state).toBe("completed");
+  });
 });

@@ -3,7 +3,7 @@ import { type ArtifactId } from "@partyroom/activities";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
 import { activities, cancelWorkflow, sendWorkflowEvent } from "../activities/workflowManager";
-import type { OperationKind } from "./validators";
+import type { CoreMediaOperationKind, OperationKind } from "./validators";
 
 const mediaPipelineVersion = 4;
 
@@ -114,7 +114,7 @@ async function requireOwnedAsset(ctx: MutationCtx, jobId: Id<"mediaJobs">) {
 export async function getActivityJobState(
   ctx: MutationCtx,
   jobId: Id<"mediaJobs">,
-  kind: OperationKind,
+  kind: CoreMediaOperationKind,
 ) {
   if (kind === "resolve") {
     return { job: await requireJob(ctx, jobId), asset: null };
@@ -131,7 +131,7 @@ export async function recordScheduledActivity(
   }: {
     jobId: Id<"mediaJobs">;
     activityId: string;
-    kind: OperationKind;
+    kind: CoreMediaOperationKind;
   },
 ) {
   const { job } = await getActivityJobState(ctx, jobId, kind);
@@ -147,13 +147,7 @@ export async function recordScheduledActivity(
             ? "extracting"
             : kind === "separate"
               ? "separating"
-              : kind === "transcribe"
-                ? "transcribing"
-                : kind === "analyzeMelody"
-                  ? "analyzingMelody"
-                  : kind === "assembleAnnotations"
-                    ? "assemblingAnnotations"
-                    : "muxing",
+              : "muxing",
     activeActivities: [...(job.activeActivities ?? []), { activityId, kind }],
     updatedAt: Date.now(),
   });

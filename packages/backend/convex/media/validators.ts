@@ -48,23 +48,39 @@ export const lyricTrackMetadata = v.object({
   format: v.optional(v.string()),
 });
 
+export const coreMediaOperationKind = v.union(
+  v.literal("resolve"),
+  v.literal("download"),
+  v.literal("extractAudio"),
+  v.literal("separate"),
+  v.literal("mux"),
+);
+
+export const mediaEnrichmentOperationKind = v.union(
+  v.literal("transcribe"),
+  v.literal("alignLyrics"),
+  v.literal("analyzeMelody"),
+  v.literal("assembleAnnotations"),
+);
+
 export const mediaOperationKind = v.union(
   v.literal("resolve"),
   v.literal("download"),
   v.literal("extractAudio"),
   v.literal("separate"),
   v.literal("transcribe"),
+  v.literal("alignLyrics"),
   v.literal("analyzeMelody"),
   v.literal("assembleAnnotations"),
   v.literal("mux"),
 );
 
-export type OperationKind =
-  | "resolve"
-  | "download"
-  | "extractAudio"
-  | "separate"
+export type CoreMediaOperationKind = "resolve" | "download" | "extractAudio" | "separate" | "mux";
+
+export type MediaEnrichmentOperationKind =
   | "transcribe"
+  | "alignLyrics"
   | "analyzeMelody"
-  | "assembleAnnotations"
-  | "mux";
+  | "assembleAnnotations";
+
+export type OperationKind = CoreMediaOperationKind | MediaEnrichmentOperationKind;

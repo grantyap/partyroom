@@ -7,12 +7,12 @@ import type { Validator } from "convex/values";
 import { internal } from "../_generated/api";
 import { internalMutation } from "../_generated/server";
 import { managedWorkflow } from "../activities/workflowManager";
-import type { OperationKind } from "./validators";
+import type { CoreMediaOperationKind } from "./validators";
 
 export const mediaPipeline = managedWorkflow
   .define({ args: { jobId: v.id("mediaJobs") } })
   .handler(async (step, { jobId }) => {
-    const runActivity = async <Kind extends OperationKind>(
+    const runActivity = async <Kind extends CoreMediaOperationKind>(
       kind: Kind,
     ): Promise<ActivityOutput<(typeof mediaActivities)[Kind]>> => {
       const activityId = await step.runMutation(
@@ -156,11 +156,6 @@ export const mediaPipeline = managedWorkflow
         },
         { name: "record-separate", inline: true },
       );
-      await step.runMutation(
-        internal.media.enrichment.start,
-        { jobId },
-        { name: "start-enrichment", inline: true },
-      );
       const muxBranch = (async () => {
         const result = await runActivity("mux");
         await step.runMutation(
@@ -175,7 +170,13 @@ export const mediaPipeline = managedWorkflow
         return result;
       })();
 
-      await Promise.all([muxBranch, lrclibLyricsBranch]);
+      await lrclibLyricsBranch;
+      await step.runMutation(
+        internal.media.enrichment.start,
+        { jobId },
+        { name: "start-enrichment", inline: true },
+      );
+      await muxBranch;
       await step.runMutation(
         internal.media.jobs.finalizeAsset,
         { jobId },

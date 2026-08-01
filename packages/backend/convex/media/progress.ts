@@ -1,18 +1,19 @@
 import type { OperationKind } from "./validators";
 
-export type PipelineStepKind = OperationKind | "fetchLyrics";
-
-export const mediaPipelineSteps: readonly PipelineStepKind[] = [
+export const mediaPipelineSteps = [
   "resolve",
   "fetchLyrics",
   "download",
   "extractAudio",
   "separate",
   "transcribe",
+  "alignLyrics",
   "analyzeMelody",
   "mux",
   "assembleAnnotations",
-];
+] as const;
+
+export type PipelineStepKind = (typeof mediaPipelineSteps)[number];
 
 type ActivityProgress = {
   kind: OperationKind;
@@ -95,7 +96,9 @@ export function mediaPipelineStepStatuses({
   generatedLyricsState,
   generatedLyricsTiming,
   lrclibLyricsState,
+  lrclibLyricsTimingKind,
   lrclibLyricsTiming,
+  enrichmentState,
   asset,
   activities,
   timings,
@@ -105,7 +108,9 @@ export function mediaPipelineStepStatuses({
   generatedLyricsState?: "processing" | "ready" | "not_found" | "failed";
   generatedLyricsTiming?: { startedAt: number; completedAt?: number };
   lrclibLyricsState?: "processing" | "ready" | "not_found" | "failed";
+  lrclibLyricsTimingKind?: "word" | "line";
   lrclibLyricsTiming?: { startedAt: number; completedAt?: number };
+  enrichmentState?: "processing" | "ready" | "failed" | "canceled";
   asset: ProgressAsset | null;
   activities: ActivityProgress[];
   timings: Array<{
@@ -139,6 +144,39 @@ export function mediaPipelineStepStatuses({
     }
     const activity = activeByKind.get(kind);
     const timing = timingByKind.get(kind);
+    if (kind === "alignLyrics") {
+      if (activity?.state === "completed" || lrclibLyricsTimingKind === "word") {
+        return stepStatus({ kind, state: "completed", progress: 1 }, activity, timing);
+      }
+      if (activity) {
+        const state: PipelineStepState =
+          activity.state === "running"
+            ? "running"
+            : activity.state === "failed" || activity.state === "canceled"
+              ? "failed"
+              : "queued";
+        return stepStatus(
+          {
+            kind,
+            state,
+            progress: Math.min(1, Math.max(0, activity.progress ?? 0)),
+          },
+          activity,
+          timing,
+        );
+      }
+      if (
+        timing ||
+        lrclibLyricsState === "failed" ||
+        lrclibLyricsState === "not_found" ||
+        enrichmentState === "failed" ||
+        enrichmentState === "canceled" ||
+        (enrichmentState === "ready" && lrclibLyricsTimingKind === "line")
+      ) {
+        return stepStatus({ kind, state: "failed", progress: 1 }, undefined, timing);
+      }
+      return { kind, state: "pending", progress: 0 };
+    }
     const annotationFailed =
       asset?.annotationsState === "failed" &&
       ((kind === "analyzeMelody" && !asset.melodyArtifactId) || kind === "assembleAnnotations");

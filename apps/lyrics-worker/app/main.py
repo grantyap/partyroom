@@ -12,7 +12,14 @@ import httpx
 from fastapi import FastAPI
 from partyroom_activity_worker import ActivityContext, Worker, replace_url_origin
 
-from .activities_generated import TranscribeInput, TranscribeOutput, transcribe
+from .activities_generated import (
+    AlignLyricsInput,
+    AlignLyricsOutput,
+    TranscribeInput,
+    TranscribeOutput,
+    align_lyrics,
+    transcribe,
+)
 from .chunked import (
     TranscriptionCancelled,
     cleanup_stale_work,
@@ -94,20 +101,11 @@ def get_model() -> Any:
         return model
 
 
-def transcribe_to_artifacts(
-    audio_path: Path,
-    vtt_path: Path,
-    lyrics_path: Path,
-    cancelled: threading.Event,
-    chunk_completed: Callable[[int, int], None] | None = None,
-    stage_changed: Callable[[str], None] | None = None,
-) -> str | None:
+def load_mono_audio(audio_path: Path) -> tuple[Any, int]:
     import numpy as np
     import soundfile as sf
     from scipy.signal import resample_poly
 
-    if stage_changed is not None:
-        stage_changed("preprocessing")
     audio, sample_rate = sf.read(audio_path, dtype="float32", always_2d=True)
     mono = np.mean(audio, axis=1, dtype=np.float32)
     del audio
@@ -119,6 +117,20 @@ def transcribe_to_artifacts(
             target_sample_rate // divisor,
             sample_rate // divisor,
         ).astype(np.float32, copy=False)
+    return mono, target_sample_rate
+
+
+def transcribe_to_artifacts(
+    audio_path: Path,
+    vtt_path: Path,
+    lyrics_path: Path,
+    cancelled: threading.Event,
+    chunk_completed: Callable[[int, int], None] | None = None,
+    stage_changed: Callable[[str], None] | None = None,
+) -> str | None:
+    if stage_changed is not None:
+        stage_changed("preprocessing")
+    mono, target_sample_rate = load_mono_audio(audio_path)
 
     if stage_changed is not None:
         stage_changed("loadingModel")
@@ -155,6 +167,57 @@ def transcribe_to_artifacts(
         ),
     )
     return language
+
+
+def align_to_artifact(
+    audio_path: Path,
+    lyrics_path: Path,
+    transcript: str,
+    language: str,
+    cancelled: threading.Event,
+    stage_changed: Callable[[str], None] | None = None,
+) -> None:
+    if not transcript.strip():
+        raise ValueError("Lyrics transcript is empty")
+    if stage_changed is not None:
+        stage_changed("preprocessing")
+    mono, sample_rate = load_mono_audio(audio_path)
+    if len(mono) / sample_rate > 300:
+        raise ValueError("Qwen forced alignment supports at most 5 minutes of audio")
+    if cancelled.is_set():
+        raise TranscriptionCancelled("Lyrics alignment was cancelled")
+    if stage_changed is not None:
+        stage_changed("loadingModel")
+    loaded_model = get_model()
+    if stage_changed is not None:
+        stage_changed("aligning")
+    words = loaded_model.align(
+        audio=(mono, sample_rate),
+        text=transcript,
+        language=language,
+    )
+    if cancelled.is_set():
+        raise TranscriptionCancelled("Lyrics alignment was cancelled")
+    if not words:
+        raise ValueError("Qwen forced alignment returned no words")
+    if stage_changed is not None:
+        stage_changed("writing")
+    write_text_atomic(
+        lyrics_path,
+        build_timed_lyrics(
+            [
+                TimedLyric(
+                    time=float(word.start_time),
+                    duration=float(word.end_time) - float(word.start_time),
+                    value=str(word.text),
+                )
+                for word in words
+            ],
+            language=language,
+            asr_model="LRCLIB",
+            aligner_model=ALIGNER_MODEL,
+        ),
+    )
 
 
 async def run_transcription(
@@ -201,6 +264,38 @@ async def run_transcription(
     return json.loads(result_path.read_text(encoding="utf-8")).get("language")
 
 
+async def run_alignment(
+    context: ActivityContext,
+    input_path: Path,
+    transcript_path: Path,
+    lyrics_path: Path,
+    language: str,
+) -> None:
+    async def process_output(line: str) -> None:
+        if not line.startswith(PROGRESS_PREFIX):
+            return
+        stage = json.loads(line[len(PROGRESS_PREFIX) :]).get("stage")
+        if stage == "preprocessing":
+            await context.report_progress(0.25, "Preparing vocal audio")
+        elif stage == "loadingModel":
+            await context.report_progress(0.4, f"Loading {ALIGNER_MODEL}")
+        elif stage == "aligning":
+            await context.report_progress(0.55, "Aligning LRCLIB lyrics")
+        elif stage == "writing":
+            await context.report_progress(0.75, "Writing word-timed lyrics")
+
+    await context.run_process(
+        sys.executable,
+        "-m",
+        "app.alignment_process",
+        str(input_path),
+        str(transcript_path),
+        str(lyrics_path),
+        language,
+        on_stdout_line=process_output,
+    )
+
+
 @worker.activity(transcribe)
 async def transcribe_activity(context: ActivityContext, activity: TranscribeInput) -> TranscribeOutput:
     directory = WORK_DIR / f"{context.info.activity_id}-{context.info.attempt}"
@@ -243,6 +338,53 @@ async def transcribe_activity(context: ActivityContext, activity: TranscribeInpu
         )
     finally:
         shutil.rmtree(directory, ignore_errors=True)
+
+
+@worker.activity(align_lyrics)
+async def align_lyrics_activity(
+    context: ActivityContext,
+    activity: AlignLyricsInput,
+) -> AlignLyricsOutput:
+    directory = WORK_DIR / f"{context.info.activity_id}-{context.info.attempt}"
+    input_path = directory / "vocals.flac"
+    transcript_path = directory / "lrclib.txt"
+    lyrics_path = directory / "timed-lyrics.json"
+    directory.mkdir(parents=True, exist_ok=True)
+    try:
+        await context.report_progress(0, "Downloading vocal stem")
+        await download(
+            activity.audio_url,
+            input_path,
+            context.progress_reporter(0, 0.25, "Downloading vocal stem"),
+        )
+        write_text_atomic(transcript_path, activity.lyrics)
+        await run_alignment(
+            context,
+            input_path,
+            transcript_path,
+            lyrics_path,
+            activity.language,
+        )
+        await context.report_progress(0.75, "Uploading aligned LRCLIB lyrics")
+        if lyrics_path.stat().st_size > MAX_BYTES:
+            raise ValueError("Output exceeds MAX_MEDIA_BYTES")
+        timed_lyrics_artifact_id = await context.upload_artifact(
+            "timedLyricsArtifactId",
+            lyrics_path,
+            "application/json",
+            on_progress=context.progress_reporter(
+                0.75, 1, "Uploading word-timed LRCLIB lyrics"
+            ),
+        )
+        return AlignLyricsOutput(
+            timed_lyrics_artifact_id=timed_lyrics_artifact_id,
+            content_type="application/json",
+            model=ALIGNER_MODEL,
+            language=activity.language,
+        )
+    finally:
+        shutil.rmtree(directory, ignore_errors=True)
+
 
 if os.getenv("LYRICS_PROCESS_CHILD") != "1":
     cleanup_stale_work(WORK_DIR)

@@ -5,9 +5,9 @@ import { v } from "convex/values";
 import { internal } from "../_generated/api";
 import { env, internalMutation } from "../_generated/server";
 import { activities } from "../activities/workflowManager";
-import { mediaOperationKind } from "./validators";
+import { coreMediaOperationKind } from "./validators";
 import { replaceUrlOrigin } from "./urls";
-import { getActivityJobState, getLyricTrack, recordScheduledActivity } from "./service";
+import { getActivityJobState, recordScheduledActivity } from "./service";
 
 async function artifactUrl(
   ctx: Parameters<typeof activities.getArtifactUrl>[0],
@@ -22,7 +22,7 @@ export const schedule = internalMutation({
   args: {
     jobId: v.id("mediaJobs"),
     workflowId: vWorkflowId,
-    kind: mediaOperationKind,
+    kind: coreMediaOperationKind,
   },
   returns: v.string(),
   handler: async (ctx, { jobId, workflowId, kind }): Promise<string> => {
@@ -31,11 +31,6 @@ export const schedule = internalMutation({
       if (!asset) throw new Error("Media job has no claimed asset");
       return asset;
     };
-    const generatedLyrics =
-      kind === "assembleAnnotations" && asset
-        ? await getLyricTrack(ctx, asset._id, "generated")
-        : null;
-
     const input =
       kind === "resolve" || kind === "download"
         ? { jobId }
@@ -43,28 +38,14 @@ export const schedule = internalMutation({
           ? {
               sourceUrl: await artifactUrl(ctx, requireAsset().sourceArtifactId),
             }
-          : kind === "separate" || kind === "transcribe" || kind === "analyzeMelody"
+          : kind === "separate"
             ? {
-                audioUrl: await artifactUrl(
-                  ctx,
-                  kind === "separate"
-                    ? requireAsset().extractedAudioArtifactId
-                    : requireAsset().vocalsArtifactId,
-                ),
+                audioUrl: await artifactUrl(ctx, requireAsset().extractedAudioArtifactId),
               }
-            : kind === "mux"
-              ? {
-                  videoUrl: await artifactUrl(ctx, requireAsset().sourceArtifactId),
-                  instrumentalUrl: await artifactUrl(ctx, requireAsset().instrumentalArtifactId),
-                }
-              : {
-                  lyricsUrl: await artifactUrl(ctx, generatedLyrics?.timedArtifactId),
-                  melodyUrl: await artifactUrl(ctx, requireAsset().melodyArtifactId),
-                  duration: requireAsset().duration!,
-                  extractor: requireAsset().extractor,
-                  sourceId: requireAsset().sourceId,
-                  title: requireAsset().title,
-                };
+            : {
+                videoUrl: await artifactUrl(ctx, requireAsset().sourceArtifactId),
+                instrumentalUrl: await artifactUrl(ctx, requireAsset().instrumentalArtifactId),
+              };
 
     const definition = mediaActivities[kind];
     const activityId: string = await activities.schedule(

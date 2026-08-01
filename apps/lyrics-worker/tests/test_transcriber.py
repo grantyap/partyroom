@@ -28,6 +28,17 @@ class FakeSession:
 class FakeAligner:
     def __init__(self, model: str) -> None:
         self.model = model
+        self.request: tuple[object, str, str] | None = None
+
+    def align(self, audio: object, text: str, language: str) -> list[object]:
+        self.request = (audio, text, language)
+        return [
+            types.SimpleNamespace(
+                text="LRCLIB",
+                start_time=1.25,
+                end_time=1.75,
+            )
+        ]
 
 
 class TranscriberTest(unittest.TestCase):
@@ -58,6 +69,31 @@ class TranscriberTest(unittest.TestCase):
         self.assertEqual(transcriber._session.request["max_new_tokens"], 512)
         self.assertIs(
             transcriber._session.request["forced_aligner"], transcriber._aligner
+        )
+
+    def test_mlx_adapter_aligns_external_transcript(self) -> None:
+        module = types.ModuleType("mlx_qwen3_asr")
+        module.Session = FakeSession  # type: ignore[attr-defined]
+        module.ForcedAligner = FakeAligner  # type: ignore[attr-defined]
+        with patch.dict(sys.modules, {"mlx_qwen3_asr": module}):
+            transcriber = MlxTranscriber(
+                asr_model="asr",
+                aligner_model="aligner",
+                max_new_tokens=512,
+            )
+            words = transcriber.align(
+                audio=("samples", 16_000),  # type: ignore[arg-type]
+                text="LRCLIB",
+                language="English",
+            )
+
+        self.assertEqual(
+            [(word.text, word.start_time, word.end_time) for word in words],
+            [("LRCLIB", 1.25, 1.75)],
+        )
+        self.assertEqual(
+            transcriber._aligner.request,
+            ("samples", "LRCLIB", "English"),
         )
 
     def test_rejects_unknown_backend(self) -> None:

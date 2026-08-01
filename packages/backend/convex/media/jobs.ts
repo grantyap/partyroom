@@ -312,6 +312,7 @@ export const getJob = query({
             }
           : undefined,
         lrclibLyricsState: lrclibLyrics?.state,
+        lrclibLyricsTimingKind: lrclibLyrics?.timing,
         lrclibLyricsTiming: lrclibLyrics
           ? {
               startedAt: lrclibLyrics.createdAt,
@@ -320,6 +321,7 @@ export const getJob = query({
                 : { completedAt: lrclibLyrics.updatedAt }),
             }
           : undefined,
+        enrichmentState: enrichment?.state,
         asset,
         activities: activityRows,
         timings: [...(job.stepTimings ?? []), ...(enrichment?.stepTimings ?? [])],
@@ -417,6 +419,7 @@ export const listRoomMedia = query({
                 }
               : undefined,
             lrclibLyricsState: lrclibLyrics?.state,
+            lrclibLyricsTimingKind: lrclibLyrics?.timing,
             lrclibLyricsTiming: lrclibLyrics
               ? {
                   startedAt: lrclibLyrics.createdAt,
@@ -425,6 +428,7 @@ export const listRoomMedia = query({
                     : { completedAt: lrclibLyrics.updatedAt }),
                 }
               : undefined,
+            enrichmentState: enrichment?.state,
             asset,
             activities: activityRows,
             timings: [...(job?.stepTimings ?? []), ...(enrichment?.stepTimings ?? [])],

@@ -38,6 +38,7 @@
 			extractAudio: "Extract audio",
 			separate: "Separate stems",
 			transcribe: "Transcribe lyrics",
+			alignLyrics: "Align LRCLIB lyrics",
 			analyzeMelody: "Analyze melody",
 			mux: "Build final video",
 			assembleAnnotations: "Assemble annotations",

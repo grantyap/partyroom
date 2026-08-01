@@ -25,6 +25,14 @@ class Transcriber(Protocol):
         return_time_stamps: bool,
     ) -> list[Any]: ...
 
+    def align(
+        self,
+        *,
+        audio: tuple[Any, int],
+        text: str,
+        language: str,
+    ) -> list[AlignedWord]: ...
+
 
 class MlxTranscriber:
     def __init__(
@@ -69,6 +77,88 @@ class MlxTranscriber:
             )
         ]
 
+    def align(
+        self,
+        *,
+        audio: tuple[Any, int],
+        text: str,
+        language: str,
+    ) -> list[AlignedWord]:
+        samples, sample_rate = audio
+        if sample_rate != 16_000:
+            raise ValueError("MLX forced alignment requires 16 kHz audio")
+        return [
+            AlignedWord(
+                text=str(word.text),
+                start_time=float(word.start_time),
+                end_time=float(word.end_time),
+            )
+            for word in self._aligner.align(samples, text, language)
+        ]
+
+
+class PytorchTranscriber:
+    def __init__(
+        self,
+        *,
+        asr_model: str,
+        aligner_model: str,
+        max_new_tokens: int,
+    ) -> None:
+        import torch
+        from qwen_asr import Qwen3ASRModel
+
+        requested_device = os.getenv("LYRICS_DEVICE", "auto")
+        device = (
+            "cuda:0"
+            if requested_device == "auto" and torch.cuda.is_available()
+            else requested_device
+        )
+        if device == "auto":
+            device = "cpu"
+        dtype = torch.bfloat16 if device.startswith("cuda") else torch.float32
+        self._model = Qwen3ASRModel.from_pretrained(
+            asr_model,
+            dtype=dtype,
+            device_map=device,
+            max_inference_batch_size=1,
+            max_new_tokens=max_new_tokens,
+            forced_aligner=aligner_model,
+            forced_aligner_kwargs={"dtype": dtype, "device_map": device},
+        )
+
+    def transcribe(
+        self,
+        *,
+        audio: tuple[Any, int],
+        language: str | None,
+        return_time_stamps: bool,
+    ) -> list[Any]:
+        return self._model.transcribe(
+            audio=audio,
+            language=language,
+            return_time_stamps=return_time_stamps,
+        )
+
+    def align(
+        self,
+        *,
+        audio: tuple[Any, int],
+        text: str,
+        language: str,
+    ) -> list[AlignedWord]:
+        aligner = self._model.forced_aligner
+        if aligner is None:
+            raise RuntimeError("Qwen forced aligner is not loaded")
+        return [
+            AlignedWord(
+                text=str(word.text),
+                start_time=float(word.start_time),
+                end_time=float(word.end_time),
+            )
+            for word in aligner.align(audio=audio, text=text, language=language)[0]
+        ]
+
 
 def create_transcriber(
     backend: str,
@@ -85,25 +175,8 @@ def create_transcriber(
         )
     if backend != "pytorch":
         raise ValueError(f"Unsupported lyrics backend: {backend}")
-
-    import torch
-    from qwen_asr import Qwen3ASRModel
-
-    requested_device = os.getenv("LYRICS_DEVICE", "auto")
-    device = (
-        "cuda:0"
-        if requested_device == "auto" and torch.cuda.is_available()
-        else requested_device
-    )
-    if device == "auto":
-        device = "cpu"
-    dtype = torch.bfloat16 if device.startswith("cuda") else torch.float32
-    return Qwen3ASRModel.from_pretrained(
-        asr_model,
-        dtype=dtype,
-        device_map=device,
-        max_inference_batch_size=1,
+    return PytorchTranscriber(
+        asr_model=asr_model,
+        aligner_model=aligner_model,
         max_new_tokens=max_new_tokens,
-        forced_aligner=aligner_model,
-        forced_aligner_kwargs={"dtype": dtype, "device_map": device},
     )

@@ -191,6 +191,48 @@
       }
     }
   },
+  "alignLyrics": {
+    "name": "media.alignLyrics",
+    "version": 1,
+    "taskQueue": "lyrics",
+    "input": {
+      "kind": "object",
+      "fields": {
+        "audioUrl": {
+          "kind": "string"
+        },
+        "lyrics": {
+          "kind": "string"
+        },
+        "language": {
+          "kind": "string"
+        }
+      }
+    },
+    "output": {
+      "kind": "object",
+      "fields": {
+        "timedLyricsArtifactId": {
+          "kind": "artifact",
+          "disposition": "retained"
+        },
+        "contentType": {
+          "kind": "string"
+        },
+        "model": {
+          "kind": "string"
+        },
+        "language": {
+          "kind": "string"
+        }
+      }
+    },
+    "artifacts": {
+      "timedLyricsArtifactId": {
+        "disposition": "retained"
+      }
+    }
+  },
   "analyzeMelody": {
     "name": "media.analyzeMelody",
     "version": 2,
