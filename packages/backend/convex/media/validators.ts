@@ -38,6 +38,7 @@ export const lyricTrackMetadata = v.object({
   trackName: v.optional(v.string()),
   artistName: v.optional(v.string()),
   albumName: v.optional(v.string()),
+  format: v.optional(v.string()),
 });
 
 export const mediaOperationKind = v.union(

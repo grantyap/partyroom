@@ -1,6 +1,8 @@
 import { describe, expect, test } from "vitest";
 import {
   lrclibSearchTitle,
+  normalizeLrclibTimedLyrics,
+  parseLyricsfile,
   parseSyncedLyrics,
   retryAfterMilliseconds,
   suggestLyricsOffsetMs,
@@ -24,6 +26,99 @@ describe("LRCLIB lyric normalization", () => {
     expect(parseSyncedLyrics("[01:02.5] Last line")).toEqual([
       { time: 62.5, duration: 4, value: "Last line" },
     ]);
+  });
+
+  test("parses Lyricsfile words and applies its global offset", () => {
+    expect(
+      parseLyricsfile(`
+version: "1.0"
+metadata:
+  title: Example
+  artist: Artist
+  offset_ms: 100
+lines:
+  - text: Hello world
+    start_ms: 1000
+    end_ms: 1800
+    words:
+      - text: "Hello "
+        start_ms: 1000
+      - text: world
+        start_ms: 1400
+`),
+    ).toEqual({
+      timing: "word",
+      observations: [
+        { time: 1.1, duration: 0.4, value: "Hello" },
+        { time: 1.5, duration: 0.4, value: "world" },
+      ],
+    });
+  });
+
+  test("uses Lyricsfile line timing when word timing is unavailable", () => {
+    expect(
+      parseLyricsfile(`
+version: "1.0"
+metadata:
+  title: Example
+  artist: Artist
+lines:
+  - text: First line
+    start_ms: 2000
+    end_ms: 3500
+`),
+    ).toEqual({
+      timing: "line",
+      observations: [{ time: 2, duration: 1.5, value: "First line" }],
+    });
+  });
+
+  test("rejects malformed Lyricsfile so legacy synced lyrics can be used", () => {
+    expect(parseLyricsfile("version: [not valid")).toBeNull();
+  });
+
+  test("prefers word-timed Lyricsfile over legacy synced lyrics", () => {
+    expect(
+      normalizeLrclibTimedLyrics({
+        lyricsfile: `
+version: "1.0"
+metadata:
+  title: Example
+  artist: Artist
+lines:
+  - text: Hello world
+    start_ms: 1000
+    end_ms: 1800
+    words:
+      - text: "Hello "
+        start_ms: 1000
+      - text: world
+        start_ms: 1400
+`,
+        syncedLyrics: "[00:09.00] Legacy line",
+      }),
+    ).toMatchObject({
+      timing: "word",
+      format: "lyricsfile",
+      observations: [
+        { time: 1, duration: 0.4, value: "Hello" },
+        { time: 1.4, duration: 0.4, value: "world" },
+      ],
+    });
+  });
+
+  test("falls back to legacy synced lyrics when Lyricsfile is unusable", () => {
+    expect(
+      normalizeLrclibTimedLyrics({
+        lyricsfile: "invalid: yaml: value",
+        syncedLyrics: "[00:09.00] Legacy line",
+        duration: 12,
+      }),
+    ).toEqual({
+      timing: "line",
+      format: "syncedLyrics",
+      observations: [{ time: 9, duration: 3, value: "Legacy line" }],
+    });
   });
 
   test("honors numeric and HTTP-date Retry-After values", () => {
@@ -81,5 +176,14 @@ describe("LRCLIB lyric normalization", () => {
         ],
       ),
     ).toBeNull();
+  });
+
+  test("suggests an offset from word-timed reference lyrics", () => {
+    const reference = ["You", "know", "I", "want", "you", "here"].map((value, index) => ({
+      time: 5 + index * 0.2,
+      value,
+    }));
+    const generated = reference.map(({ time, value }) => ({ time: time + 8, value }));
+    expect(suggestLyricsOffsetMs(reference, generated, "word")).toBe(8_000);
   });
 });

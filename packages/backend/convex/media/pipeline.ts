@@ -96,7 +96,7 @@ export const mediaPipeline = managedWorkflow
               jobId,
               source: "lrclib",
               label: "LRCLIB",
-              timing: "line",
+              timing: result.timing,
               state: result.state,
               observations: result.observations,
               metadata: {
@@ -104,6 +104,7 @@ export const mediaPipeline = managedWorkflow
                 trackName: result.trackName,
                 artistName: result.artistName,
                 albumName: result.albumName,
+                format: result.format,
               },
             },
             { name: "record-lrclib", inline: true },

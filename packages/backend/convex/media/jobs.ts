@@ -265,6 +265,7 @@ export const getLyricOffsetSuggestionInputs = internalQuery({
     v.object({
       generatedLyricsUrl: v.string(),
       referenceObservations: v.array(lyricObservation),
+      referenceTiming: v.union(v.literal("word"), v.literal("line")),
     }),
   ),
   handler: async (ctx, { jobId }) => {
@@ -286,7 +287,11 @@ export const getLyricOffsetSuggestionInputs = internalQuery({
     }
     const generatedLyricsUrl = await mediaArtifactUrl(ctx, generated.timedArtifactId);
     return generatedLyricsUrl
-      ? { generatedLyricsUrl, referenceObservations: lrclib.observations }
+      ? {
+          generatedLyricsUrl,
+          referenceObservations: lrclib.observations,
+          referenceTiming: lrclib.timing,
+        }
       : null;
   },
 });
