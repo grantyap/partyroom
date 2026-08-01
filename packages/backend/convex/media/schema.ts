@@ -6,6 +6,7 @@ import {
   lyricTrackMetadata,
   lyricTrackState,
   lyricObservation,
+  mediaEnrichmentState,
   mediaJobState,
   mediaOperationKind,
 } from "./validators";
@@ -83,6 +84,27 @@ export const mediaTables = {
   })
     .index("by_request_key", ["requestKey"])
     .index("by_asset", ["asset"]),
+
+  mediaEnrichments: defineTable({
+    asset: v.id("mediaAssets"),
+    workflowId: v.optional(v.string()),
+    state: mediaEnrichmentState,
+    activeActivities: v.optional(
+      v.array(v.object({ activityId: v.string(), kind: mediaOperationKind })),
+    ),
+    stepTimings: v.optional(
+      v.array(
+        v.object({
+          kind: mediaOperationKind,
+          startedAt: v.number(),
+          completedAt: v.number(),
+        }),
+      ),
+    ),
+    error: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_asset", ["asset"]),
 
   roomMedia: defineTable({
     room: v.id("rooms"),

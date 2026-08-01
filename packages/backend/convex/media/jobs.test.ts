@@ -1,4 +1,5 @@
 import { convexTest } from "convex-test";
+import type { WorkflowId } from "@convex-dev/workflow";
 import { describe, expect, test } from "vitest";
 import { internal } from "../_generated/api";
 import type { Id } from "../_generated/dataModel";
@@ -164,6 +165,71 @@ describe("media jobs", () => {
         artifactId: "stale-artifact",
       }),
     ).rejects.toThrow("no longer owns");
+  });
+
+  test("lets only the current enrichment workflow write after playback is ready", async () => {
+    const t = convexTest(schema, modules);
+    const roomId = await seedRoom(t);
+    const { jobId } = await createJob(t, roomId);
+    const claim = await t.mutation(internal.media.jobs.claimAsset, {
+      jobId,
+      extractor: "youtube",
+      sourceId: "detached-enrichment-owner",
+    });
+    const currentWorkflowId = "current-workflow" as WorkflowId;
+    const replacementWorkflowId = "replacement-workflow" as WorkflowId;
+    const enrichmentId = await t.run(async (ctx) => {
+      const now = Date.now();
+      await ctx.db.patch("mediaAssets", claim.assetId, {
+        state: "ready",
+        activeJob: undefined,
+      });
+      return await ctx.db.insert("mediaEnrichments", {
+        asset: claim.assetId,
+        workflowId: currentWorkflowId,
+        state: "processing",
+        createdAt: now,
+        updatedAt: now,
+      });
+    });
+
+    await t.mutation(internal.media.enrichment.markGeneratedLyricsProcessing, {
+      enrichmentId,
+      workflowId: currentWorkflowId,
+    });
+    await t.mutation(internal.media.enrichment.recordGeneratedLyrics, {
+      enrichmentId,
+      workflowId: currentWorkflowId,
+      textArtifactId: "captions",
+      timedArtifactId: "timed-lyrics",
+    });
+    await t.run(
+      async (ctx) =>
+        await ctx.db.patch("mediaEnrichments", enrichmentId, {
+          workflowId: replacementWorkflowId,
+        }),
+    );
+
+    await expect(
+      t.mutation(internal.media.enrichment.recordMelody, {
+        enrichmentId,
+        workflowId: currentWorkflowId,
+        artifactId: "stale-melody",
+      }),
+    ).rejects.toThrow("no longer current");
+    const generated = await t.run(async (ctx) => {
+      return await ctx.db
+        .query("mediaLyricTracks")
+        .withIndex("by_asset_and_source", (q) =>
+          q.eq("asset", claim.assetId).eq("source", "generated"),
+        )
+        .unique();
+    });
+    expect(generated).toMatchObject({
+      state: "ready",
+      textArtifactId: "captions",
+      timedArtifactId: "timed-lyrics",
+    });
   });
 
   test("deletes a completed asset and clears both media cache layers", async () => {
@@ -454,33 +520,64 @@ describe("media jobs", () => {
     });
   });
 
-  test("keeps instrumental playback available when annotations fail", async () => {
+  test("marks playback ready while durable enrichment is still processing", async () => {
     const t = convexTest(schema, modules);
     const roomId = await seedRoom(t);
     const { jobId } = await createJob(t, roomId);
-    await t.mutation(internal.media.jobs.claimAsset, {
+    const claim = await t.mutation(internal.media.jobs.claimAsset, {
       jobId,
       extractor: "youtube",
-      sourceId: "optional-annotations",
+      sourceId: "durable-enrichment",
     });
-
-    await t.mutation(internal.media.jobs.markAnnotationsFailed, {
+    const finalVideo = await t.run(async (ctx) => await ctx.storage.store(new Blob(["video"])));
+    await t.mutation(internal.media.jobs.recordStageResult, {
       jobId,
-      errorMessage: "model unavailable",
+      kind: "mux",
+      artifactId: finalVideo,
     });
+    await t.run(async (ctx) => {
+      const now = Date.now();
+      await ctx.db.insert("mediaEnrichments", {
+        asset: claim.assetId,
+        workflowId: "detached-workflow",
+        state: "processing",
+        createdAt: now,
+        updatedAt: now,
+      });
+      await ctx.db.insert("mediaLyricTracks", {
+        asset: claim.assetId,
+        source: "generated",
+        label: "Generated",
+        timing: "word",
+        state: "processing",
+        createdAt: now,
+        updatedAt: now,
+      });
+    });
+    await t.mutation(internal.media.jobs.finalizeAsset, { jobId });
 
-    const asset = await t.run(async (ctx) => {
+    const result = await t.run(async (ctx) => {
       const job = await ctx.db.get("mediaJobs", jobId);
-      return job?.asset ? await ctx.db.get("mediaAssets", job.asset) : null;
+      return {
+        job,
+        asset: job?.asset ? await ctx.db.get("mediaAssets", job.asset) : null,
+        enrichment: await ctx.db
+          .query("mediaEnrichments")
+          .withIndex("by_asset", (q) => q.eq("asset", claim.assetId))
+          .unique(),
+      };
     });
-    expect(asset).toMatchObject({
-      state: "processing",
-      annotationsState: "failed",
-      annotationsError: "model unavailable",
+    expect(result.job).toMatchObject({ state: "ready", stage: "ready" });
+    expect(result.asset).toMatchObject({
+      state: "ready",
+      finalArtifactId: finalVideo,
+      annotationsState: "processing",
     });
+    expect(result.asset?.activeJob).toBeUndefined();
+    expect(result.enrichment?.state).toBe("processing");
   });
 
-  test("only reuses a cache entry after playback, lyrics, and annotations are terminal", async () => {
+  test("reuses a cache entry as soon as playback is ready", async () => {
     const t = convexTest(schema, modules);
     const roomId = await seedRoom(t);
     const first = await createJob(t, roomId, "cache-owner");
@@ -490,28 +587,11 @@ describe("media jobs", () => {
       sourceId: "complete-cache-entry",
     });
     expect(claim.mode).toBe("owner");
-    const [lyrics, finalVideo] = await t.run(async (ctx) =>
-      Promise.all([
-        ctx.storage.store(new Blob(["WEBVTT"])),
-        ctx.storage.store(new Blob(["video"])),
-      ]),
-    );
-    await t.mutation(internal.media.jobs.recordLyricTrack, {
-      jobId: first.jobId,
-      source: "generated",
-      label: "Generated",
-      timing: "word",
-      state: "ready",
-      textArtifactId: lyrics,
-    });
+    const finalVideo = await t.run(async (ctx) => await ctx.storage.store(new Blob(["video"])));
     await t.mutation(internal.media.jobs.recordStageResult, {
       jobId: first.jobId,
       kind: "mux",
       artifactId: finalVideo,
-    });
-    await t.mutation(internal.media.jobs.markAnnotationsFailed, {
-      jobId: first.jobId,
-      errorMessage: "optional model failure",
     });
     await t.mutation(internal.media.jobs.finalizeAsset, { jobId: first.jobId });
 

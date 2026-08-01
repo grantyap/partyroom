@@ -20,6 +20,13 @@ export const annotationState = v.union(
   v.literal("failed"),
 );
 
+export const mediaEnrichmentState = v.union(
+  v.literal("processing"),
+  v.literal("ready"),
+  v.literal("failed"),
+  v.literal("canceled"),
+);
+
 export const lyricTrackState = v.union(
   v.literal("processing"),
   v.literal("ready"),

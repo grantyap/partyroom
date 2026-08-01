@@ -464,7 +464,7 @@ export const lookup = internalAction({
 
 export const suggestOffset = internalAction({
   args: {
-    jobId: v.id("mediaJobs"),
+    requestId: v.string(),
     generatedLyricsUrl: v.string(),
     referenceObservations: v.array(lyricObservation),
     referenceTiming: v.union(v.literal("word"), v.literal("line")),
@@ -491,7 +491,7 @@ export const suggestOffset = internalAction({
       args.referenceTiming,
     );
     log(suggestedOffsetMs === null ? "offset.unavailable" : "offset.suggested", {
-      jobId: args.jobId,
+      requestId: args.requestId,
       suggestedOffsetMs,
       referenceLineCount: args.referenceObservations.length,
       generatedObservationCount: observations.length,

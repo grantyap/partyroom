@@ -156,49 +156,11 @@ export const mediaPipeline = managedWorkflow
         },
         { name: "record-separate", inline: true },
       );
-
-      const transcriptionBranch = (async () => {
-        const result = await runActivity("transcribe");
-        await step.runMutation(
-          internal.media.jobs.recordLyricTrack,
-          {
-            jobId,
-            source: "generated",
-            label: "Generated",
-            timing: "word",
-            state: "ready",
-            textArtifactId: result.lyricsArtifactId,
-            timedArtifactId: result.timedLyricsArtifactId,
-          },
-          { name: "record-transcribe", inline: true },
-        );
-        return result;
-      })();
-      const melodyBranch = (async () => {
-        try {
-          const result = await runActivity("analyzeMelody");
-          await step.runMutation(
-            internal.media.jobs.recordStageResult,
-            {
-              jobId,
-              kind: "analyzeMelody",
-              artifactId: result.artifactId,
-            },
-            { name: "record-analyzeMelody", inline: true },
-          );
-          return result;
-        } catch (error) {
-          await step.runMutation(
-            internal.media.jobs.markAnnotationsFailed,
-            {
-              jobId,
-              errorMessage: error instanceof Error ? error.message : String(error),
-            },
-            { name: "mark-melody-failed", inline: true },
-          );
-          return null;
-        }
-      })();
+      await step.runMutation(
+        internal.media.enrichment.start,
+        { jobId },
+        { name: "start-enrichment", inline: true },
+      );
       const muxBranch = (async () => {
         const result = await runActivity("mux");
         await step.runMutation(
@@ -213,65 +175,7 @@ export const mediaPipeline = managedWorkflow
         return result;
       })();
 
-      const [, melody] = await Promise.all([
-        transcriptionBranch,
-        melodyBranch,
-        muxBranch,
-        lrclibLyricsBranch,
-      ]);
-
-      try {
-        const inputs = await step.runQuery(
-          internal.media.jobs.getLyricOffsetSuggestionInputs,
-          { jobId },
-          { name: "prepare-lyric-offset", inline: true },
-        );
-        if (inputs) {
-          const suggestedOffsetMs = await step.runAction(
-            internal.media.lrclib.suggestOffset,
-            { jobId, ...inputs },
-            { name: "suggest-lyric-offset" },
-          );
-          if (suggestedOffsetMs !== null) {
-            await step.runMutation(
-              internal.media.jobs.recordSuggestedLyricOffset,
-              { jobId, source: "lrclib", suggestedOffsetMs },
-              { name: "record-lyric-offset", inline: true },
-            );
-          }
-        }
-      } catch (error) {
-        console.warn("[lrclib] Unable to suggest lyrics offset", {
-          jobId,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-
-      if (melody) {
-        try {
-          const annotations = await runActivity("assembleAnnotations");
-          await step.runMutation(
-            internal.media.jobs.recordStageResult,
-            {
-              jobId,
-              kind: "assembleAnnotations",
-              artifactId: annotations.annotationsArtifactId,
-              secondaryArtifactId: annotations.midiArtifactId,
-              tertiaryArtifactId: annotations.musicXmlArtifactId,
-            },
-            { name: "record-assembleAnnotations", inline: true },
-          );
-        } catch (error) {
-          await step.runMutation(
-            internal.media.jobs.markAnnotationsFailed,
-            {
-              jobId,
-              errorMessage: error instanceof Error ? error.message : String(error),
-            },
-            { name: "mark-annotations-failed", inline: true },
-          );
-        }
-      }
+      await Promise.all([muxBranch, lrclibLyricsBranch]);
       await step.runMutation(
         internal.media.jobs.finalizeAsset,
         { jobId },

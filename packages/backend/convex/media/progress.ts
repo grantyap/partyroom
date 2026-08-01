@@ -92,6 +92,8 @@ function completedSteps(
 export function mediaPipelineStepStatuses({
   hasAsset,
   hasGeneratedLyrics = false,
+  generatedLyricsState,
+  generatedLyricsTiming,
   lrclibLyricsState,
   lrclibLyricsTiming,
   asset,
@@ -100,6 +102,8 @@ export function mediaPipelineStepStatuses({
 }: {
   hasAsset: boolean;
   hasGeneratedLyrics?: boolean;
+  generatedLyricsState?: "processing" | "ready" | "not_found" | "failed";
+  generatedLyricsTiming?: { startedAt: number; completedAt?: number };
   lrclibLyricsState?: "processing" | "ready" | "not_found" | "failed";
   lrclibLyricsTiming?: { startedAt: number; completedAt?: number };
   asset: ProgressAsset | null;
@@ -139,6 +143,9 @@ export function mediaPipelineStepStatuses({
       asset?.annotationsState === "failed" &&
       ((kind === "analyzeMelody" && !asset.melodyArtifactId) || kind === "assembleAnnotations");
 
+    if (kind === "transcribe" && generatedLyricsState === "failed") {
+      return stepStatus({ kind, state: "failed", progress: 1 }, activity, generatedLyricsTiming);
+    }
     if (annotationFailed) {
       return stepStatus({ kind, state: "failed", progress: 1 }, activity, timing);
     }
@@ -161,6 +168,9 @@ export function mediaPipelineStepStatuses({
         activity,
         timing,
       );
+    }
+    if (kind === "transcribe" && generatedLyricsState === "processing") {
+      return stepStatus({ kind, state: "running", progress: 0 }, undefined, generatedLyricsTiming);
     }
     return { kind, state: "pending", progress: 0 };
   });

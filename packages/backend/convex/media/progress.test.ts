@@ -129,4 +129,21 @@ describe("media pipeline progress", () => {
       completedAt: 14_500,
     });
   });
+
+  test("reports detached lyric generation after playback is ready", () => {
+    const steps = mediaPipelineStepStatuses({
+      hasAsset: true,
+      generatedLyricsState: "processing",
+      generatedLyricsTiming: { startedAt: 20_000 },
+      asset: { finalArtifactId: "playable-video" },
+      activities: [],
+      timings: [],
+    });
+
+    expect(steps.find((step) => step.kind === "mux")?.state).toBe("completed");
+    expect(steps.find((step) => step.kind === "transcribe")).toMatchObject({
+      state: "running",
+      startedAt: 20_000,
+    });
+  });
 });

@@ -126,7 +126,7 @@
         },
         "vocalsArtifactId": {
           "kind": "artifact",
-          "disposition": "intermediate"
+          "disposition": "retained"
         },
         "contentType": {
           "kind": "string"
@@ -141,7 +141,7 @@
         "disposition": "retained"
       },
       "vocalsArtifactId": {
-        "disposition": "intermediate"
+        "disposition": "retained"
       }
     }
   },

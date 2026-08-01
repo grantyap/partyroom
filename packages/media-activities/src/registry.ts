@@ -113,7 +113,9 @@ export const mediaActivities = {
     input: wire.object({ audioUrl: wire.string }),
     output: wire.object({
       instrumentalArtifactId: wire.artifact("retained"),
-      vocalsArtifactId: wire.artifact("intermediate"),
+      // The durable enrichment workflow may consume vocals after the core
+      // media workflow has completed and released its intermediate artifacts.
+      vocalsArtifactId: wire.artifact("retained"),
       contentType: wire.string,
       model: wire.string,
     }),

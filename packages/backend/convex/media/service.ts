@@ -7,21 +7,6 @@ import type { OperationKind } from "./validators";
 
 const mediaPipelineVersion = 4;
 
-export function hasTerminalAnnotations(asset: {
-  annotationsState?: "processing" | "ready" | "failed";
-  annotationsArtifactId?: string;
-  midiArtifactId?: string;
-  musicXmlArtifactId?: string;
-}) {
-  return (
-    asset.annotationsState === "failed" ||
-    (asset.annotationsState === "ready" &&
-      !!asset.annotationsArtifactId &&
-      !!asset.midiArtifactId &&
-      !!asset.musicXmlArtifactId)
-  );
-}
-
 export const assetArtifactFields = [
   "sourceArtifactId",
   "extractedAudioArtifactId",
@@ -43,6 +28,34 @@ export async function getLyricTrack(
     .query("mediaLyricTracks")
     .withIndex("by_asset_and_source", (q) => q.eq("asset", assetId).eq("source", source))
     .unique();
+}
+
+export async function getMediaEnrichment(ctx: Pick<QueryCtx, "db">, assetId: Id<"mediaAssets">) {
+  return await ctx.db
+    .query("mediaEnrichments")
+    .withIndex("by_asset", (q) => q.eq("asset", assetId))
+    .unique();
+}
+
+async function cancelAssetEnrichment(ctx: MutationCtx, assetId: Id<"mediaAssets">) {
+  const enrichment = await getMediaEnrichment(ctx, assetId);
+  if (!enrichment || enrichment.state !== "processing") return enrichment;
+  if (enrichment.workflowId) {
+    try {
+      await cancelWorkflow(ctx, enrichment.workflowId as WorkflowId);
+    } catch (error) {
+      console.warn(`Unable to cancel media enrichment ${enrichment.workflowId}`, error);
+    }
+  }
+  for (const activity of enrichment.activeActivities ?? []) {
+    await activities.cancel(ctx, activity.activityId as any);
+  }
+  return enrichment;
+}
+
+async function deleteAssetEnrichment(ctx: MutationCtx, assetId: Id<"mediaAssets">) {
+  const enrichment = await cancelAssetEnrichment(ctx, assetId);
+  if (enrichment) await ctx.db.delete("mediaEnrichments", enrichment._id);
 }
 
 async function deleteAssetArtifacts(ctx: MutationCtx, asset: Doc<"mediaAssets">) {
@@ -75,6 +88,7 @@ async function deleteLyricTracks(ctx: MutationCtx, assetId: Id<"mediaAssets">) {
 }
 
 async function deleteIncompleteAsset(ctx: MutationCtx, asset: Doc<"mediaAssets">) {
+  await deleteAssetEnrichment(ctx, asset._id);
   await deleteLyricTracks(ctx, asset._id);
   await deleteAssetArtifacts(ctx, asset);
   await ctx.db.delete(asset._id);
@@ -203,11 +217,7 @@ export async function createOrJoinMedia(
     const asset = candidate.asset ? await ctx.db.get("mediaAssets", candidate.asset) : null;
     if (
       candidate.state === "ready" &&
-      (!asset ||
-        asset.state !== "ready" ||
-        !asset.finalArtifactId ||
-        !(await getLyricTrack(ctx, asset._id, "generated"))?.textArtifactId ||
-        !hasTerminalAnnotations(asset))
+      (!asset || asset.state !== "ready" || !asset.finalArtifactId)
     )
       continue;
     existing = candidate;
@@ -296,6 +306,7 @@ export async function requeueRoomMedia(
       throw new Error("Media is already being processed");
     }
     if (asset) {
+      await cancelAssetEnrichment(ctx, asset._id);
       await ctx.db.patch("mediaAssets", asset._id, {
         state: "failed",
         activeJob: undefined,
@@ -432,6 +443,7 @@ export async function deleteCompletedMediaAsset(ctx: MutationCtx, assetId: Id<"m
       await ctx.db.patch("mediaJobs", job._id, { asset: undefined });
     }
   }
+  await deleteAssetEnrichment(ctx, assetId);
   const deletedStorageObjects =
     (await deleteAssetArtifacts(ctx, asset)) + (await deleteLyricTracks(ctx, assetId));
   await ctx.db.delete("mediaAssets", assetId);
@@ -465,12 +477,7 @@ export async function claimAssetForJob(
       asset: existing._id,
       updatedAt: now,
     });
-    if (
-      existing.state === "ready" &&
-      existing.finalArtifactId &&
-      (await getLyricTrack(ctx, existing._id, "generated"))?.textArtifactId &&
-      hasTerminalAnnotations(existing)
-    )
+    if (existing.state === "ready" && existing.finalArtifactId)
       return { mode: "cached" as const, assetId: existing._id };
     if (existing.activeJob && existing.activeJob !== args.jobId)
       return { mode: "waiting" as const, assetId: existing._id };
@@ -496,6 +503,7 @@ export async function claimAssetForJob(
         }
       }
     }
+    await deleteAssetEnrichment(ctx, existing._id);
     await deleteAssetArtifacts(ctx, existing);
     await ctx.db.patch("mediaAssets", existing._id, {
       activeJob: args.jobId,
@@ -584,19 +592,6 @@ export async function recordStageResultForJob(
   });
 }
 
-export async function markJobAnnotationsFailed(
-  ctx: MutationCtx,
-  jobId: Id<"mediaJobs">,
-  errorMessage: string,
-) {
-  const { asset } = await requireOwnedAsset(ctx, jobId);
-  await ctx.db.patch("mediaAssets", asset._id, {
-    annotationsState: "failed",
-    annotationsError: errorMessage.slice(0, 2000),
-    updatedAt: Date.now(),
-  });
-}
-
 async function markJobReady(ctx: MutationCtx, jobId: Id<"mediaJobs">, assetId: Id<"mediaAssets">) {
   const job = await requireJob(ctx, jobId);
   if (job.asset && job.asset !== assetId) {
@@ -622,26 +617,14 @@ export async function completeJobFromAsset(
   assetId: Id<"mediaAssets">,
 ) {
   const asset = await ctx.db.get("mediaAssets", assetId);
-  const generatedLyrics = asset ? await getLyricTrack(ctx, asset._id, "generated") : null;
-  if (
-    !asset?.finalArtifactId ||
-    !generatedLyrics?.textArtifactId ||
-    !hasTerminalAnnotations(asset) ||
-    asset.state !== "ready"
-  )
+  if (!asset?.finalArtifactId || asset.state !== "ready")
     throw new Error("Media asset is not ready");
   await markJobReady(ctx, jobId, assetId);
 }
 
 export async function finalizeAssetForJob(ctx: MutationCtx, jobId: Id<"mediaJobs">) {
   const { asset } = await requireOwnedAsset(ctx, jobId);
-  const generatedLyrics = await getLyricTrack(ctx, asset._id, "generated");
-  if (!asset.finalArtifactId || !generatedLyrics?.textArtifactId) {
-    throw new Error("Media asset is missing its final video or WebVTT lyrics");
-  }
-  if (!hasTerminalAnnotations(asset)) {
-    throw new Error("Media asset annotation processing did not reach a terminal state");
-  }
+  if (!asset.finalArtifactId) throw new Error("Media asset is missing its final video");
   await ctx.db.patch("mediaAssets", asset._id, {
     state: "ready",
     activeJob: undefined,
@@ -685,6 +668,7 @@ export async function failMediaJob(
   if (!job.asset) return;
   const asset = await ctx.db.get("mediaAssets", job.asset);
   if (asset?.activeJob !== args.jobId) return;
+  await cancelAssetEnrichment(ctx, asset._id);
   await ctx.db.patch("mediaAssets", asset._id, {
     state: "failed",
     activeJob: undefined,

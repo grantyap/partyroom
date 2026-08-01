@@ -23,7 +23,7 @@ import {
   failMediaJob,
   finalizeAssetForJob,
   getLyricTrack,
-  markJobAnnotationsFailed,
+  getMediaEnrichment,
   recordStageResultForJob,
   requeueRoomMedia,
   removeRoomMedia,
@@ -210,12 +210,6 @@ export const recordStageResult = internalMutation({
     }),
 });
 
-export const markAnnotationsFailed = internalMutation({
-  args: { jobId: v.id("mediaJobs"), errorMessage: v.string() },
-  handler: async (ctx, { jobId, errorMessage }) =>
-    await markJobAnnotationsFailed(ctx, jobId, errorMessage),
-});
-
 export const recordLyricTrack = internalMutation({
   args: {
     jobId: v.id("mediaJobs"),
@@ -254,67 +248,6 @@ export const recordLyricTrack = internalMutation({
     };
     if (existing) await ctx.db.patch("mediaLyricTracks", existing._id, value);
     else await ctx.db.insert("mediaLyricTracks", { ...value, createdAt: now });
-    return null;
-  },
-});
-
-export const getLyricOffsetSuggestionInputs = internalQuery({
-  args: { jobId: v.id("mediaJobs") },
-  returns: v.union(
-    v.null(),
-    v.object({
-      generatedLyricsUrl: v.string(),
-      referenceObservations: v.array(lyricObservation),
-      referenceTiming: v.union(v.literal("word"), v.literal("line")),
-    }),
-  ),
-  handler: async (ctx, { jobId }) => {
-    const job = await ctx.db.get("mediaJobs", jobId);
-    if (!job?.asset) return null;
-    const asset = await ctx.db.get("mediaAssets", job.asset);
-    if (!asset || asset.activeJob !== job._id) return null;
-    const [generated, lrclib] = await Promise.all([
-      getLyricTrack(ctx, asset._id, "generated"),
-      getLyricTrack(ctx, asset._id, "lrclib"),
-    ]);
-    if (
-      generated?.state !== "ready" ||
-      !generated.timedArtifactId ||
-      lrclib?.state !== "ready" ||
-      !lrclib.observations?.length
-    ) {
-      return null;
-    }
-    const generatedLyricsUrl = await mediaArtifactUrl(ctx, generated.timedArtifactId);
-    return generatedLyricsUrl
-      ? {
-          generatedLyricsUrl,
-          referenceObservations: lrclib.observations,
-          referenceTiming: lrclib.timing,
-        }
-      : null;
-  },
-});
-
-export const recordSuggestedLyricOffset = internalMutation({
-  args: {
-    jobId: v.id("mediaJobs"),
-    source: v.string(),
-    suggestedOffsetMs: v.number(),
-  },
-  returns: v.null(),
-  handler: async (ctx, { jobId, source, suggestedOffsetMs }) => {
-    const job = await ctx.db.get("mediaJobs", jobId);
-    if (!job?.asset) return null;
-    const asset = await ctx.db.get("mediaAssets", job.asset);
-    if (!asset || asset.activeJob !== job._id) return null;
-    const track = await getLyricTrack(ctx, asset._id, source);
-    if (track) {
-      await ctx.db.patch("mediaLyricTracks", track._id, {
-        suggestedOffsetMs,
-        updatedAt: Date.now(),
-      });
-    }
     return null;
   },
 });
@@ -358,13 +291,26 @@ export const getJob = query({
       : [];
     const generatedLyrics = lyricTracks.find(({ source }) => source === "generated");
     const lrclibLyrics = lyricTracks.find(({ source }) => source === "lrclib");
-    const activities = await activityStatuses(ctx, job.activeActivities);
+    const enrichment = asset ? await getMediaEnrichment(ctx, asset._id) : null;
+    const activityRows = await activityStatuses(ctx, [
+      ...(job.activeActivities ?? []),
+      ...(enrichment?.activeActivities ?? []),
+    ]);
     return {
       _id: job._id,
       state: job.state,
       steps: mediaPipelineStepStatuses({
         hasAsset: !!job.asset,
         hasGeneratedLyrics: !!generatedLyrics?.timedArtifactId,
+        generatedLyricsState: generatedLyrics?.state,
+        generatedLyricsTiming: generatedLyrics
+          ? {
+              startedAt: generatedLyrics.createdAt,
+              ...(generatedLyrics.state === "processing"
+                ? {}
+                : { completedAt: generatedLyrics.updatedAt }),
+            }
+          : undefined,
         lrclibLyricsState: lrclibLyrics?.state,
         lrclibLyricsTiming: lrclibLyrics
           ? {
@@ -375,8 +321,8 @@ export const getJob = query({
             }
           : undefined,
         asset,
-        activities,
-        timings: job.stepTimings ?? [],
+        activities: activityRows,
+        timings: [...(job.stepTimings ?? []), ...(enrichment?.stepTimings ?? [])],
       }),
       errorCode: job.errorCode,
       errorMessage: job.errorMessage,
@@ -418,9 +364,13 @@ export const listRoomMedia = query({
               .withIndex("by_asset", (q) => q.eq("asset", asset._id))
               .take(20)
           : [];
-        const activities = await activityStatuses(ctx, job?.activeActivities);
         const generatedLyrics = lyricTracks.find(({ source }) => source === "generated");
         const lrclibLyrics = lyricTracks.find(({ source }) => source === "lrclib");
+        const enrichment = asset ? await getMediaEnrichment(ctx, asset._id) : null;
+        const activityRows = await activityStatuses(ctx, [
+          ...(job?.activeActivities ?? []),
+          ...(enrichment?.activeActivities ?? []),
+        ]);
         const annotationsUrl = asset
           ? await mediaArtifactUrl(ctx, asset.annotationsArtifactId)
           : null;
@@ -457,6 +407,15 @@ export const listRoomMedia = query({
           steps: mediaPipelineStepStatuses({
             hasAsset: !!job?.asset,
             hasGeneratedLyrics: !!generatedLyrics?.timedArtifactId,
+            generatedLyricsState: generatedLyrics?.state,
+            generatedLyricsTiming: generatedLyrics
+              ? {
+                  startedAt: generatedLyrics.createdAt,
+                  ...(generatedLyrics.state === "processing"
+                    ? {}
+                    : { completedAt: generatedLyrics.updatedAt }),
+                }
+              : undefined,
             lrclibLyricsState: lrclibLyrics?.state,
             lrclibLyricsTiming: lrclibLyrics
               ? {
@@ -467,8 +426,8 @@ export const listRoomMedia = query({
                 }
               : undefined,
             asset,
-            activities,
-            timings: job?.stepTimings ?? [],
+            activities: activityRows,
+            timings: [...(job?.stepTimings ?? []), ...(enrichment?.stepTimings ?? [])],
           }),
           title: asset?.title,
           duration: asset?.duration,
