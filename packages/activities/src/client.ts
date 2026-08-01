@@ -25,6 +25,12 @@ import {
 export type ActivityId = string & { readonly __activityId: unique symbol };
 export type ActivityState = "scheduled" | "running" | "completed" | "failed" | "canceled";
 
+/**
+ * Retry policy applied by an activity worker.
+ *
+ * {@link defineActivity} supplies conservative defaults, so definitions only
+ * need to override values that are part of their worker contract.
+ */
 export type RetryPolicy = {
   maximumAttempts: number;
   initialIntervalMs: number;
@@ -33,6 +39,15 @@ export type RetryPolicy = {
   nonRetryableErrorTypes: string[];
 };
 
+/**
+ * Declares where an activity runs and how long a worker may hold its lease.
+ *
+ * Reuse queue definitions across activities that share worker capacity. Use
+ * `maxConcurrentActivities` only when the queue itself needs a hard cap.
+ *
+ * @see {@link defineQueue}
+ * @see {@link defineActivity}
+ */
 export type QueueDefinition<Name extends string = string> = {
   readonly name: Name;
   readonly leaseDurationMs: number;
@@ -45,6 +60,15 @@ export type ArtifactDefinitions = Readonly<
   Record<string, { readonly disposition: ArtifactDisposition }>
 >;
 
+/**
+ * Frozen worker-facing contract produced by {@link defineActivity}.
+ *
+ * Pass the definition itself to consumers such as `activityStep`; its generic
+ * parameters preserve the relationship between queue, input, output, and
+ * artifacts without callers supplying type arguments.
+ *
+ * @see {@link defineActivity}
+ */
 export type ActivityDefinition<
   Name extends string = string,
   Version extends number = number,
@@ -76,6 +100,12 @@ const defaultRetryPolicy: RetryPolicy = {
   nonRetryableErrorTypes: [],
 };
 
+/**
+ * Creates a reusable queue definition while preserving the queue name literal.
+ *
+ * @see {@link QueueDefinition}
+ * @see {@link defineActivity}
+ */
 export function defineQueue<const Name extends string>(
   name: Name,
   options: Omit<QueueDefinition<Name>, "name">,
@@ -83,6 +113,23 @@ export function defineQueue<const Name extends string>(
   return Object.freeze({ name, ...options });
 }
 
+/**
+ * Defines and validates an external activity's complete worker contract.
+ *
+ * Prefer this inference boundary over annotating an {@link ActivityDefinition}
+ * object directly: the input/output wire schemas remain available, literal
+ * names and versions stay narrow, and artifact metadata is derived once for
+ * every scheduler and worker consumer. The returned definition is frozen.
+ *
+ * Timeouts are intentionally explicit. Retries default to three attempts with
+ * exponential backoff from 1 second to 60 seconds; override only the fields
+ * whose behavior differs. Bump `version` for incompatible worker-observable
+ * changes, not for workflow-only orchestration changes.
+ *
+ * @see {@link defineQueue}
+ * @see {@link defineActivityRegistry}
+ * @see {@link activityStep}
+ */
 export function defineActivity<
   const Name extends string,
   const Version extends number,
@@ -133,6 +180,15 @@ export function defineActivity<
   });
 }
 
+/**
+ * Groups queue and activity definitions without widening their inferred keys.
+ *
+ * The registry is a discoverability and type-preservation boundary, not a
+ * second source of configuration; define policy on each queue or activity.
+ *
+ * @see {@link defineQueue}
+ * @see {@link defineActivity}
+ */
 export function defineActivityRegistry<
   const Queues extends Record<string, QueueDefinition>,
   const Activities extends Record<string, ActivityDefinition>,
@@ -320,5 +376,16 @@ export type ActivityWorkflowContext = {
 };
 
 export { protocolVersion };
-export { ManagedWorkflowManager } from "./managedWorkflow";
+export {
+  actionOptions,
+  activityStep,
+  ManagedWorkflowManager,
+  manualWorkflowStep,
+  mutationOptions,
+  queryOptions,
+  workflowOptions,
+  workflowStep,
+  type ManagedWorkflowCtx,
+  type ManagedStepOperation,
+} from "./managedWorkflow";
 export { wire, type ArtifactDisposition, type ArtifactId, type WireSchema } from "./wire";

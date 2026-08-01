@@ -12,6 +12,7 @@ import type * as activities from "../activities.js";
 import type * as artifacts from "../artifacts.js";
 import type * as crons from "../crons.js";
 import type * as validators from "../validators.js";
+import type * as workflowSteps from "../workflowSteps.js";
 
 import type {
   ApiFromModules,
@@ -25,6 +26,7 @@ const fullApi: ApiFromModules<{
   artifacts: typeof artifacts;
   crons: typeof crons;
   validators: typeof validators;
+  workflowSteps: typeof workflowSteps;
 }> = anyApi as any;
 
 /**

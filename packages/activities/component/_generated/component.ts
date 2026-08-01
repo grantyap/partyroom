@@ -252,4 +252,113 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         Name
       >;
     };
+    workflowSteps: {
+      failActivity: FunctionReference<
+        "mutation",
+        "internal",
+        { error: string; key: string; workflowId: string },
+        null,
+        Name
+      >;
+      finalize: FunctionReference<
+        "mutation",
+        "internal",
+        { succeeded: boolean; workflowId: string },
+        null,
+        Name
+      >;
+      finish: FunctionReference<
+        "mutation",
+        "internal",
+        {
+          error?: string;
+          key: string;
+          state: "completed" | "failed";
+          workflowId: string;
+        },
+        null,
+        Name
+      >;
+      finishActivity: FunctionReference<
+        "mutation",
+        "internal",
+        {
+          activityId: string;
+          error?: string;
+          state: "completed" | "failed" | "canceled";
+        },
+        null,
+        Name
+      >;
+      linkActivity: FunctionReference<
+        "mutation",
+        "internal",
+        { activityId: string; key: string; workflowId: string },
+        null,
+        Name
+      >;
+      list: FunctionReference<
+        "query",
+        "internal",
+        { workflowId: string },
+        Array<{
+          activityId?: string;
+          attempt?: number;
+          completedAt?: number;
+          error?: string;
+          key: string;
+          kind: "activity" | "workflow";
+          label: string;
+          message?: string;
+          position: number;
+          progress: number;
+          startedAt?: number;
+          state:
+            | "pending"
+            | "queued"
+            | "running"
+            | "completed"
+            | "failed"
+            | "canceled"
+            | "skipped";
+        }>,
+        Name
+      >;
+      register: FunctionReference<
+        "mutation",
+        "internal",
+        {
+          steps: Array<{
+            key: string;
+            kind: "activity" | "workflow";
+            label: string;
+            position: number;
+          }>;
+          workflowId: string;
+        },
+        null,
+        Name
+      >;
+      skip: FunctionReference<
+        "mutation",
+        "internal",
+        { key: string; message?: string; workflowId: string },
+        null,
+        Name
+      >;
+      start: FunctionReference<
+        "mutation",
+        "internal",
+        { key: string; workflowId: string },
+        null,
+        Name
+      >;
+      startActivity: FunctionReference<
+        "mutation",
+        "internal",
+        { key: string; workflowId: string },
+        null,
+        Name
+      >;
+    };
   };

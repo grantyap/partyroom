@@ -193,47 +193,105 @@ export const exampleActivities = {
 };
 ```
 
-Define the workflow through the configured managed manager. The handler
-receives only its declared application arguments:
+When an activity needs worker-facing values derived from domain state, define a
+typed, read-only input builder. It must accept `workflowId`; the managed runtime
+injects that value automatically:
 
 ```ts
+export const publish = defineActivityInput({
+  activity: exampleActivities.publish,
+  args: { normalized: v.string() },
+  handler: async (ctx, { normalized }) => ({
+    normalizedUrl: await artifactUrl(ctx, normalized),
+  }),
+});
+```
+
+Define the workflow through the configured managed manager. The handler
+receives its declared application arguments and typed, workflow-bound steps:
+
+```ts
+const notifySubscribers = mutationOptions({
+  mutation: internal.example.notifySubscribers,
+  inline: true,
+});
+
 export const exampleWorkflow = managedWorkflow
-  .define({ args: { sourceUrl: v.string() } })
+  .define({
+    args: { sourceUrl: v.string() },
+    steps: {
+      prepare: activityStep(exampleActivities.prepare),
+      publish: activityStep(exampleActivities.publish, {
+        input: internal.example.activityInputs.publish,
+      }),
+      notify: workflowStep(notifySubscribers, {
+        label: "Notify subscribers",
+      }),
+    },
+  })
   .handler(async (step, { sourceUrl }) => {
-    const prepareId = await step.runMutation(internal.example.activities.schedule, {
-      kind: "prepare",
-      input: { sourceUrl },
-      workflowId: step.workflowId,
-    });
-    const prepared = await step.awaitEvent({
-      name: prepareId,
-      validator: exampleActivities.prepare.output,
+    const prepared = await step.steps.prepare.run({
+      sourceUrl,
     });
 
-    const publishId = await step.runMutation(internal.example.activities.schedule, {
-      kind: "publish",
-      input: { normalizedUrl: await artifactUrl(prepared.normalized) },
-      workflowId: step.workflowId,
+    await step.steps.publish.run({
+      normalized: prepared.normalized,
     });
-    await step.awaitEvent({
-      name: publishId,
-      validator: exampleActivities.publish.output,
-    });
+
+    await step.steps.notify.run({});
   });
 ```
 
-The application scheduling mutation maps `kind` to its registry definition,
-then calls the configured `activities.schedule` with `workflowId`:
+The key is the stable consumer-facing step identity and its declaration order
+is the default display order. Labels default to a humanized key and can be
+overridden. Activity input and output types are inferred from `defineActivity`.
+`defineActivityInput` is an app-level helper built on that app's generated
+`internalQuery`; it adds `workflowId` and the activity's return validator so
+those invariants cannot be wired incorrectly at each call site.
+When an input builder is present, `activityStep.run` accepts the builder's
+domain arguments, injects `workflowId`, runs the query, and schedules its
+validated return value. It then links the activity to the workflow, waits for
+its validated output, and exposes worker heartbeat progress. `workflowStep.run`
+executes one registered query, mutation, action, or child workflow as a
+structured journal boundary. Conditional steps may be marked early with
+`step.steps.name.skip()`; unreached steps are finalized automatically.
+Use `queryOptions`, `mutationOptions`, `actionOptions`, or `workflowOptions` to
+construct reusable execution policy separately from each workflow's label and
+display order.
+
+Structured activity and workflow steps can run safely in parallel. The
+coordinator starts, executes, and finishes each phase in stable key order:
 
 ```ts
-await activities.schedule(ctx, workflowId, exampleActivities[kind], input);
+const results = await step.parallel({
+  prepare: step.steps.prepare.run({ sourceUrl }),
+  notify: step.steps.notify.run({}),
+});
 ```
 
-It is only the domain-specific bridge for constructing activity inputs. The
-activities infrastructure always resumes the workflow, resolves the private
-scope, and owns cleanup. An optional `onComplete` callback may update
-application projections, but application code never owns the workflow-event
-wiring.
+Use `manualWorkflowStep()` only for a small parent-specific sequence that would
+not benefit from its own registered child workflow:
+
+```ts
+steps: {
+  refreshCache: manualWorkflowStep({ label: "Refresh cache" }),
+}
+
+await step.steps.refreshCache.run(async () => {
+  const keys = await step.runQuery(internal.example.listCacheKeys, {});
+  await step.runMutation(internal.example.refreshCache, { keys });
+});
+```
+
+The manual `run(callback)` call must be awaited immediately. Starting another
+managed step while it is active throws with guidance before the workflow can
+append a nondeterministic journal sequence.
+
+The component persists the complete progress projection. Consumers call
+`managedWorkflow.getProgress(ctx, workflowId)` and receive ordered pending,
+queued, running, completed, failed, canceled, or skipped steps with timing and
+activity progress. Domain tables do not need their own activity-ID arrays,
+timing arrays, completion callbacks, or label maps.
 
 Start it through `managedWorkflow.start`, not the underlying
 `WorkflowManager.start`. The manager creates the scope and installs the
@@ -318,19 +376,12 @@ are reviewable.
 
 ## Media integration
 
-The media Workflow schedules each external operation through
-`ActivityManager`, then waits for an event named with the activity ID. The
-application completion mutation removes the activity from the job projection
-and sends that event. After stem separation, transcription, melody analysis,
-and muxing run concurrently. Annotation assembly joins the transcription and
-melody results; annotation failure remains non-fatal to the final karaoke
-asset. The workflow returns its retained artifact references; the managed
-workflow completion boundary adopts them and deletes its intermediates.
-
-`mediaJobs.activeActivities` contains the current activity IDs and kinds. Job
-queries resolve those IDs through the component and expose each activity's
-state, attempt, optional progress, and progress message to the UI. Progress is
-therefore observable without being required for lease renewal or correctness.
+The media workflows declare consumer-visible activity and custom steps through
+`managedWorkflow.define`. They execute activities through
+`step.steps.name.run(input)` and keep business-result persistence as explicit
+domain mutations. Core and enrichment progress snapshots are combined for the
+room UI. The older media activity/timing projection remains only as a fallback
+for jobs created before managed step registration.
 
 Workers authenticate to `/activities/workers/*` with
 `ACTIVITY_WORKER_TOKEN`. The media source URL remains encrypted in the

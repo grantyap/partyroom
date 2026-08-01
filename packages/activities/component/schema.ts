@@ -69,6 +69,33 @@ export default defineSchema({
     .index("by_worker_state", ["workerId", "state"])
     .index("by_state", ["state"]),
 
+  workflowSteps: defineTable({
+    workflowId: v.string(),
+    key: v.string(),
+    label: v.string(),
+    position: v.number(),
+    kind: v.union(v.literal("activity"), v.literal("workflow")),
+    state: v.union(
+      v.literal("pending"),
+      v.literal("queued"),
+      v.literal("running"),
+      v.literal("completed"),
+      v.literal("failed"),
+      v.literal("canceled"),
+      v.literal("skipped"),
+    ),
+    activityId: v.optional(v.id("activities")),
+    message: v.optional(v.string()),
+    error: v.optional(v.string()),
+    startedAt: v.optional(v.number()),
+    completedAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_workflow_id", ["workflowId"])
+    .index("by_workflow_id_and_key", ["workflowId", "key"])
+    .index("by_activity_id", ["activityId"]),
+
   artifactScopes: defineTable({
     state: v.union(v.literal("open"), v.literal("closed"), v.literal("abandoned")),
     workflowId: v.optional(v.string()),

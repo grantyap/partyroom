@@ -15,6 +15,7 @@ export const managedWorkflow: ManagedWorkflowManager = new ManagedWorkflowManage
   workflow,
   components.activities,
   internal.activities.managedWorkflow.onComplete,
+  activities,
 );
 
 export const sendWorkflowEvent = workflow.sendEvent.bind(workflow) as WorkflowManager["sendEvent"];
