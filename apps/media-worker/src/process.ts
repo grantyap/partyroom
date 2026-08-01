@@ -28,6 +28,7 @@ export type MediaActivityReporter = {
 };
 
 type ProcessReporter = MediaActivityReporter;
+type LineHandler = (line: string) => void | Promise<void>;
 
 type YtDlpMetadata = {
   id?: string;
@@ -60,16 +61,29 @@ async function resolveSource(sourceUrl: string, reporter: ProcessReporter) {
 
 async function run(
   command: string[],
-  onStdout?: (line: string) => void | Promise<void>,
+  onStdout?: LineHandler,
   reporter?: ProcessReporter,
+  onStderr?: LineHandler,
 ) {
   return await reporter!.runProcess(command, {
     onStdoutLine: async (line) => {
       console.log(line);
       await onStdout?.(line);
     },
-    onStderrLine: (line) => console.error(line),
+    onStderrLine: async (line) => {
+      console.error(line);
+      await onStderr?.(line);
+    },
   });
+}
+
+export function ytDlpDownloadProgress(line: string) {
+  if (!line.startsWith("download:")) return undefined;
+  const [downloadedText, totalText] = line.slice("download:".length).split("|");
+  const downloaded = Number(downloadedText);
+  const total = Number(totalText);
+  if (!Number.isFinite(downloaded) || !Number.isFinite(total) || total <= 0) return undefined;
+  return Math.min(1, Math.max(0, downloaded / total));
 }
 
 async function downloadFile(url: string, path: string) {
@@ -173,6 +187,10 @@ async function processDownload(
   await assertSafeSourceUrl(request.input.sourceUrl);
   let outputPath = "";
   await reporter.progress("downloading", 0, "Downloading source", true);
+  const reportDownloadProgress = async (line: string) => {
+    if (!line.startsWith("download:")) return;
+    await reporter.progress("downloading", ytDlpDownloadProgress(line));
+  };
   await run(
     [
       "yt-dlp",
@@ -190,18 +208,13 @@ async function processDownload(
     ],
     async (line) => {
       if (line.startsWith("download:")) {
-        const [downloadedText, totalText] = line.slice(9).split("|");
-        const downloaded = Number(downloadedText);
-        const total = Number(totalText);
-        await reporter.progress(
-          "downloading",
-          Number.isFinite(total) && total > 0 ? downloaded / total : undefined,
-        );
+        await reportDownloadProgress(line);
       } else if (line.trim()) {
         outputPath = line.trim();
       }
     },
     reporter,
+    reportDownloadProgress,
   );
   if (!outputPath || !outputPath.startsWith(dir) || !(await Bun.file(outputPath).exists())) {
     throw new Error("yt-dlp did not produce the expected output file");
