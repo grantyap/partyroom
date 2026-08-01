@@ -42,13 +42,18 @@ export type MediaActivityReporter = {
 type ProcessReporter = MediaActivityReporter;
 type LineHandler = (line: string) => void | Promise<void>;
 
+const ytDlpFormatsPrefix = "partyroom-formats:";
 type YtDlpMetadata = {
   id?: string;
   extractor_key?: string;
   extractor?: string;
   title?: string;
   duration?: number;
-  webpage_url?: string;
+};
+type YtDlpSelectedFormat = {
+  format_id?: unknown;
+  filesize?: unknown;
+  filesize_approx?: unknown;
 };
 
 async function resolveSource(sourceUrl: string, reporter: ProcessReporter) {
@@ -90,12 +95,101 @@ async function run(
 }
 
 export function ytDlpDownloadProgress(line: string) {
+  const progress = parseYtDlpProgress(line);
+  return progress && Math.min(1, progress.downloaded / progress.total);
+}
+
+function parseYtDlpProgress(line: string) {
   if (!line.startsWith("download:")) return undefined;
-  const [downloadedText, totalText] = line.slice("download:".length).split("|");
+  const fields = line.slice("download:".length).split("|");
+  const [formatId, downloadedText, totalText] =
+    fields.length === 2 ? [undefined, ...fields] : fields;
   const downloaded = Number(downloadedText);
   const total = Number(totalText);
-  if (!Number.isFinite(downloaded) || !Number.isFinite(total) || total <= 0) return undefined;
-  return Math.min(1, Math.max(0, downloaded / total));
+  if (!Number.isFinite(downloaded) || !Number.isFinite(total) || total <= 0) {
+    return undefined;
+  }
+  return { formatId, downloaded, total };
+}
+
+/**
+ * Combines yt-dlp's per-format progress into one byte-weighted activity value.
+ *
+ * `ytDlpDownloadCommand` requests two machine-readable record types:
+ *
+ * - `partyroom-formats:<json>` is emitted once by `before_dl` on stdout. It
+ *   describes every selected format and its exact or estimated byte size.
+ * - `download:<format-id>|<downloaded-bytes>|<total-bytes>` is normally emitted
+ *   on stderr for each progress update. Separate video, audio, and additional
+ *   tracks each start their own byte counter at zero.
+ *
+ * `configure` stores the selected formats before downloading begins. `update`
+ * records the current fraction for one format and returns the sum of every
+ * format's completed bytes divided by their combined size. If selected sizes
+ * are unavailable, formats receive equal weight. Returned progress is
+ * monotonic so retries or corrected estimates cannot move the UI backward.
+ */
+export class YtDlpProgressAggregator {
+  private configured = false;
+  private selectedFormats: Array<{ id: string; size?: number }> = [];
+  private progressByFormat = new Map<string, number>();
+  private lastProgress = 0;
+
+  /** Parses the one-time selected-format record written to stdout. */
+  configure(line: string) {
+    if (!line.startsWith(ytDlpFormatsPrefix)) return false;
+    this.configured = true;
+    try {
+      const parsed = JSON.parse(line.slice(ytDlpFormatsPrefix.length)) as unknown;
+      this.selectedFormats = Array.isArray(parsed)
+        ? parsed.flatMap((format: YtDlpSelectedFormat) => {
+            if (typeof format !== "object" || format === null) return [];
+            const id = typeof format.format_id === "string" ? format.format_id : undefined;
+            if (!id) return [];
+            const candidate = Number(format.filesize ?? format.filesize_approx);
+            const size = Number.isFinite(candidate) && candidate > 0 ? candidate : undefined;
+            return [{ id, size }];
+          })
+        : [];
+    } catch {
+      this.selectedFormats = [];
+    }
+    return true;
+  }
+
+  /** Parses one per-format progress record and returns aggregate progress. */
+  update(line: string) {
+    if (!this.configured) return undefined;
+    const progress = parseYtDlpProgress(line);
+    if (!progress?.formatId) return undefined;
+    const { formatId, downloaded, total } = progress;
+    this.progressByFormat.set(formatId, Math.min(1, Math.max(0, downloaded / total)));
+
+    const selected =
+      this.selectedFormats.length > 0
+        ? this.selectedFormats
+        : [{ id: formatId, size: total }];
+    if (!selected.some((format) => format.id === formatId)) {
+      this.lastProgress = Math.max(
+        this.lastProgress,
+        Math.min(1, Math.max(0, downloaded / total)),
+      );
+      return this.lastProgress;
+    }
+    const allSizesKnown = selected.every((format) => format.size !== undefined);
+    const weightedProgress = allSizesKnown
+      ? selected.reduce(
+          (sum, format) =>
+            sum + (format.size ?? 0) * (this.progressByFormat.get(format.id) ?? 0),
+          0,
+        ) / selected.reduce((sum, format) => sum + (format.size ?? 0), 0)
+      : selected.reduce(
+          (sum, format) => sum + (this.progressByFormat.get(format.id) ?? 0),
+          0,
+        ) / selected.length;
+    this.lastProgress = Math.max(this.lastProgress, Math.min(1, weightedProgress));
+    return this.lastProgress;
+  }
 }
 
 export function ytDlpDownloadCommand(sourceUrl: string, dir: string) {
@@ -107,9 +201,11 @@ export function ytDlpDownloadCommand(sourceUrl: string, dir: string) {
     "--max-filesize",
     String(maxBytes),
     "--progress-template",
-    "download:download:%(progress.downloaded_bytes)s|%(progress.total_bytes,progress.total_bytes_estimate)s",
+    "download:download:%(info.format_id)s|%(progress.downloaded_bytes)s|%(progress.total_bytes,progress.total_bytes_estimate)s",
     "--output",
     join(dir, "source.%(ext)s"),
+    "--print",
+    "before_dl:partyroom-formats:%(requested_formats.:.{format_id,filesize,filesize_approx}|[])j",
     "--print",
     "after_move:filepath",
     sourceUrl,
@@ -223,21 +319,27 @@ async function processDownload(
 ) {
   await assertSafeSourceUrl(request.input.sourceUrl);
   let outputPath = "";
+  const downloadProgress = new YtDlpProgressAggregator();
   await reporter.progress("downloading", 0, "Downloading source", true);
   const reportDownloadProgress = async (line: string) => {
     if (!line.startsWith("download:")) return;
-    await reporter.progress("downloading", ytDlpDownloadProgress(line));
+    await reporter.progress("downloading", downloadProgress.update(line));
   };
   await run(
     ytDlpDownloadCommand(request.input.sourceUrl, dir),
     async (line) => {
-      if (line.startsWith("download:")) {
+      // yt-dlp writes the before_dl format inventory and final filepath to
+      // stdout. Progress can also appear here with some downloader/configs.
+      if (downloadProgress.configure(line)) {
+        return;
+      } else if (line.startsWith("download:")) {
         await reportDownloadProgress(line);
       } else if (line.trim()) {
         outputPath = line.trim();
       }
     },
     reporter,
+    // yt-dlp normally writes progress-template records to stderr.
     reportDownloadProgress,
   );
   if (!outputPath || !outputPath.startsWith(dir) || !(await Bun.file(outputPath).exists())) {
