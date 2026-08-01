@@ -13,18 +13,19 @@
     "test:once": "vitest run"
   },
   "dependencies": {
-    "@partyroom/activities": "workspace:*",
-    "@partyroom/activity-worker": "workspace:*",
-    "@partyroom/media-activities": "workspace:*",
     "@convex-dev/better-auth": "catalog:",
     "@convex-dev/presence": "catalog:",
     "@convex-dev/workflow": "^0.4.4",
     "@convex-dev/workpool": "^0.4.8",
     "@mmailaender/convex-better-auth-svelte": "catalog:",
+    "@partyroom/activities": "workspace:*",
+    "@partyroom/activity-worker": "workspace:*",
+    "@partyroom/media-activities": "workspace:*",
     "better-auth": "catalog:",
     "convex": "catalog:",
     "dotenv": "catalog:",
     "random-word-slugs": "^0.1.7",
+    "yaml": "^2.9.0",
     "zod": "catalog:"
   },
   "devDependencies": {
