@@ -43,6 +43,13 @@ export type ActivityContext = {
   readonly info: ActivityInfo;
   readonly signal: AbortSignal;
   heartbeat(details?: Value): Promise<void>;
+  /**
+   * Immediately publishes overall activity progress with the current lease.
+   *
+   * @param progress - Completion normalized to the inclusive range `0..1`.
+   *   Values outside that range are clamped before being sent.
+   * @param message - Optional user-facing description of the current operation.
+   */
   reportProgress(progress: number, message?: string): Promise<void>;
   uploadArtifact(slot: string, body: BodyInit, contentType: string): Promise<ArtifactId>;
   runProcess(command: string[], options?: ManagedProcessOptions): Promise<ManagedProcessResult>;

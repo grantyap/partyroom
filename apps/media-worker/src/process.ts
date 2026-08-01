@@ -17,6 +17,18 @@ type OperationRequest =
 type WorkerResult = Record<string, string | number | boolean | null>;
 
 export type MediaActivityReporter = {
+  /**
+   * Publishes the current overall progress for a media activity.
+   *
+   * @param stage - Descriptive identifier for the operation currently running.
+   *   The activity adapter currently uses this for call-site context only.
+   * @param progress - Overall activity completion normalized to the inclusive
+   *   range `0..1`, where `1` means 100%. Pass `undefined` to send a heartbeat
+   *   without changing the stored progress value.
+   * @param message - Optional user-facing description of the current operation.
+   * @param force - Compatibility hint requesting an immediate report. The
+   *   current activity adapter already publishes every call immediately.
+   */
   progress(
     stage: string,
     progress: number | undefined,
@@ -84,6 +96,31 @@ export function ytDlpDownloadProgress(line: string) {
   const total = Number(totalText);
   if (!Number.isFinite(downloaded) || !Number.isFinite(total) || total <= 0) return undefined;
   return Math.min(1, Math.max(0, downloaded / total));
+}
+
+export function ytDlpDownloadCommand(sourceUrl: string, dir: string) {
+  return [
+    "yt-dlp",
+    "--no-playlist",
+    "--newline",
+    "--progress",
+    "--max-filesize",
+    String(maxBytes),
+    "--progress-template",
+    "download:download:%(progress.downloaded_bytes)s|%(progress.total_bytes,progress.total_bytes_estimate)s",
+    "--output",
+    join(dir, "source.%(ext)s"),
+    "--print",
+    "after_move:filepath",
+    sourceUrl,
+  ];
+}
+
+export async function reportFinalUpload(
+  reporter: Pick<MediaActivityReporter, "progress">,
+  message: string,
+) {
+  await reporter.progress("uploading", 1, message, true);
 }
 
 async function downloadFile(url: string, path: string) {
@@ -192,20 +229,7 @@ async function processDownload(
     await reporter.progress("downloading", ytDlpDownloadProgress(line));
   };
   await run(
-    [
-      "yt-dlp",
-      "--no-playlist",
-      "--newline",
-      "--max-filesize",
-      String(maxBytes),
-      "--progress-template",
-      "download:%(progress.downloaded_bytes)s|%(progress.total_bytes_estimate)s",
-      "--output",
-      join(dir, "source.%(ext)s"),
-      "--print",
-      "after_move:filepath",
-      request.input.sourceUrl,
-    ],
+    ytDlpDownloadCommand(request.input.sourceUrl, dir),
     async (line) => {
       if (line.startsWith("download:")) {
         await reportDownloadProgress(line);
@@ -220,7 +244,7 @@ async function processDownload(
     throw new Error("yt-dlp did not produce the expected output file");
   }
 
-  await reporter.progress("uploading", 0, "Uploading source", true);
+  await reportFinalUpload(reporter, "Uploading source");
   const artifactId = await uploadOutput(reporter, "artifactId", outputPath);
   return {
     artifactId,
@@ -281,7 +305,7 @@ async function processExtractAudio(
     reporter,
     "extracting",
   );
-  await reporter.progress("uploading", 0, "Uploading extracted audio", true);
+  await reportFinalUpload(reporter, "Uploading extracted audio");
   return {
     artifactId: await uploadOutput(reporter, "artifactId", output),
     duration,
@@ -336,7 +360,7 @@ async function processMux(
     reporter,
     "muxing",
   );
-  await reporter.progress("uploading", 0, "Uploading final media", true);
+  await reportFinalUpload(reporter, "Uploading final media");
   return {
     artifactId: await uploadOutput(reporter, "artifactId", output),
     duration,
