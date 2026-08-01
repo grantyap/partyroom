@@ -1,8 +1,14 @@
 import { vResultValidator } from "@convex-dev/workpool";
-import { vWorkflowId } from "@convex-dev/workflow";
-import { type ArtifactId, type ActivityOutput } from "@partyroom/activities";
+import { vWorkflowId, type WorkflowId } from "@convex-dev/workflow";
+import {
+  activityStep,
+  type ActivityDefinition,
+  type ActivityInput,
+  type ArtifactId,
+} from "@partyroom/activities";
 import { mediaActivities } from "@partyroom/media-activities";
-import { v, type Validator } from "convex/values";
+import type { FunctionReference } from "convex/server";
+import { v } from "convex/values";
 import { internal } from "../_generated/api";
 import type { Id } from "../_generated/dataModel";
 import {
@@ -12,8 +18,8 @@ import {
   type QueryCtx,
 } from "../_generated/server";
 import { activities, cancelWorkflow, managedWorkflow } from "../activities/workflowManager";
-import { getLyricTrack } from "./service";
-import { lyricObservation, type MediaEnrichmentOperationKind } from "./validators";
+import { getLyricTrack } from "./domain/lyrics";
+import { lyricObservation } from "./validators";
 
 async function requireCurrentEnrichment(
   ctx: Pick<QueryCtx, "db">,
@@ -89,6 +95,7 @@ export const start = internalMutation({
       .withIndex("by_asset", (q) => q.eq("asset", asset._id))
       .unique();
     if (existing?.workflowId && existing.state === "processing") {
+      await managedWorkflow.cancelActivities(ctx, existing.workflowId as any);
       await cancelWorkflow(ctx, existing.workflowId as any);
     }
     for (const activity of existing?.activeActivities ?? []) {
@@ -360,165 +367,197 @@ export const complete = internalMutation({
   },
 });
 
-export const mediaEnrichment = managedWorkflow
-  .define({ args: { enrichmentId: v.id("mediaEnrichments") } })
-  .handler(async (step, { enrichmentId }) => {
-    const runActivity = async <Kind extends MediaEnrichmentOperationKind>(
-      kind: Kind,
-      options?: { language?: string },
-    ): Promise<ActivityOutput<(typeof mediaActivities)[Kind]>> => {
-      const activityId = await step.runMutation(
-        internal.media.enrichmentActivities.schedule,
-        {
-          enrichmentId,
-          workflowId: step.workflowId,
-          kind,
-          language: options?.language,
-        },
-        { name: `schedule-${kind}`, inline: true },
-      );
-      return await step.awaitEvent<ActivityOutput<(typeof mediaActivities)[Kind]>>({
-        name: activityId,
-        validator: mediaActivities[kind].output as Validator<
-          ActivityOutput<(typeof mediaActivities)[Kind]>,
-          any,
-          any
-        >,
-      });
-    };
+type InputBuilder<Definition extends ActivityDefinition, Args> = FunctionReference<
+  "query",
+  "internal",
+  Args & { workflowId: WorkflowId },
+  ActivityInput<Definition>
+>;
 
+const inputBuilders: {
+  transcribe: InputBuilder<
+    (typeof mediaActivities)["transcribe"],
+    { enrichmentId: Id<"mediaEnrichments"> }
+  >;
+  alignLyrics: InputBuilder<
+    (typeof mediaActivities)["alignLyrics"],
+    { enrichmentId: Id<"mediaEnrichments">; language: string }
+  >;
+  analyzeMelody: InputBuilder<
+    (typeof mediaActivities)["analyzeMelody"],
+    { enrichmentId: Id<"mediaEnrichments"> }
+  >;
+  assembleAnnotations: InputBuilder<
+    (typeof mediaActivities)["assembleAnnotations"],
+    { enrichmentId: Id<"mediaEnrichments"> }
+  >;
+} = {
+  transcribe: internal.media.activityInputs.enrichment.transcribe,
+  alignLyrics: internal.media.activityInputs.enrichment.alignLyrics,
+  analyzeMelody: internal.media.activityInputs.enrichment.analyzeMelody,
+  assembleAnnotations: internal.media.activityInputs.enrichment.assembleAnnotations,
+};
+
+const mediaEnrichmentDefinition = managedWorkflow.define({
+  args: { enrichmentId: v.id("mediaEnrichments") },
+  steps: {
+    transcribe: activityStep(mediaActivities.transcribe, {
+      input: inputBuilders.transcribe,
+      label: "Transcribe lyrics",
+      order: 5,
+    }),
+    alignLyrics: activityStep(mediaActivities.alignLyrics, {
+      input: inputBuilders.alignLyrics,
+      label: "Align LRCLIB lyrics",
+      order: 6,
+    }),
+    analyzeMelody: activityStep(mediaActivities.analyzeMelody, {
+      input: inputBuilders.analyzeMelody,
+      label: "Analyze melody",
+      order: 7,
+    }),
+    assembleAnnotations: activityStep(mediaActivities.assembleAnnotations, {
+      input: inputBuilders.assembleAnnotations,
+      label: "Assemble annotations",
+      order: 9,
+    }),
+  },
+});
+
+export const mediaEnrichment = mediaEnrichmentDefinition.handler(async (step, { enrichmentId }) => {
+  await step.runMutation(
+    internal.media.enrichment.markGeneratedLyricsProcessing,
+    { enrichmentId, workflowId: step.workflowId },
+    { name: "mark-generated-lyrics-processing", inline: true },
+  );
+
+  // These managed steps stay sequential because each expands to multiple
+  // journal entries whose replay order must remain deterministic.
+  const transcription = await step.steps.transcribe.run({ enrichmentId });
+  await step.runMutation(
+    internal.media.enrichment.recordGeneratedLyrics,
+    {
+      enrichmentId,
+      workflowId: step.workflowId,
+      textArtifactId: transcription.lyricsArtifactId,
+      timedArtifactId: transcription.timedLyricsArtifactId,
+    },
+    { name: "record-generated-lyrics", inline: true },
+  );
+  const language = transcription.language;
+
+  let hasMelody = false;
+  try {
+    const melody = await step.steps.analyzeMelody.run({ enrichmentId });
     await step.runMutation(
-      internal.media.enrichment.markGeneratedLyricsProcessing,
-      { enrichmentId, workflowId: step.workflowId },
-      { name: "mark-generated-lyrics-processing", inline: true },
+      internal.media.enrichment.recordMelody,
+      { enrichmentId, workflowId: step.workflowId, artifactId: melody.artifactId },
+      { name: "record-melody", inline: true },
     );
+    hasMelody = true;
+  } catch (error) {
+    await step.runMutation(
+      internal.media.enrichment.markAnnotationsFailed,
+      {
+        enrichmentId,
+        workflowId: step.workflowId,
+        errorMessage: error instanceof Error ? error.message : String(error),
+      },
+      { name: "mark-melody-failed", inline: true },
+    );
+  }
 
-    const transcriptionBranch = (async () => {
-      const result = await runActivity("transcribe");
+  if (
+    language &&
+    (await step.runQuery(
+      internal.media.enrichment.shouldAlignLrclibLyrics,
+      { enrichmentId, workflowId: step.workflowId },
+      { name: "prepare-lrclib-alignment", inline: true },
+    ))
+  ) {
+    try {
+      const aligned = await step.steps.alignLyrics.run({ enrichmentId, language });
       await step.runMutation(
-        internal.media.enrichment.recordGeneratedLyrics,
+        internal.media.enrichment.recordAlignedLrclibLyrics,
         {
           enrichmentId,
           workflowId: step.workflowId,
-          textArtifactId: result.lyricsArtifactId,
-          timedArtifactId: result.timedLyricsArtifactId,
+          timedArtifactId: aligned.timedLyricsArtifactId,
         },
-        { name: "record-generated-lyrics", inline: true },
+        { name: "record-aligned-lrclib-lyrics", inline: true },
       );
-      return result.language;
-    })();
-    const melodyBranch = (async () => {
-      try {
-        const result = await runActivity("analyzeMelody");
-        await step.runMutation(
-          internal.media.enrichment.recordMelody,
-          { enrichmentId, workflowId: step.workflowId, artifactId: result.artifactId },
-          { name: "record-melody", inline: true },
-        );
-        return true;
-      } catch (error) {
-        await step.runMutation(
-          internal.media.enrichment.markAnnotationsFailed,
-          {
-            enrichmentId,
-            workflowId: step.workflowId,
-            errorMessage: error instanceof Error ? error.message : String(error),
-          },
-          { name: "mark-melody-failed", inline: true },
-        );
-        return false;
-      }
-    })();
-
-    const [language, hasMelody] = await Promise.all([transcriptionBranch, melodyBranch]);
-
-    if (
-      language &&
-      (await step.runQuery(
-        internal.media.enrichment.shouldAlignLrclibLyrics,
-        { enrichmentId, workflowId: step.workflowId },
-        { name: "prepare-lrclib-alignment", inline: true },
-      ))
-    ) {
-      try {
-        const aligned = await runActivity("alignLyrics", { language });
-        await step.runMutation(
-          internal.media.enrichment.recordAlignedLrclibLyrics,
-          {
-            enrichmentId,
-            workflowId: step.workflowId,
-            timedArtifactId: aligned.timedLyricsArtifactId,
-          },
-          { name: "record-aligned-lrclib-lyrics", inline: true },
-        );
-      } catch (error) {
-        console.warn("[lrclib] Unable to align lyrics", {
-          enrichmentId,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
-
-    try {
-      const inputs = await step.runQuery(
-        internal.media.enrichment.getLyricOffsetSuggestionInputs,
-        { enrichmentId, workflowId: step.workflowId },
-        { name: "prepare-lyric-offset", inline: true },
-      );
-      if (inputs) {
-        const suggestedOffsetMs = await step.runAction(
-          internal.media.lrclib.suggestOffset,
-          { requestId: enrichmentId, ...inputs },
-          { name: "suggest-lyric-offset" },
-        );
-        if (suggestedOffsetMs !== null) {
-          await step.runMutation(
-            internal.media.enrichment.recordSuggestedLyricOffset,
-            { enrichmentId, workflowId: step.workflowId, suggestedOffsetMs },
-            { name: "record-lyric-offset", inline: true },
-          );
-        }
-      }
     } catch (error) {
-      console.warn("[lrclib] Unable to suggest lyrics offset", {
+      console.warn("[lrclib] Unable to align lyrics", {
         enrichmentId,
         error: error instanceof Error ? error.message : String(error),
       });
     }
+  } else {
+    await step.steps.alignLyrics.skip("No line-timed lyrics required alignment");
+  }
 
-    if (hasMelody) {
-      try {
-        const annotations = await runActivity("assembleAnnotations");
+  try {
+    const inputs = await step.runQuery(
+      internal.media.enrichment.getLyricOffsetSuggestionInputs,
+      { enrichmentId, workflowId: step.workflowId },
+      { name: "prepare-lyric-offset", inline: true },
+    );
+    if (inputs) {
+      const suggestedOffsetMs = await step.runAction(
+        internal.media.lrclib.suggestOffset,
+        { requestId: enrichmentId, ...inputs },
+        { name: "suggest-lyric-offset" },
+      );
+      if (suggestedOffsetMs !== null) {
         await step.runMutation(
-          internal.media.enrichment.recordAnnotations,
-          {
-            enrichmentId,
-            workflowId: step.workflowId,
-            annotationsArtifactId: annotations.annotationsArtifactId,
-            midiArtifactId: annotations.midiArtifactId,
-            musicXmlArtifactId: annotations.musicXmlArtifactId,
-          },
-          { name: "record-annotations", inline: true },
-        );
-      } catch (error) {
-        await step.runMutation(
-          internal.media.enrichment.markAnnotationsFailed,
-          {
-            enrichmentId,
-            workflowId: step.workflowId,
-            errorMessage: error instanceof Error ? error.message : String(error),
-          },
-          { name: "mark-annotations-failed", inline: true },
+          internal.media.enrichment.recordSuggestedLyricOffset,
+          { enrichmentId, workflowId: step.workflowId, suggestedOffsetMs },
+          { name: "record-lyric-offset", inline: true },
         );
       }
     }
+  } catch (error) {
+    console.warn("[lrclib] Unable to suggest lyrics offset", {
+      enrichmentId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 
-    await step.runMutation(
-      internal.media.enrichment.complete,
-      { enrichmentId, workflowId: step.workflowId },
-      { name: "complete-enrichment", inline: true },
-    );
-  });
+  if (hasMelody) {
+    try {
+      const annotations = await step.steps.assembleAnnotations.run({ enrichmentId });
+      await step.runMutation(
+        internal.media.enrichment.recordAnnotations,
+        {
+          enrichmentId,
+          workflowId: step.workflowId,
+          annotationsArtifactId: annotations.annotationsArtifactId,
+          midiArtifactId: annotations.midiArtifactId,
+          musicXmlArtifactId: annotations.musicXmlArtifactId,
+        },
+        { name: "record-annotations", inline: true },
+      );
+    } catch (error) {
+      await step.runMutation(
+        internal.media.enrichment.markAnnotationsFailed,
+        {
+          enrichmentId,
+          workflowId: step.workflowId,
+          errorMessage: error instanceof Error ? error.message : String(error),
+        },
+        { name: "mark-annotations-failed", inline: true },
+      );
+    }
+  } else {
+    await step.steps.assembleAnnotations.skip("Melody analysis was unavailable");
+  }
+
+  await step.runMutation(
+    internal.media.enrichment.complete,
+    { enrichmentId, workflowId: step.workflowId },
+    { name: "complete-enrichment", inline: true },
+  );
+});
 
 export const onComplete = internalMutation({
   args: {

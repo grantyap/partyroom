@@ -3,7 +3,7 @@ import { v } from "convex/values";
 import { components } from "../_generated/api";
 import type { Id } from "../_generated/dataModel";
 import { internalMutation } from "../_generated/server";
-import { recordActivityTerminal } from "./service";
+import { recordActivityTerminal } from "./domain/jobs";
 
 type Context = {
   jobId: Id<"mediaJobs">;

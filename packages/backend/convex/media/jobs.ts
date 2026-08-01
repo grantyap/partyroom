@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { vWorkflowId } from "@convex-dev/workflow";
+import { vWorkflowId, type WorkflowId } from "@convex-dev/workflow";
 import { type ArtifactId } from "@partyroom/activities";
 import type { Id } from "../_generated/dataModel";
 import { components, internal } from "../_generated/api";
@@ -13,7 +13,7 @@ import {
 import { activities, managedWorkflow } from "../activities/workflowManager";
 import { getCurrentUserImpl } from "../auth";
 import { userHasRoomPermission } from "../rooms";
-import { mediaPipelineStepStatuses } from "./progress";
+import { getMediaEnrichment } from "./domain/assets";
 import {
   attachWorkflowToJob,
   claimAssetForJob,
@@ -22,12 +22,12 @@ import {
   deleteCompletedMediaAsset,
   failMediaJob,
   finalizeAssetForJob,
-  getLyricTrack,
-  getMediaEnrichment,
   recordStageResultForJob,
   requeueRoomMedia,
   removeRoomMedia,
-} from "./service";
+} from "./domain/jobs";
+import { getLyricTrack } from "./domain/lyrics";
+import { mediaPipelineStepStatuses, workflowPipelineStepStatuses } from "./progress/model";
 import {
   lyricTrackMetadata,
   lyricTrackState,
@@ -40,7 +40,7 @@ async function mediaArtifactUrl(ctx: QueryCtx, artifactId: string | undefined) {
   return artifactId ? await activities.getArtifactUrl(ctx, artifactId as ArtifactId) : null;
 }
 
-export { removeRoomMedia as removeFromRoomImpl } from "./service";
+export { removeRoomMedia as removeFromRoomImpl } from "./domain/jobs";
 
 async function activityStatuses(
   ctx: Pick<QueryCtx, "runQuery">,
@@ -62,6 +62,18 @@ async function activityStatuses(
       };
     }),
   );
+}
+
+async function workflowProgressSteps(
+  ctx: Pick<QueryCtx, "runQuery">,
+  workflowIds: Array<string | undefined>,
+) {
+  const workflows = await Promise.all(
+    workflowIds
+      .filter((workflowId): workflowId is string => workflowId !== undefined)
+      .map(async (workflowId) => await managedWorkflow.getProgress(ctx, workflowId as WorkflowId)),
+  );
+  return workflowPipelineStepStatuses(...workflows);
 }
 
 async function requireRoomAccess(
@@ -292,6 +304,7 @@ export const getJob = query({
     const generatedLyrics = lyricTracks.find(({ source }) => source === "generated");
     const lrclibLyrics = lyricTracks.find(({ source }) => source === "lrclib");
     const enrichment = asset ? await getMediaEnrichment(ctx, asset._id) : null;
+    const managedSteps = await workflowProgressSteps(ctx, [job.workflowId, enrichment?.workflowId]);
     const activityRows = await activityStatuses(ctx, [
       ...(job.activeActivities ?? []),
       ...(enrichment?.activeActivities ?? []),
@@ -299,33 +312,36 @@ export const getJob = query({
     return {
       _id: job._id,
       state: job.state,
-      steps: mediaPipelineStepStatuses({
-        hasAsset: !!job.asset,
-        hasGeneratedLyrics: !!generatedLyrics?.timedArtifactId,
-        generatedLyricsState: generatedLyrics?.state,
-        generatedLyricsTiming: generatedLyrics
-          ? {
-              startedAt: generatedLyrics.createdAt,
-              ...(generatedLyrics.state === "processing"
-                ? {}
-                : { completedAt: generatedLyrics.updatedAt }),
-            }
-          : undefined,
-        lrclibLyricsState: lrclibLyrics?.state,
-        lrclibLyricsTimingKind: lrclibLyrics?.timing,
-        lrclibLyricsTiming: lrclibLyrics
-          ? {
-              startedAt: lrclibLyrics.createdAt,
-              ...(lrclibLyrics.state === "processing"
-                ? {}
-                : { completedAt: lrclibLyrics.updatedAt }),
-            }
-          : undefined,
-        enrichmentState: enrichment?.state,
-        asset,
-        activities: activityRows,
-        timings: [...(job.stepTimings ?? []), ...(enrichment?.stepTimings ?? [])],
-      }),
+      steps:
+        managedSteps.length > 0
+          ? managedSteps
+          : mediaPipelineStepStatuses({
+              hasAsset: !!job.asset,
+              hasGeneratedLyrics: !!generatedLyrics?.timedArtifactId,
+              generatedLyricsState: generatedLyrics?.state,
+              generatedLyricsTiming: generatedLyrics
+                ? {
+                    startedAt: generatedLyrics.createdAt,
+                    ...(generatedLyrics.state === "processing"
+                      ? {}
+                      : { completedAt: generatedLyrics.updatedAt }),
+                  }
+                : undefined,
+              lrclibLyricsState: lrclibLyrics?.state,
+              lrclibLyricsTimingKind: lrclibLyrics?.timing,
+              lrclibLyricsTiming: lrclibLyrics
+                ? {
+                    startedAt: lrclibLyrics.createdAt,
+                    ...(lrclibLyrics.state === "processing"
+                      ? {}
+                      : { completedAt: lrclibLyrics.updatedAt }),
+                  }
+                : undefined,
+              enrichmentState: enrichment?.state,
+              asset,
+              activities: activityRows,
+              timings: [...(job.stepTimings ?? []), ...(enrichment?.stepTimings ?? [])],
+            }),
       errorCode: job.errorCode,
       errorMessage: job.errorMessage,
       asset: asset
@@ -369,6 +385,10 @@ export const listRoomMedia = query({
         const generatedLyrics = lyricTracks.find(({ source }) => source === "generated");
         const lrclibLyrics = lyricTracks.find(({ source }) => source === "lrclib");
         const enrichment = asset ? await getMediaEnrichment(ctx, asset._id) : null;
+        const managedSteps = await workflowProgressSteps(ctx, [
+          job?.workflowId,
+          enrichment?.workflowId,
+        ]);
         const activityRows = await activityStatuses(ctx, [
           ...(job?.activeActivities ?? []),
           ...(enrichment?.activeActivities ?? []),
@@ -406,33 +426,36 @@ export const listRoomMedia = query({
           _id: association._id,
           jobId: association.job,
           state: job?.state ?? "failed",
-          steps: mediaPipelineStepStatuses({
-            hasAsset: !!job?.asset,
-            hasGeneratedLyrics: !!generatedLyrics?.timedArtifactId,
-            generatedLyricsState: generatedLyrics?.state,
-            generatedLyricsTiming: generatedLyrics
-              ? {
-                  startedAt: generatedLyrics.createdAt,
-                  ...(generatedLyrics.state === "processing"
-                    ? {}
-                    : { completedAt: generatedLyrics.updatedAt }),
-                }
-              : undefined,
-            lrclibLyricsState: lrclibLyrics?.state,
-            lrclibLyricsTimingKind: lrclibLyrics?.timing,
-            lrclibLyricsTiming: lrclibLyrics
-              ? {
-                  startedAt: lrclibLyrics.createdAt,
-                  ...(lrclibLyrics.state === "processing"
-                    ? {}
-                    : { completedAt: lrclibLyrics.updatedAt }),
-                }
-              : undefined,
-            enrichmentState: enrichment?.state,
-            asset,
-            activities: activityRows,
-            timings: [...(job?.stepTimings ?? []), ...(enrichment?.stepTimings ?? [])],
-          }),
+          steps:
+            managedSteps.length > 0
+              ? managedSteps
+              : mediaPipelineStepStatuses({
+                  hasAsset: !!job?.asset,
+                  hasGeneratedLyrics: !!generatedLyrics?.timedArtifactId,
+                  generatedLyricsState: generatedLyrics?.state,
+                  generatedLyricsTiming: generatedLyrics
+                    ? {
+                        startedAt: generatedLyrics.createdAt,
+                        ...(generatedLyrics.state === "processing"
+                          ? {}
+                          : { completedAt: generatedLyrics.updatedAt }),
+                      }
+                    : undefined,
+                  lrclibLyricsState: lrclibLyrics?.state,
+                  lrclibLyricsTimingKind: lrclibLyrics?.timing,
+                  lrclibLyricsTiming: lrclibLyrics
+                    ? {
+                        startedAt: lrclibLyrics.createdAt,
+                        ...(lrclibLyrics.state === "processing"
+                          ? {}
+                          : { completedAt: lrclibLyrics.updatedAt }),
+                      }
+                    : undefined,
+                  enrichmentState: enrichment?.state,
+                  asset,
+                  activities: activityRows,
+                  timings: [...(job?.stepTimings ?? []), ...(enrichment?.stepTimings ?? [])],
+                }),
           title: asset?.title,
           duration: asset?.duration,
           errorMessage: job?.errorMessage,

@@ -449,7 +449,11 @@ export const lookup = internalAction({
   }),
   handler: async (_ctx, args) => {
     try {
-      return await fetchLyrics(args);
+      const result = await fetchLyrics(args);
+      if (result.state === "not_found") {
+        throw new Error("No synchronized lyrics were found");
+      }
+      return result;
     } catch (error) {
       log("search.failed", {
         jobId: args.jobId,

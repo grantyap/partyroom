@@ -6,7 +6,7 @@ import type { Id } from "../_generated/dataModel";
 import schema from "../schema";
 import { modules } from "../test.setup";
 import { removeFromRoomImpl } from "./jobs";
-import { recordActivityTerminal, requeueRoomMedia } from "./service";
+import { recordActivityTerminal, requeueRoomMedia } from "./domain/jobs";
 
 async function seedRoom(t: ReturnType<typeof convexTest>) {
   return await t.run(async (ctx) => {

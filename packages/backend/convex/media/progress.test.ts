@@ -1,7 +1,61 @@
 import { describe, expect, test } from "vitest";
-import { mediaPipelineStepStatuses } from "./progress";
+import { mediaPipelineStepStatuses, workflowPipelineStepStatuses } from "./progress/model";
 
 describe("media pipeline progress", () => {
+  test("combines managed workflow steps by display order", () => {
+    expect(
+      workflowPipelineStepStatuses(
+        [
+          {
+            key: "resolve",
+            kind: "workflow",
+            label: "Resolve source",
+            position: 0,
+            state: "completed",
+            progress: 1,
+          },
+          {
+            key: "mux",
+            kind: "activity",
+            label: "Build final video",
+            position: 8,
+            state: "running",
+            progress: 0.5,
+          },
+        ],
+        [
+          {
+            key: "transcribe",
+            kind: "activity",
+            label: "Transcribe lyrics",
+            position: 5,
+            state: "queued",
+            progress: 0,
+          },
+        ],
+      ),
+    ).toEqual([
+      {
+        kind: "resolve",
+        label: "Resolve source",
+        state: "completed",
+        progress: 1,
+      },
+      {
+        kind: "transcribe",
+        label: "Transcribe lyrics",
+        state: "queued",
+        progress: 0,
+      },
+      {
+        kind: "mux",
+        label: "Build final video",
+        state: "running",
+        progress: 0.5,
+      },
+    ]);
+  });
+
   test("reports parallel activities as independently running", () => {
     const steps = mediaPipelineStepStatuses({
       hasAsset: true,

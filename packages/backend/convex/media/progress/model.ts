@@ -1,4 +1,4 @@
-import type { OperationKind } from "./validators";
+import type { OperationKind } from "../validators";
 
 export const mediaPipelineSteps = [
   "resolve",
@@ -35,10 +35,18 @@ type ProgressAsset = {
   annotationsState?: "processing" | "ready" | "failed";
 };
 
-export type PipelineStepState = "pending" | "queued" | "running" | "completed" | "failed";
+export type PipelineStepState =
+  | "pending"
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "canceled"
+  | "skipped";
 
 export type PipelineStepStatus = {
   kind: PipelineStepKind;
+  label?: string;
   state: PipelineStepState;
   progress: number;
   message?: string;
@@ -46,6 +54,39 @@ export type PipelineStepStatus = {
   startedAt?: number;
   completedAt?: number;
 };
+
+export type WorkflowStepSnapshot = {
+  key: string;
+  kind: "activity" | "workflow";
+  label: string;
+  position: number;
+  state: PipelineStepState;
+  progress: number;
+  message?: string;
+  attempt?: number;
+  startedAt?: number;
+  completedAt?: number;
+};
+
+/**
+ * Projects managed workflow snapshots into the media UI's progress shape.
+ *
+ * This is the primary projection for workflows created after managed step
+ * registration was introduced.
+ *
+ * @see {@link mediaPipelineStepStatuses}
+ */
+export function workflowPipelineStepStatuses(
+  ...workflows: WorkflowStepSnapshot[][]
+): PipelineStepStatus[] {
+  return workflows
+    .flat()
+    .sort((left, right) => left.position - right.position)
+    .map(({ key, kind: _executionKind, position: _position, ...step }) => ({
+      ...step,
+      kind: key as PipelineStepKind,
+    }));
+}
 
 function stepStatus(
   status: Omit<PipelineStepStatus, "message" | "attempt" | "startedAt" | "completedAt">,
@@ -90,6 +131,16 @@ function completedSteps(
   ]);
 }
 
+/**
+ * Reconstructs progress from media records created before managed workflow
+ * step registration.
+ *
+ * Keep this only as the legacy-data fallback; new workflows should persist
+ * steps through `ManagedWorkflowManager` and use
+ * {@link workflowPipelineStepStatuses}.
+ *
+ * @see {@link workflowPipelineStepStatuses}
+ */
 export function mediaPipelineStepStatuses({
   hasAsset,
   hasGeneratedLyrics = false,

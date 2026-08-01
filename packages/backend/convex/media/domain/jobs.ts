@@ -1,106 +1,31 @@
 import type { WorkflowId } from "@convex-dev/workflow";
 import { type ArtifactId } from "@partyroom/activities";
-import type { Doc, Id } from "../_generated/dataModel";
-import type { MutationCtx, QueryCtx } from "../_generated/server";
-import { activities, cancelWorkflow, sendWorkflowEvent } from "../activities/workflowManager";
-import type { CoreMediaOperationKind, OperationKind } from "./validators";
+import type { Doc, Id } from "../../_generated/dataModel";
+import type { MutationCtx, QueryCtx } from "../../_generated/server";
+import {
+  activities,
+  cancelWorkflow,
+  managedWorkflow,
+  sendWorkflowEvent,
+} from "../../activities/workflowManager";
+import {
+  cancelAssetEnrichment,
+  deleteAssetArtifacts,
+  deleteAssetEnrichment,
+  deleteIncompleteAsset,
+  deleteLyricTracks,
+} from "./assets";
+import type { CoreMediaOperationKind, OperationKind } from "../validators";
 
 const mediaPipelineVersion = 4;
 
-export const assetArtifactFields = [
-  "sourceArtifactId",
-  "extractedAudioArtifactId",
-  "instrumentalArtifactId",
-  "vocalsArtifactId",
-  "finalArtifactId",
-  "melodyArtifactId",
-  "annotationsArtifactId",
-  "midiArtifactId",
-  "musicXmlArtifactId",
-] as const satisfies readonly (keyof Doc<"mediaAssets">)[];
-
-export async function getLyricTrack(
-  ctx: Pick<QueryCtx, "db">,
-  assetId: Id<"mediaAssets">,
-  source: string,
-) {
-  return await ctx.db
-    .query("mediaLyricTracks")
-    .withIndex("by_asset_and_source", (q) => q.eq("asset", assetId).eq("source", source))
-    .unique();
-}
-
-export async function getMediaEnrichment(ctx: Pick<QueryCtx, "db">, assetId: Id<"mediaAssets">) {
-  return await ctx.db
-    .query("mediaEnrichments")
-    .withIndex("by_asset", (q) => q.eq("asset", assetId))
-    .unique();
-}
-
-async function cancelAssetEnrichment(ctx: MutationCtx, assetId: Id<"mediaAssets">) {
-  const enrichment = await getMediaEnrichment(ctx, assetId);
-  if (!enrichment || enrichment.state !== "processing") return enrichment;
-  if (enrichment.workflowId) {
-    try {
-      await cancelWorkflow(ctx, enrichment.workflowId as WorkflowId);
-    } catch (error) {
-      console.warn(`Unable to cancel media enrichment ${enrichment.workflowId}`, error);
-    }
-  }
-  for (const activity of enrichment.activeActivities ?? []) {
-    await activities.cancel(ctx, activity.activityId as any);
-  }
-  return enrichment;
-}
-
-async function deleteAssetEnrichment(ctx: MutationCtx, assetId: Id<"mediaAssets">) {
-  const enrichment = await cancelAssetEnrichment(ctx, assetId);
-  if (enrichment) await ctx.db.delete("mediaEnrichments", enrichment._id);
-}
-
-async function deleteAssetArtifacts(ctx: MutationCtx, asset: Doc<"mediaAssets">) {
-  let deleted = 0;
-  for (const field of assetArtifactFields) {
-    const artifactId = asset[field];
-    if (!artifactId) continue;
-    if (await activities.deleteArtifact(ctx, artifactId as ArtifactId)) {
-      deleted += 1;
-    }
-  }
-  return deleted;
-}
-
-async function deleteLyricTracks(ctx: MutationCtx, assetId: Id<"mediaAssets">) {
-  const tracks = await ctx.db
-    .query("mediaLyricTracks")
-    .withIndex("by_asset", (q) => q.eq("asset", assetId))
-    .take(100);
-  let deletedArtifacts = 0;
-  for (const track of tracks) {
-    for (const artifactId of [track.textArtifactId, track.timedArtifactId]) {
-      if (artifactId && (await activities.deleteArtifact(ctx, artifactId as ArtifactId))) {
-        deletedArtifacts += 1;
-      }
-    }
-    await ctx.db.delete("mediaLyricTracks", track._id);
-  }
-  return deletedArtifacts;
-}
-
-async function deleteIncompleteAsset(ctx: MutationCtx, asset: Doc<"mediaAssets">) {
-  await deleteAssetEnrichment(ctx, asset._id);
-  await deleteLyricTracks(ctx, asset._id);
-  await deleteAssetArtifacts(ctx, asset);
-  await ctx.db.delete(asset._id);
-}
-
-async function requireJob(ctx: MutationCtx, jobId: Id<"mediaJobs">) {
+async function requireJob(ctx: Pick<QueryCtx, "db">, jobId: Id<"mediaJobs">) {
   const job = await ctx.db.get("mediaJobs", jobId);
   if (!job) throw new Error("Media job not found");
   return job;
 }
 
-async function requireOwnedAsset(ctx: MutationCtx, jobId: Id<"mediaJobs">) {
+async function requireOwnedAsset(ctx: Pick<QueryCtx, "db">, jobId: Id<"mediaJobs">) {
   const job = await requireJob(ctx, jobId);
   if (!job.asset) throw new Error("Media job has no claimed asset");
   const asset = await ctx.db.get("mediaAssets", job.asset);
@@ -112,7 +37,7 @@ async function requireOwnedAsset(ctx: MutationCtx, jobId: Id<"mediaJobs">) {
 }
 
 export async function getActivityJobState(
-  ctx: MutationCtx,
+  ctx: Pick<QueryCtx, "db">,
   jobId: Id<"mediaJobs">,
   kind: CoreMediaOperationKind,
 ) {
@@ -376,6 +301,7 @@ export async function removeRoomMedia(
 
   if (job.workflowId) {
     try {
+      await managedWorkflow.cancelActivities(ctx, job.workflowId as WorkflowId);
       await cancelWorkflow(ctx, job.workflowId as WorkflowId);
     } catch (error) {
       console.warn(`Unable to cancel media workflow ${job.workflowId}`, error);
