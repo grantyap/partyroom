@@ -4,6 +4,7 @@ import {
   activityStep,
   type ActivityDefinition,
   type ActivityInput,
+  type ActivityOutput,
   type ArtifactId,
 } from "@partyroom/activities";
 import { mediaActivities } from "@partyroom/media-activities";
@@ -381,7 +382,7 @@ const inputBuilders: {
   >;
   alignLyrics: InputBuilder<
     (typeof mediaActivities)["alignLyrics"],
-    { enrichmentId: Id<"mediaEnrichments">; language: string }
+    { enrichmentId: Id<"mediaEnrichments"> }
   >;
   analyzeMelody: InputBuilder<
     (typeof mediaActivities)["analyzeMelody"],
@@ -431,9 +432,38 @@ export const mediaEnrichment = mediaEnrichmentDefinition.handler(async (step, { 
     { name: "mark-generated-lyrics-processing", inline: true },
   );
 
-  // These managed steps stay sequential because each expands to multiple
-  // journal entries whose replay order must remain deterministic.
-  const transcription = await step.steps.transcribe.run({ enrichmentId });
+  const shouldAlign = await step.runQuery(
+    internal.media.enrichment.shouldAlignLrclibLyrics,
+    { enrichmentId, workflowId: step.workflowId },
+    { name: "prepare-lrclib-alignment", inline: true },
+  );
+  let transcription: ActivityOutput<(typeof mediaActivities)["transcribe"]>;
+  let alignment: ActivityOutput<(typeof mediaActivities)["alignLyrics"]> | null = null;
+  if (shouldAlign) {
+    const outcomes = await step.parallelSettled({
+      transcription: step.steps.transcribe.run({ enrichmentId }),
+      alignment: step.steps.alignLyrics.run({ enrichmentId }),
+    });
+    if (outcomes.transcription.status === "rejected") {
+      throw outcomes.transcription.reason;
+    }
+    transcription = outcomes.transcription.value;
+    if (outcomes.alignment.status === "fulfilled") {
+      alignment = outcomes.alignment.value;
+    } else {
+      console.warn("[lrclib] Unable to align lyrics", {
+        enrichmentId,
+        error:
+          outcomes.alignment.reason instanceof Error
+            ? outcomes.alignment.reason.message
+            : String(outcomes.alignment.reason),
+      });
+    }
+  } else {
+    await step.steps.alignLyrics.skip("No line-timed lyrics required alignment");
+    transcription = await step.steps.transcribe.run({ enrichmentId });
+  }
+
   await step.runMutation(
     internal.media.enrichment.recordGeneratedLyrics,
     {
@@ -444,7 +474,17 @@ export const mediaEnrichment = mediaEnrichmentDefinition.handler(async (step, { 
     },
     { name: "record-generated-lyrics", inline: true },
   );
-  const language = transcription.language;
+  if (alignment) {
+    await step.runMutation(
+      internal.media.enrichment.recordAlignedLrclibLyrics,
+      {
+        enrichmentId,
+        workflowId: step.workflowId,
+        timedArtifactId: alignment.timedLyricsArtifactId,
+      },
+      { name: "record-aligned-lrclib-lyrics", inline: true },
+    );
+  }
 
   let hasMelody = false;
   try {
@@ -465,35 +505,6 @@ export const mediaEnrichment = mediaEnrichmentDefinition.handler(async (step, { 
       },
       { name: "mark-melody-failed", inline: true },
     );
-  }
-
-  if (
-    language &&
-    (await step.runQuery(
-      internal.media.enrichment.shouldAlignLrclibLyrics,
-      { enrichmentId, workflowId: step.workflowId },
-      { name: "prepare-lrclib-alignment", inline: true },
-    ))
-  ) {
-    try {
-      const aligned = await step.steps.alignLyrics.run({ enrichmentId, language });
-      await step.runMutation(
-        internal.media.enrichment.recordAlignedLrclibLyrics,
-        {
-          enrichmentId,
-          workflowId: step.workflowId,
-          timedArtifactId: aligned.timedLyricsArtifactId,
-        },
-        { name: "record-aligned-lrclib-lyrics", inline: true },
-      );
-    } catch (error) {
-      console.warn("[lrclib] Unable to align lyrics", {
-        enrichmentId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  } else {
-    await step.steps.alignLyrics.skip("No line-timed lyrics required alignment");
   }
 
   try {

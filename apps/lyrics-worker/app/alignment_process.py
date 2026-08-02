@@ -5,6 +5,8 @@ from pathlib import Path
 
 from .aligner import create_aligner
 from .alignment import align_to_artifact
+from .chunked import write_text_atomic
+from .language import detect_alignment_language
 
 
 def emit_progress(stage: str) -> None:
@@ -18,26 +20,33 @@ def main() -> None:
     if len(sys.argv) != 8:
         raise SystemExit(
             "usage: python -m app.alignment_process "
-            "AUDIO TRANSCRIPT LYRICS LANGUAGE BACKEND MODEL DEVICE"
+            "BACKEND MODEL DEVICE AUDIO TRANSCRIPT LYRICS RESULT"
         )
-    audio_path = Path(sys.argv[1])
-    transcript_path = Path(sys.argv[2])
-    lyrics_path = Path(sys.argv[3])
-    language = sys.argv[4]
-    backend = sys.argv[5]
-    model = sys.argv[6]
-    device = sys.argv[7]
+    backend = sys.argv[1]
+    model = sys.argv[2]
+    device = sys.argv[3]
+    audio_path = Path(sys.argv[4])
+    transcript_path = Path(sys.argv[5])
+    lyrics_path = Path(sys.argv[6])
+    result_path = Path(sys.argv[7])
+    transcript = transcript_path.read_text(encoding="utf-8")
+    emit_progress("detectingLanguage")
+    language = detect_alignment_language(transcript)
     emit_progress("loadingModel")
     aligner = create_aligner(backend, model=model, device=device)
     align_to_artifact(
         audio_path,
         lyrics_path,
-        transcript_path.read_text(encoding="utf-8"),
+        transcript,
         language,
         threading.Event(),
         aligner=aligner,
         aligner_model=model,
         stage_changed=emit_progress,
+    )
+    write_text_atomic(
+        result_path,
+        json.dumps({"language": language}, ensure_ascii=False) + "\n",
     )
 
 

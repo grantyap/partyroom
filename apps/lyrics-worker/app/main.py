@@ -39,7 +39,7 @@ worker = Worker(
     token=TOKEN,
     worker_id=os.getenv("ACTIVITY_WORKER_ID", "lyrics-worker"),
     task_queue="lyrics",
-    max_concurrent_activities=int(os.getenv("LYRICS_WORKER_CONCURRENCY", "1")),
+    max_concurrent_activities=int(os.getenv("LYRICS_WORKER_CONCURRENCY", "2")),
     artifact_origin=ARTIFACT_ORIGIN,
 )
 
@@ -128,14 +128,17 @@ async def run_alignment(
     input_path: Path,
     transcript_path: Path,
     lyrics_path: Path,
-    language: str,
-) -> None:
+) -> str:
+    result_path = lyrics_path.with_name("alignment-result.json")
+
     async def process_output(line: str) -> None:
         if not line.startswith(PROGRESS_PREFIX):
             return
         stage = json.loads(line[len(PROGRESS_PREFIX) :]).get("stage")
-        if stage == "loadingModel":
-            await context.report_progress(0.25, f"Loading {ALIGNER_MODEL}")
+        if stage == "detectingLanguage":
+            await context.report_progress(0.25, "Detecting lyrics language")
+        elif stage == "loadingModel":
+            await context.report_progress(0.3, f"Loading {ALIGNER_MODEL}")
         elif stage == "preprocessing":
             await context.report_progress(0.4, "Preparing vocal audio")
         elif stage == "aligning":
@@ -147,15 +150,17 @@ async def run_alignment(
         sys.executable,
         "-m",
         "app.alignment_process",
-        str(input_path),
-        str(transcript_path),
-        str(lyrics_path),
-        language,
         LYRICS_BACKEND,
         ALIGNER_MODEL,
         LYRICS_DEVICE,
+        str(input_path),
+        str(transcript_path),
+        str(lyrics_path),
+        str(result_path),
         on_stdout_line=process_output,
     )
+    result = json.loads(result_path.read_text(encoding="utf-8"))
+    return str(result["language"])
 
 
 @worker.activity(transcribe)
@@ -220,12 +225,11 @@ async def align_lyrics_activity(
             context.progress_reporter(0, 0.25, "Downloading vocal stem"),
         )
         write_text_atomic(transcript_path, activity.transcript)
-        await run_alignment(
+        language = await run_alignment(
             context,
             input_path,
             transcript_path,
             lyrics_path,
-            activity.language,
         )
         await context.report_progress(0.75, "Uploading aligned lyrics")
         if lyrics_path.stat().st_size > MAX_BYTES:
@@ -242,7 +246,7 @@ async def align_lyrics_activity(
             timed_lyrics_artifact_id=timed_lyrics_artifact_id,
             content_type="application/json",
             model=ALIGNER_MODEL,
-            language=activity.language,
+            language=language,
         )
     finally:
         shutil.rmtree(directory, ignore_errors=True)

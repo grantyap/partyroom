@@ -6,6 +6,7 @@ dependencies = [
   "partyroom-activity-worker",
   "fastapi==0.116.1",
   "httpx==0.28.1",
+  "py3langid==0.3.0",
   "qwen-asr==0.0.6; sys_platform != 'darwin'",
   "scipy==1.18.0",
   "soundfile==0.14.0",

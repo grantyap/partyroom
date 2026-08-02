@@ -56,11 +56,8 @@ export const analyzeMelody = defineActivityInput({
 
 export const alignLyrics = defineActivityInput({
   activity: mediaActivities.alignLyrics,
-  args: {
-    enrichmentId: v.id("mediaEnrichments"),
-    language: v.string(),
-  },
-  handler: async (ctx, { enrichmentId, workflowId, language }) => {
+  args: { enrichmentId: v.id("mediaEnrichments") },
+  handler: async (ctx, { enrichmentId, workflowId }) => {
     const { asset } = await requireCurrentEnrichment(ctx, enrichmentId, workflowId);
     const lyrics = await getLyricTrack(ctx, asset._id, "lrclib");
     return {
@@ -69,7 +66,6 @@ export const alignLyrics = defineActivityInput({
         .map(({ value }) => value.trim())
         .filter((value) => value && !/^(?:\.{3}|…+)$/.test(value))
         .join("\n"),
-      language,
     };
   },
 });

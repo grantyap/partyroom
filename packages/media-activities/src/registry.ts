@@ -19,7 +19,7 @@ export const mediaQueues = {
   }),
   lyrics: defineQueue("lyrics", {
     leaseDurationMs: 30_000,
-    maxConcurrentActivities: 1,
+    maxConcurrentActivities: 2,
   }),
   annotations: defineQueue("annotations", {
     leaseDurationMs: 30_000,
@@ -137,12 +137,11 @@ export const mediaActivities = {
   }),
   alignLyrics: activity({
     name: "media.alignLyrics",
-    version: 2,
+    version: 3,
     queue: mediaQueues.lyrics,
     input: wire.object({
       audioUrl: wire.string,
       transcript: wire.string,
-      language: wire.string,
     }),
     output: wire.object({
       timedLyricsArtifactId: wire.artifact("retained"),
