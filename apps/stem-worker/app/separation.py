@@ -5,6 +5,11 @@ from pathlib import Path
 from partyroom_activity_worker import ActivityContext, ApplicationError, ManagedProcessResult
 
 
+SEPARATION_START = 0.02
+SEPARATION_END = 0.98
+SEPARATION_PASSES = 2
+
+
 def separator_arguments(
     input_path: Path, model: str, model_dir: Path, output_dir: Path
 ) -> tuple[str, ...]:
@@ -46,12 +51,14 @@ async def run_separator(
         completed = int(event["completed"])
         total = int(event["total"])
         pass_number = max(1, int(event.get("pass", 1)))
-        pass_start = 0.5 + min(pass_number - 1, 1) * 0.125
+        pass_span = (SEPARATION_END - SEPARATION_START) / SEPARATION_PASSES
+        pass_index = min(pass_number - 1, SEPARATION_PASSES - 1)
+        pass_start = SEPARATION_START + pass_index * pass_span
         reporter = reporters.setdefault(
             pass_number,
             context.progress_reporter(
                 pass_start,
-                pass_start + 0.125,
+                pass_start + pass_span,
                 lambda done, count, current_pass=pass_number: (
                     f"Separating stems: pass {current_pass}, "
                     f"chunk {done} of {count}"
@@ -75,7 +82,8 @@ async def run_separator(
         for partial_output in output_dir.glob("*.flac"):
             partial_output.unlink(missing_ok=True)
         await context.report_progress(
-            0.15, f"CoreML could not run {model}; retrying separation on CPU"
+            SEPARATION_START,
+            f"CoreML could not run {model}; retrying separation on CPU",
         )
         return await context.run_process(
             sys.executable,

@@ -9,7 +9,7 @@ from partyroom_activity_worker import ActivityContext, Worker, replace_url_origi
 
 from .activities_generated import SeparateInput, SeparateOutput, separate
 from .model import ensure_model
-from .separation import run_separator
+from .separation import SEPARATION_END, SEPARATION_START, run_separator
 
 WORK_DIR = Path(os.getenv("WORK_DIR", "/work"))
 MODEL_DIR = Path(os.getenv("MODEL_DIR", "/models"))
@@ -71,11 +71,11 @@ async def separate_activity(context: ActivityContext, activity: SeparateInput) -
         await download(
             activity.audio_url,
             input_path,
-            context.progress_reporter(0, 0.25, "Downloading extracted audio"),
+            context.progress_reporter(0, 0.01, "Downloading extracted audio"),
         )
-        await context.report_progress(0.25, f"Preparing separation model {MODEL}")
+        await context.report_progress(0.01, f"Preparing separation model {MODEL}")
         await ensure_model(MODEL_DIR, MODEL, context.run_process)
-        await context.report_progress(0.5, f"Separating stems with {MODEL}")
+        await context.report_progress(SEPARATION_START, f"Separating stems with {MODEL}")
         result = await run_separator(context, input_path, MODEL, MODEL_DIR, directory)
         output = (result.stdout + result.stderr).decode(errors="replace")
         if not output_path.exists():
@@ -92,7 +92,7 @@ async def separate_activity(context: ActivityContext, activity: SeparateInput) -
                     f"audio-separator did not produce a vocal stem: {output[-4000:]}"
                 )
             vocals_path = candidates[0]
-        await context.report_progress(0.75, "Uploading separated stems")
+        await context.report_progress(SEPARATION_END, "Uploading separated stems")
         if output_path.stat().st_size > MAX_BYTES or vocals_path.stat().st_size > MAX_BYTES:
             raise ValueError("Output exceeds MAX_MEDIA_BYTES")
         return SeparateOutput(
@@ -101,7 +101,7 @@ async def separate_activity(context: ActivityContext, activity: SeparateInput) -
                 output_path,
                 "audio/flac",
                 on_progress=context.progress_reporter(
-                    0.75, 0.875, "Uploading instrumental stem"
+                    SEPARATION_END, 0.99, "Uploading instrumental stem"
                 ),
             ),
             vocals_artifact_id=await context.upload_artifact(
@@ -109,7 +109,7 @@ async def separate_activity(context: ActivityContext, activity: SeparateInput) -
                 vocals_path,
                 "audio/flac",
                 on_progress=context.progress_reporter(
-                    0.875, 1, "Uploading vocal stem"
+                    0.99, 1, "Uploading vocal stem"
                 ),
             ),
             content_type="audio/flac",

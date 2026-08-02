@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import app.cpu_separator as cpu_separator
-from app.separation import run_separator
+from app.separation import SEPARATION_END, SEPARATION_START, run_separator
 from app.progress_separator import PROGRESS_PREFIX
 from partyroom_activity_worker import ApplicationError, ManagedProcessResult
 
@@ -77,19 +77,29 @@ class SeparationTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_reports_structured_separator_chunk_progress(self):
         context = AsyncMock()
+        reports = []
 
-        async def report(completed, total):
-            await context.report_progress(
-                0.5 + 0.125 * completed / total,
-                f"Separating stems: pass 1, chunk {completed} of {total}",
-            )
+        def progress_reporter(start, end, message):
+            async def report(completed, total):
+                progress = start + (end - start) * completed / total
+                await context.report_progress(
+                    progress,
+                    message(completed, total),
+                )
 
-        context.progress_reporter = MagicMock(return_value=report)
+            reports.append((start, end))
+            return report
+
+        context.progress_reporter = MagicMock(side_effect=progress_reporter)
 
         async def run_process(*_command, **options):
             await options["on_stdout_line"](
                 PROGRESS_PREFIX
                 + json.dumps({"pass": 1, "completed": 2, "total": 4})
+            )
+            await options["on_stdout_line"](
+                PROGRESS_PREFIX
+                + json.dumps({"pass": 2, "completed": 1, "total": 4})
             )
             return ManagedProcessResult(0, b"", b"")
 
@@ -102,8 +112,20 @@ class SeparationTest(unittest.IsolatedAsyncioTestCase):
             Path("."),
         )
 
-        context.report_progress.assert_awaited_once_with(
-            0.5625, "Separating stems: pass 1, chunk 2 of 4"
+        self.assertEqual(
+            reports,
+            [
+                (SEPARATION_START, 0.5),
+                (0.5, SEPARATION_END),
+            ],
+        )
+        self.assertEqual(
+            context.report_progress.await_args_list[0].args,
+            (0.26, "Separating stems: pass 1, chunk 2 of 4"),
+        )
+        self.assertEqual(
+            context.report_progress.await_args_list[1].args,
+            (0.62, "Separating stems: pass 2, chunk 1 of 4"),
         )
 
 
