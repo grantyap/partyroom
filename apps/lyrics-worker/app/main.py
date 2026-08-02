@@ -126,7 +126,7 @@ async def run_transcription(
 async def run_alignment(
     context: ActivityContext,
     input_path: Path,
-    transcript_path: Path,
+    alignment_input_path: Path,
     lyrics_path: Path,
 ) -> str:
     result_path = lyrics_path.with_name("alignment-result.json")
@@ -134,7 +134,8 @@ async def run_alignment(
     async def process_output(line: str) -> None:
         if not line.startswith(PROGRESS_PREFIX):
             return
-        stage = json.loads(line[len(PROGRESS_PREFIX) :]).get("stage")
+        progress = json.loads(line[len(PROGRESS_PREFIX) :])
+        stage = progress.get("stage")
         if stage == "detectingLanguage":
             await context.report_progress(0.25, "Detecting lyrics language")
         elif stage == "loadingModel":
@@ -143,6 +144,13 @@ async def run_alignment(
             await context.report_progress(0.4, "Preparing vocal audio")
         elif stage == "aligning":
             await context.report_progress(0.55, "Aligning lyric transcript")
+        elif stage == "alignedChunk":
+            completed = int(progress["completed"])
+            total = int(progress["total"])
+            await context.report_progress(
+                0.55 + 0.2 * completed / total,
+                f"Aligned lyric chunk {completed} of {total}",
+            )
         elif stage == "writing":
             await context.report_progress(0.75, "Writing word-timed lyrics")
 
@@ -154,7 +162,7 @@ async def run_alignment(
         ALIGNER_MODEL,
         LYRICS_DEVICE,
         str(input_path),
-        str(transcript_path),
+        str(alignment_input_path),
         str(lyrics_path),
         str(result_path),
         on_stdout_line=process_output,
@@ -214,7 +222,7 @@ async def align_lyrics_activity(
 ) -> AlignLyricsOutput:
     directory = WORK_DIR / f"{context.info.activity_id}-{context.info.attempt}"
     input_path = directory / "vocals.flac"
-    transcript_path = directory / "transcript.txt"
+    alignment_input_path = directory / "alignment-input.json"
     lyrics_path = directory / "timed-lyrics.json"
     directory.mkdir(parents=True, exist_ok=True)
     try:
@@ -224,11 +232,22 @@ async def align_lyrics_activity(
             input_path,
             context.progress_reporter(0, 0.25, "Downloading vocal stem"),
         )
-        write_text_atomic(transcript_path, activity.transcript)
+        write_text_atomic(
+            alignment_input_path,
+            json.dumps(
+                {
+                    "lines": activity.lines,
+                    "lineStarts": activity.line_starts,
+                    "lineEnds": activity.line_ends,
+                },
+                ensure_ascii=False,
+            )
+            + "\n",
+        )
         language = await run_alignment(
             context,
             input_path,
-            transcript_path,
+            alignment_input_path,
             lyrics_path,
         )
         await context.report_progress(0.75, "Uploading aligned lyrics")

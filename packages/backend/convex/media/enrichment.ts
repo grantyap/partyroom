@@ -200,7 +200,6 @@ export const shouldAlignLrclibLyrics = internalQuery({
   returns: v.boolean(),
   handler: async (ctx, { enrichmentId, workflowId }) => {
     const { asset } = await requireCurrentEnrichment(ctx, enrichmentId, workflowId);
-    if (asset.duration !== undefined && asset.duration > 300) return false;
     const track = await getLyricTrack(ctx, asset._id, "lrclib");
     return (
       track?.state === "ready" &&

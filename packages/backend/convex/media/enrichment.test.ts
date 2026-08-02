@@ -63,7 +63,7 @@ describe("media enrichment", () => {
     expect(track?.observations).toBeUndefined();
   });
 
-  test("does not align media beyond the aligner's duration limit", async () => {
+  test("sends line-timed lyrics from longer media to the lyrics worker", async () => {
     const t = convexTest(schema, modules);
     const enrichmentId = await t.run(async (ctx) => {
       const now = Date.now();
@@ -100,6 +100,6 @@ describe("media enrichment", () => {
         enrichmentId,
         workflowId: "workflow" as any,
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 });

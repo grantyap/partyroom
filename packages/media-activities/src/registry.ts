@@ -137,11 +137,13 @@ export const mediaActivities = {
   }),
   alignLyrics: activity({
     name: "media.alignLyrics",
-    version: 3,
+    version: 4,
     queue: mediaQueues.lyrics,
     input: wire.object({
       audioUrl: wire.string,
-      transcript: wire.string,
+      lines: wire.array(wire.string),
+      lineStarts: wire.array(wire.number),
+      lineEnds: wire.array(wire.number),
     }),
     output: wire.object({
       timedLyricsArtifactId: wire.artifact("retained"),

@@ -15,7 +15,13 @@ os.environ.setdefault("ACTIVITY_WORKER_TOKEN", "test-token")
 os.environ.setdefault("WORK_DIR", "/tmp/partyroom-lyrics-tests")
 
 from app.aligner import AlignedWord  # noqa: E402
-from app.alignment import align_to_artifact, preserve_transcript_timing  # noqa: E402
+from app.alignment import (  # noqa: E402
+    AlignmentLine,
+    align_to_artifact,
+    alignment_lines_from_arrays,
+    build_alignment_chunks,
+    preserve_transcript_timing,
+)
 
 
 class FakeAligner:
@@ -31,6 +37,29 @@ class FakeAligner:
         return [
             AlignedWord(text="Accurate", start_time=1.0, end_time=1.4),
             AlignedWord(text="lyrics", start_time=1.8, end_time=2.2),
+        ]
+
+
+class ChunkRecordingAligner:
+    def __init__(self) -> None:
+        self.calls: list[tuple[int, str]] = []
+
+    def align(
+        self,
+        *,
+        audio: tuple[object, int],
+        text: str,
+        language: str,
+    ) -> list[AlignedWord]:
+        samples, _sample_rate = audio
+        self.calls.append((len(samples), text))
+        return [
+            AlignedWord(
+                text=token,
+                start_time=1 + index * 0.25,
+                end_time=1.2 + index * 0.25,
+            )
+            for index, token in enumerate(text.split())
         ]
 
 
@@ -70,7 +99,7 @@ class AlignmentTest(unittest.TestCase):
                 align_to_artifact(
                     Path(directory) / "vocals.flac",
                     output,
-                    "Accurate LRCLIB lyrics",
+                    [AlignmentLine("Accurate LRCLIB lyrics", 0, 4)],
                     "English",
                     threading.Event(),
                     aligner=FakeAligner(),
@@ -92,6 +121,71 @@ class AlignmentTest(unittest.TestCase):
         )
         self.assertAlmostEqual(document["observations"][1]["time"], 1.4)
         self.assertAlmostEqual(document["observations"][1]["duration"], 0.4)
+
+    def test_aligns_long_audio_in_overlapping_line_owned_chunks(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "aligned.json"
+            aligner = ChunkRecordingAligner()
+            lines = [
+                AlignmentLine("same chorus", 10, 20),
+                AlignmentLine("same chorus", 260, 270),
+                AlignmentLine("same chorus", 510, 520),
+                AlignmentLine("same chorus", 760, 770),
+            ]
+            with patch(
+                "app.alignment.load_mono_audio",
+                return_value=(np.zeros(800, dtype=np.float32), 1),
+            ):
+                align_to_artifact(
+                    Path(directory) / "vocals.flac",
+                    output,
+                    lines,
+                    "English",
+                    threading.Event(),
+                    aligner=aligner,
+                    aligner_model="forced-aligner",
+                )
+            document = json.loads(output.read_text(encoding="utf-8"))
+
+        self.assertEqual(len(aligner.calls), 4)
+        self.assertTrue(all(samples <= 300 for samples, _text in aligner.calls))
+        self.assertTrue(any(text.count("same chorus") == 2 for _, text in aligner.calls))
+        self.assertEqual(
+            [observation["value"] for observation in document["observations"]],
+            ["same", "chorus"] * 4,
+        )
+        times = [observation["time"] for observation in document["observations"]]
+        self.assertEqual(times, sorted(times))
+
+    def test_builds_bounded_chunks_across_arbitrarily_long_timing(self) -> None:
+        lines = [
+            AlignmentLine("first", 10, 20),
+            AlignmentLine("second", 260, 270),
+            AlignmentLine("third", 510, 520),
+            AlignmentLine("fourth", 760, 770),
+        ]
+
+        chunks = build_alignment_chunks(lines, 800)
+
+        self.assertEqual(
+            [(chunk.core_start, chunk.core_end) for chunk in chunks],
+            [(0, 1), (1, 2), (2, 3), (3, 4)],
+        )
+        self.assertTrue(
+            all(
+                0 < chunk.audio_end - chunk.audio_start <= 300
+                for chunk in chunks
+            )
+        )
+        self.assertGreater(chunks[-1].audio_end, 700)
+
+    def test_validates_parallel_line_arrays(self) -> None:
+        self.assertEqual(
+            alignment_lines_from_arrays(["line"], [1.0], [2.0]),
+            [AlignmentLine("line", 1.0, 2.0)],
+        )
+        with self.assertRaisesRegex(ValueError, "equal lengths"):
+            alignment_lines_from_arrays(["line"], [1.0], [])
 
     def test_repairs_zero_duration_words_without_changing_source_text(self) -> None:
         result = preserve_transcript_timing(

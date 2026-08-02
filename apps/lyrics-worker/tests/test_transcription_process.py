@@ -10,7 +10,7 @@ os.environ.setdefault("ACTIVITY_WORKER_API_URL", "http://activities.test/workers
 os.environ.setdefault("ACTIVITY_WORKER_TOKEN", "test-token")
 os.environ.setdefault("WORK_DIR", "/tmp/partyroom-lyrics-tests")
 
-from app.main import PROGRESS_PREFIX, run_transcription  # noqa: E402
+from app.main import PROGRESS_PREFIX, run_alignment, run_transcription  # noqa: E402
 
 
 class FakeContext:
@@ -31,6 +31,21 @@ class FakeContext:
         )
         await callback(  # type: ignore[operator]
             PROGRESS_PREFIX + json.dumps({"completed": 1, "total": 2})
+        )
+        Path(command[-1]).write_text(
+            json.dumps({"language": "English"}), encoding="utf-8"
+        )
+
+
+class FakeAlignmentContext(FakeContext):
+    async def run_process(self, *command: str, **options: object) -> None:
+        self.command = command
+        callback = options["on_stdout_line"]
+        await callback(  # type: ignore[operator]
+            PROGRESS_PREFIX
+            + json.dumps(
+                {"stage": "alignedChunk", "completed": 2, "total": 4}
+            )
         )
         Path(command[-1]).write_text(
             json.dumps({"language": "English"}), encoding="utf-8"
@@ -76,6 +91,24 @@ class TranscriptionProcessTest(unittest.IsolatedAsyncioTestCase):
                 (0.375, "Loading Qwen/Qwen3-ASR-0.6B"),
                 (0.625, "Transcribed and aligned chunk 1 of 2"),
             ],
+        )
+
+    async def test_alignment_child_reports_chunk_progress(self) -> None:
+        context = FakeAlignmentContext()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            language = await run_alignment(
+                context,  # type: ignore[arg-type]
+                root / "vocals.flac",
+                root / "alignment-input.json",
+                root / "timed-lyrics.json",
+            )
+
+        self.assertEqual(language, "English")
+        self.assertEqual(context.command[1:3], ("-m", "app.alignment_process"))
+        self.assertEqual(
+            context.progress,
+            [(0.65, "Aligned lyric chunk 2 of 4")],
         )
 
 

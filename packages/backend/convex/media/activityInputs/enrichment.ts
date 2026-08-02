@@ -60,12 +60,15 @@ export const alignLyrics = defineActivityInput({
   handler: async (ctx, { enrichmentId, workflowId }) => {
     const { asset } = await requireCurrentEnrichment(ctx, enrichmentId, workflowId);
     const lyrics = await getLyricTrack(ctx, asset._id, "lrclib");
+    const observations = (lyrics?.observations ?? []).filter(({ value }) => {
+      const normalized = value.trim();
+      return normalized && !/^(?:\.{3}|…+)$/.test(normalized);
+    });
     return {
       audioUrl: await artifactUrl(ctx, asset.vocalsArtifactId),
-      transcript: (lyrics?.observations ?? [])
-        .map(({ value }) => value.trim())
-        .filter((value) => value && !/^(?:\.{3}|…+)$/.test(value))
-        .join("\n"),
+      lines: observations.map(({ value }) => value.trim()),
+      lineStarts: observations.map(({ time }) => time),
+      lineEnds: observations.map(({ time, duration }) => time + duration),
     };
   },
 });
