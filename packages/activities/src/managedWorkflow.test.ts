@@ -316,6 +316,7 @@ describe("managed artifact workflows", () => {
     const second = "second-query" as unknown as FunctionReference<"query", "internal", {}, string>;
     const firstResult = deferred<string>();
     const secondResult = deferred<string>();
+    const firstFinalization = deferred<void>();
     const journal: string[] = [];
     const manager = new ManagedWorkflowManager(
       workflows as never,
@@ -347,6 +348,9 @@ describe("managed artifact workflows", () => {
 
     const runMutation = vi.fn(async (_target, _args, options) => {
       journal.push(options.name);
+      if (options.name === "first:complete") {
+        await firstFinalization.promise;
+      }
       return null;
     });
     const runQuery = vi.fn(async (target, _args, options) => {
@@ -360,9 +364,177 @@ describe("managed artifact workflows", () => {
     await Promise.resolve();
     expect(journal).not.toContain("first:complete");
     firstResult.resolve("first");
+    await vi.waitFor(() => expect(journal).toContain("first:complete"));
+    expect(journal).not.toContain("second:complete");
+    firstFinalization.resolve();
 
     await expect(result).resolves.toEqual({ first: "first", second: "second" });
     expect(journal.slice(-2)).toEqual(["first:complete", "second:complete"]);
+  });
+
+  test("journals parallel activity scheduling in declaration order", async () => {
+    let registeredHandler:
+      | ((workflow: Record<string, any>, args: {}) => Promise<unknown>)
+      | undefined;
+    const workflows = {
+      define: vi.fn(() => ({
+        handler: vi.fn((handler) => {
+          registeredHandler = handler;
+          return "registered-workflow";
+        }),
+      })),
+    };
+    const queue = defineQueue("parallel", { leaseDurationMs: 10_000 });
+    const first = defineActivity({
+      name: "example.first",
+      version: 1,
+      queue,
+      input: wire.object({}),
+      output: wire.object({ value: wire.string }),
+      startToCloseTimeoutMs: 60_000,
+      scheduleToCloseTimeoutMs: 300_000,
+    });
+    const second = defineActivity({
+      name: "example.second",
+      version: 1,
+      queue,
+      input: wire.object({}),
+      output: wire.object({ value: wire.string }),
+      startToCloseTimeoutMs: 60_000,
+      scheduleToCloseTimeoutMs: 300_000,
+    });
+    const journal: string[] = [];
+    const manager = new ManagedWorkflowManager(
+      workflows as never,
+      {
+        workflowSteps: {
+          register: "register-steps",
+          startActivity: "start-activity",
+          failActivity: "fail-activity",
+          linkActivity: "link-activity",
+        },
+      } as never,
+      "lifecycle-completion" as never,
+      {
+        schedule: vi.fn(async (_ctx, _workflowId, activity) => {
+          journal.push(`${activity.name}:schedule`);
+          await Promise.resolve();
+          return `${activity.name}:id`;
+        }),
+      } as never,
+    );
+    manager
+      .define({
+        args: {},
+        steps: {
+          first: activityStep(first),
+          second: activityStep(second),
+        },
+      })
+      .handler(
+        async (step) =>
+          await step.parallel({
+            first: step.steps.first.run({}),
+            second: step.steps.second.run({}),
+          }),
+      );
+
+    await registeredHandler?.(
+      {
+        workflowId,
+        runMutation: vi.fn(async (_target, _args, options) => {
+          journal.push(options.name);
+          return null;
+        }),
+        awaitEvent: vi.fn(async ({ name }) => {
+          journal.push(`${name}:execute`);
+          return { value: name };
+        }),
+      },
+      {},
+    );
+
+    expect(journal).toEqual([
+      "workflow-steps:register",
+      "first:start",
+      "example.first:schedule",
+      "first:link",
+      "second:start",
+      "example.second:schedule",
+      "second:link",
+      "example.first:id:execute",
+      "example.second:id:execute",
+    ]);
+  });
+
+  test("returns independent outcomes for optional parallel steps", async () => {
+    let registeredHandler:
+      | ((workflow: Record<string, any>, args: {}) => Promise<unknown>)
+      | undefined;
+    const workflows = {
+      define: vi.fn(() => ({
+        handler: vi.fn((handler) => {
+          registeredHandler = handler;
+          return "registered-workflow";
+        }),
+      })),
+    };
+    const required = "required-query" as unknown as FunctionReference<
+      "query",
+      "internal",
+      {},
+      string
+    >;
+    const optional = "optional-query" as unknown as FunctionReference<
+      "query",
+      "internal",
+      {},
+      string
+    >;
+    const manager = new ManagedWorkflowManager(
+      workflows as never,
+      {
+        workflowSteps: {
+          register: "register-steps",
+          start: "start-step",
+          finish: "finish-step",
+        },
+      } as never,
+      "lifecycle-completion" as never,
+      {} as never,
+    );
+    manager
+      .define({
+        args: {},
+        steps: {
+          required: workflowStep(queryOptions({ query: required, inline: true })),
+          optional: workflowStep(queryOptions({ query: optional, inline: true })),
+        },
+      })
+      .handler(
+        async (step) =>
+          await step.parallelSettled({
+            required: step.steps.required.run({}),
+            optional: step.steps.optional.run({}),
+          }),
+      );
+
+    const result = await registeredHandler?.(
+      {
+        workflowId,
+        runMutation: vi.fn(async () => null),
+        runQuery: vi.fn(async (target) => {
+          if (target === optional) throw new Error("optional failed");
+          return "required result";
+        }),
+      },
+      {},
+    );
+
+    expect(result).toMatchObject({
+      required: { status: "fulfilled", value: "required result" },
+      optional: { status: "rejected", reason: expect.any(Error) },
+    });
   });
 
   test("rejects a managed step started while a manual step is unawaited", async () => {

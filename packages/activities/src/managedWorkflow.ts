@@ -413,10 +413,33 @@ type BoundStep = {
   skip(message?: string): Promise<void>;
 };
 
+/**
+ * Private lifecycle contract used by the managed workflow coordinator.
+ *
+ * Plans are created by bound step implementations, not by workflow authors.
+ * The coordinator runs `prepare` and `finalize` sequentially in declaration
+ * order so their durable Convex journal entries remain deterministic. Only
+ * `execute` is allowed to run concurrently across plans.
+ */
 type ManagedOperationPlan<Result> = {
-  start(): Promise<void>;
+  /**
+   * Writes any durable state required before execution, such as marking a step
+   * started, building activity input, scheduling an activity, or linking its
+   * ID. This phase may contain multiple journal entries and must never be run
+   * concurrently with another plan's preparation.
+   */
+  prepare(): Promise<void>;
+  /**
+   * Performs or awaits the operation itself. The coordinator may run this
+   * phase concurrently with other plans after every plan has been prepared.
+   */
   execute(): Promise<Result>;
-  finish(result: PromiseSettledResult<Result>): Promise<void>;
+  /**
+   * Records the terminal result after every execution has settled. This phase
+   * may write durable journal entries and must remain sequential in declaration
+   * order, regardless of execution completion order.
+   */
+  finalize(result: PromiseSettledResult<Result>): Promise<void>;
 };
 
 const managedOperation = Symbol("managedWorkflowOperation");
@@ -433,6 +456,9 @@ export type ManagedStepOperation<Result> = PromiseLike<Result> & {
 
 type ManagedOperationResult<Operation> =
   Operation extends ManagedStepOperation<infer Result> ? Result : never;
+type ManagedOperationSettledResult<Operation> = PromiseSettledResult<
+  ManagedOperationResult<Operation>
+>;
 
 class ManagedOperationCoordinator {
   private active = false;
@@ -463,11 +489,36 @@ class ManagedOperationCoordinator {
     operations: Operations,
   ): Promise<{ [Key in keyof Operations]: ManagedOperationResult<Operations[Key]> }> {
     const entries = Object.entries(operations);
-    const results = await this.runPlans(
+    const settled = await this.settlePlans(
       entries.map(([, operation]) => operation[managedOperation]()),
+    );
+    const failure = settled.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    if (failure) throw failure.reason;
+    const results = settled.map(
+      (result) => (result as PromiseFulfilledResult<unknown>).value,
     );
     return Object.fromEntries(entries.map(([key], index) => [key, results[index]])) as {
       [Key in keyof Operations]: ManagedOperationResult<Operations[Key]>;
+    };
+  }
+
+  async parallelSettled<
+    const Operations extends Readonly<Record<string, ManagedStepOperation<unknown>>>,
+  >(
+    operations: Operations,
+  ): Promise<{
+    [Key in keyof Operations]: ManagedOperationSettledResult<Operations[Key]>;
+  }> {
+    const entries = Object.entries(operations);
+    const settled = await this.settlePlans(
+      entries.map(([, operation]) => operation[managedOperation]()),
+    );
+    return Object.fromEntries(
+      entries.map(([key], index) => [key, settled[index]]),
+    ) as {
+      [Key in keyof Operations]: ManagedOperationSettledResult<Operations[Key]>;
     };
   }
 
@@ -476,6 +527,17 @@ class ManagedOperationCoordinator {
   }
 
   private async runPlans(plans: ManagedOperationPlan<unknown>[]) {
+    const settled = await this.settlePlans(plans);
+    const failure = settled.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    if (failure) throw failure.reason;
+    return settled.map(
+      (result) => (result as PromiseFulfilledResult<unknown>).value,
+    );
+  }
+
+  private async settlePlans(plans: ManagedOperationPlan<unknown>[]) {
     if (this.active) {
       throw new Error(
         "A managed workflow step is already running. Await it immediately, or pass structured steps to step.parallel().",
@@ -483,18 +545,15 @@ class ManagedOperationCoordinator {
     }
     this.active = true;
     try {
-      const starts = await Promise.allSettled(plans.map(async (plan) => await plan.start()));
-      const startFailure = starts.find(
-        (result): result is PromiseRejectedResult => result.status === "rejected",
-      );
-      if (startFailure) throw startFailure.reason;
+      // Preparation and finalization may each write several durable journal
+      // entries. Keep both phases in declaration order; only execution may
+      // race.
+      for (const plan of plans) await plan.prepare();
       const settled = await Promise.allSettled(plans.map(async (plan) => await plan.execute()));
-      await Promise.all(plans.map(async (plan, index) => await plan.finish(settled[index]!)));
-      const failure = settled.find(
-        (result): result is PromiseRejectedResult => result.status === "rejected",
-      );
-      if (failure) throw failure.reason;
-      return settled.map((result) => (result as PromiseFulfilledResult<unknown>).value);
+      for (const [index, plan] of plans.entries()) {
+        await plan.finalize(settled[index]!);
+      }
+      return settled;
     } finally {
       this.active = false;
     }
@@ -578,6 +637,21 @@ export type ManagedWorkflowCtx<Steps extends StepDefinitions = StepDefinitions> 
   parallel<const Operations extends Readonly<Record<string, ManagedStepOperation<unknown>>>>(
     operations: Operations,
   ): Promise<{ [Key in keyof Operations]: ManagedOperationResult<Operations[Key]> }>;
+  /**
+   * Starts and joins a keyed group while preserving each operation's outcome.
+   *
+   * Use this when required and optional durable branches should execute
+   * concurrently. Scheduling failures still reject the group; activity or
+   * workflow failures are returned as rejected results after every branch has
+   * reached a durable terminal state.
+   */
+  parallelSettled<
+    const Operations extends Readonly<Record<string, ManagedStepOperation<unknown>>>,
+  >(
+    operations: Operations,
+  ): Promise<{
+    [Key in keyof Operations]: ManagedOperationSettledResult<Operations[Key]>;
+  }>;
 };
 
 function humanizeStepKey(key: string) {
@@ -692,6 +766,8 @@ export class ManagedWorkflowManager {
               ...workflow,
               steps: bound,
               parallel: async (operations) => await coordinator.parallel(operations),
+              parallelSettled: async (operations) =>
+                await coordinator.parallelSettled(operations),
             },
             args,
           );
@@ -713,7 +789,7 @@ export class ManagedWorkflowManager {
         coordinator.operation(() => {
           let activityId: string | undefined;
           return {
-            start: async () => {
+            prepare: async () => {
               await workflow.runMutation(
                 this.component.workflowSteps.startActivity,
                 {
@@ -783,7 +859,7 @@ export class ManagedWorkflowManager {
                 validator: step.activity.output,
               });
             },
-            finish: async () => {},
+            finalize: async () => {},
           };
         }),
       skip: async (message) =>
@@ -803,9 +879,9 @@ export class ManagedWorkflowManager {
     return {
       run: (args) =>
         coordinator.operation(() => ({
-          start: async () => await this.startWorkflowStep(workflow, key),
+          prepare: async () => await this.startWorkflowStep(workflow, key),
           execute: async () => await this.runStructuredWorkflowStep(workflow, key, step, args),
-          finish: async (result) => await this.finishWorkflowStep(workflow, key, result),
+          finalize: async (result) => await this.finishWorkflowStep(workflow, key, result),
         })),
       skip: async (message) =>
         await coordinator.exclusive(() => this.skipStepPlan(workflow, key, message)),
@@ -820,9 +896,9 @@ export class ManagedWorkflowManager {
     return {
       run: async <Result>(callback: () => Promise<Result>) =>
         await coordinator.exclusive(() => ({
-          start: async () => await this.startWorkflowStep(workflow, key),
+          prepare: async () => await this.startWorkflowStep(workflow, key),
           execute: callback,
-          finish: async (result) => await this.finishWorkflowStep(workflow, key, result),
+          finalize: async (result) => await this.finishWorkflowStep(workflow, key, result),
         })),
       skip: async (message) =>
         await coordinator.exclusive(() => this.skipStepPlan(workflow, key, message)),
@@ -890,7 +966,7 @@ export class ManagedWorkflowManager {
     message?: string,
   ): ManagedOperationPlan<void> {
     return {
-      start: async () => {},
+      prepare: async () => {},
       execute: async () => {
         await workflow.runMutation(
           this.component.workflowSteps.skip,
@@ -902,7 +978,7 @@ export class ManagedWorkflowManager {
           { name: `${key}:skip`, inline: true },
         );
       },
-      finish: async () => {},
+      finalize: async () => {},
     };
   }
 
