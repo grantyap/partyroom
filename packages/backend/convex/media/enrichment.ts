@@ -402,14 +402,14 @@ const inputBuilders: {
 const mediaEnrichmentDefinition = managedWorkflow.define({
   args: { enrichmentId: v.id("mediaEnrichments") },
   steps: {
-    transcribe: activityStep(mediaActivities.transcribe, {
-      input: inputBuilders.transcribe,
-      label: "Transcribe lyrics",
-      order: 5,
-    }),
     alignLyrics: activityStep(mediaActivities.alignLyrics, {
       input: inputBuilders.alignLyrics,
       label: "Align LRCLIB lyrics",
+      order: 5,
+    }),
+    transcribe: activityStep(mediaActivities.transcribe, {
+      input: inputBuilders.transcribe,
+      label: "Transcribe lyrics",
       order: 6,
     }),
     analyzeMelody: activityStep(mediaActivities.analyzeMelody, {
