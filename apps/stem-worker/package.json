@@ -4,6 +4,7 @@
   "scripts": {
     "check-types": "python3 -m compileall -q app",
     "dev:mac": "bun --env-file=../../.env scripts/dev-macos.ts",
+    "dev:mac:host": "bun --env-file=../../.env scripts/dev-macos.ts",
     "lock": "uv lock",
     "sync": "uv sync --locked",
     "test": "docker build -t partyroom-stem-worker -f Dockerfile ../.. && docker run --rm -v \"$PWD:/src:ro\" -e PYTHONPATH=/src partyroom-stem-worker python3 -m unittest discover -s /src/tests"

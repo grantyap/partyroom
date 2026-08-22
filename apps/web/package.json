@@ -5,6 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev",
+    "dev:host": "vite dev --host",
+    "dev:docker": "vite dev",
+    "dev:mac": "vite dev",
+    "dev:mac:host": "vite dev --host",
     "build": "vite build",
     "preview": "vite preview",
     "prepare": "svelte-kit sync || echo ''",

@@ -20,8 +20,33 @@
       "cache": false,
       "persistent": true
     },
+    "//#dev:require-mode:docker": {
+      "cache": false
+    },
+    "//#dev:require-mode:mac": {
+      "cache": false
+    },
+    "//#dev:infra": {
+      "cache": false,
+      "dependsOn": ["//#dev:require-mode:docker"]
+    },
+    "//#dev:infra:mac": {
+      "cache": false,
+      "dependsOn": ["//#dev:require-mode:mac"]
+    },
+    "dev:docker": {
+      "cache": false,
+      "dependsOn": ["//#dev:infra"],
+      "persistent": true
+    },
     "dev:mac": {
       "cache": false,
+      "dependsOn": ["//#dev:infra:mac"],
+      "persistent": true
+    },
+    "dev:mac:host": {
+      "cache": false,
+      "dependsOn": ["//#dev:infra:mac"],
       "persistent": true
     },
     "dev:setup": {
