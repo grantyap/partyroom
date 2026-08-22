@@ -251,6 +251,8 @@ export function muxFfmpegCommand(video: string, instrumental: string, output: st
     "-nostdin",
     "-nostats",
     "-y",
+    "-threads",
+    "1",
     "-i",
     video,
     "-i",
@@ -261,8 +263,12 @@ export function muxFfmpegCommand(video: string, instrumental: string, output: st
     "1:a:0",
     "-c:v",
     "libx264",
+    "-threads:v",
+    "1",
+    "-filter_threads",
+    "1",
     "-preset",
-    "fast",
+    "veryfast",
     "-crf",
     "23",
     "-vf",
@@ -366,13 +372,26 @@ async function runFfmpeg(
       if (separator < 0) return;
       block[line.slice(0, separator)] = line.slice(separator + 1);
       if (line.startsWith("progress=")) {
-        const outTimeUs = Number(block.out_time_us ?? 0);
-        await reporter.progress(stage, outTimeUs / 1_000_000 / duration);
+        const progress = ffmpegProgress(block.out_time_us, duration);
+        if (progress !== undefined) await reporter.progress(stage, progress);
         block = {};
       }
     },
     reporter,
   );
+}
+
+export function ffmpegProgress(outTimeUs: string | undefined, durationSeconds: number) {
+  const parsedOutTimeUs = Number(outTimeUs);
+  if (
+    !outTimeUs ||
+    !Number.isFinite(parsedOutTimeUs) ||
+    !Number.isFinite(durationSeconds) ||
+    durationSeconds <= 0
+  ) {
+    return undefined;
+  }
+  return Math.min(1, Math.max(0, parsedOutTimeUs / 1_000_000 / durationSeconds));
 }
 
 async function processDownload(

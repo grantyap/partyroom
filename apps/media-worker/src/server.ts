@@ -18,8 +18,9 @@ if (!apiUrl || !token)
 function reporter(context: ActivityContext): MediaActivityReporter {
   return {
     progress: async (_stage, progress, message) => {
-      if (progress !== undefined) await context.reportProgress(progress, message);
-      else await context.heartbeat(message);
+      if (progress !== undefined && Number.isFinite(progress)) {
+        await context.reportProgress(progress, message);
+      } else await context.heartbeat(message);
     },
     uploadArtifact: context.uploadArtifact,
     runProcess: context.runProcess,

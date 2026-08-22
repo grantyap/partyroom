@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  ffmpegProgress,
   parseYtDlpMetadata,
   muxFfmpegCommand,
   reportFinalUpload,
@@ -8,15 +9,37 @@ import {
   YtDlpProgressAggregator,
 } from "./process";
 
+describe("ffmpegProgress", () => {
+  test("ignores FFmpeg startup blocks without a numeric output time", () => {
+    expect(ffmpegProgress("N/A", 120)).toBeUndefined();
+    expect(ffmpegProgress(undefined, 120)).toBeUndefined();
+    expect(ffmpegProgress("0", 0)).toBeUndefined();
+  });
+
+  test("normalizes and clamps numeric FFmpeg output times", () => {
+    expect(ffmpegProgress("60000000", 120)).toBe(0.5);
+    expect(ffmpegProgress("-1000", 120)).toBe(0);
+    expect(ffmpegProgress("180000000", 120)).toBe(1);
+  });
+});
+
 describe("muxFfmpegCommand", () => {
   test("produces a broadly supported H.264/AAC MP4", () => {
     const command = muxFfmpegCommand("video", "instrumental", "karaoke.mp4");
 
+    expect(command.slice(command.indexOf("-threads"), command.indexOf("-i"))).toEqual([
+      "-threads",
+      "1",
+    ]);
     expect(command.slice(command.indexOf("-c:v"), command.indexOf("-c:a"))).toEqual([
       "-c:v",
       "libx264",
+      "-threads:v",
+      "1",
+      "-filter_threads",
+      "1",
       "-preset",
-      "fast",
+      "veryfast",
       "-crf",
       "23",
       "-vf",

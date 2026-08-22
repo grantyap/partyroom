@@ -74,8 +74,8 @@ services:
       dockerfile: apps/media-worker/Dockerfile
     restart: unless-stopped
     cpus: "${MEDIA_WORKER_CPU_LIMIT:-2.0}"
-    mem_limit: "${MEDIA_WORKER_MEMORY_LIMIT:-1g}"
-    memswap_limit: "${MEDIA_WORKER_MEMORY_LIMIT:-1g}"
+    mem_limit: "${MEDIA_WORKER_MEMORY_LIMIT:-2g}"
+    memswap_limit: "${MEDIA_WORKER_MEMORY_LIMIT:-2g}"
     pids_limit: 256
     expose:
       - "4100"
@@ -84,7 +84,7 @@ services:
       - ACTIVITY_WORKER_API_URL=${ACTIVITY_WORKER_API_URL:-http://backend:3211/activities/workers/}
       - ACTIVITY_WORKER_TOKEN
       - MAX_MEDIA_DURATION_SECONDS=${MAX_MEDIA_DURATION_SECONDS:-1200}
-      - MEDIA_WORKER_CONCURRENCY=${MEDIA_WORKER_CONCURRENCY:-2}
+      - MEDIA_WORKER_CONCURRENCY=${MEDIA_WORKER_CONCURRENCY:-1}
     depends_on:
       backend:
         condition: service_healthy
