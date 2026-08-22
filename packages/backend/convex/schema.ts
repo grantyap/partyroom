@@ -24,9 +24,11 @@ export default defineSchema({
     room: v.id("rooms"),
     user: v.string(),
     body: v.string(),
+    clientMessageId: v.string(),
   })
     .index("by_room", ["room"])
-    .index("by_room_user", ["room", "user"]),
+    .index("by_room_user", ["room", "user"])
+    .index("by_room_and_client_message_id", ["room", "clientMessageId"]),
   roomPlayback: defineTable({
     room: v.id("rooms"),
     currentQueueItem: v.optional(v.id("roomQueueItems")),

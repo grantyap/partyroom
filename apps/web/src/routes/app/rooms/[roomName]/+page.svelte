@@ -1,18 +1,23 @@
 <script lang="ts">
 	import RoomPlayer from "$lib/components/room-player.svelte";
+	import RoomChat from "$lib/components/room-chat.svelte";
+	import { createUuidInAnyContext } from "$lib/context-uuid";
 	import {
 		Avatar,
 		AvatarFallback,
 		AvatarImage,
 	} from "$lib/components/ui/avatar";
 	import { Button } from "$lib/components/ui/button";
-	import { Input } from "$lib/components/ui/input";
 	import { getMemberColor, getMemberColors } from "$lib/member-colors";
 	import { Presence } from "$lib/presence.svelte";
 	import ArrowLeftIcon from "@lucide/svelte/icons/arrow-left";
 	import { api } from "@partyroom/backend/convex/_generated/api";
+	import type { Id } from "@partyroom/backend/convex/_generated/dataModel";
 	import { useMutation, useQuery } from "convex-svelte";
+	import type { FunctionReturnType } from "convex/server";
 	import type { PageProps } from "./$types";
+
+	type ChatMessage = FunctionReturnType<(typeof api.chat)["getMessages"]>[number];
 
 	const { params, data }: PageProps = $props();
 
@@ -44,28 +49,43 @@
 	);
 	const overlayMessages = $derived(
 		(messages.data ?? []).map((message) => ({
-			id: message._id,
+			id: message.clientMessageId,
 			body: message.body,
 			color: getMemberColor(message.user._id),
 		})),
 	);
 
-	let messageBody = $state("");
-	let chatError = $state<string | null>(null);
+	async function onMessage(body: string) {
+		const clientMessageId = createUuidInAnyContext();
+		await sendMessage(
+			{ room: roomId, body, clientMessageId },
+			{
+				optimisticUpdate: (store, args) => {
+					const currentMessages = store.getQuery(api.chat.getMessages, {
+						room: args.room,
+					});
+					if (!currentMessages) return;
 
-	async function submitMessage(event: SubmitEvent) {
-		event.preventDefault();
-		const body = messageBody.trim();
-		if (!body) return;
-		messageBody = "";
-		chatError = null;
-		try {
-			await sendMessage({ room: roomId, body });
-		} catch (cause) {
-			messageBody = body;
-			chatError =
-				cause instanceof Error ? cause.message : "Unable to send message";
-		}
+					const optimisticMessage = {
+						_id: clientMessageId as Id<"messages">,
+						_creationTime: Date.now(),
+						room: args.room,
+						body: args.body,
+						clientMessageId,
+						user: {
+							_id: data.user._id,
+							name: data.user.name ?? undefined,
+						},
+					} satisfies ChatMessage;
+
+					store.setQuery(
+						api.chat.getMessages,
+						{ room: args.room },
+						[...currentMessages, optimisticMessage].slice(-50),
+					);
+				},
+			},
+		);
 	}
 
 	async function setMemberPermission(
@@ -100,52 +120,11 @@
 	<RoomPlayer {roomId} {overlayMessages} />
 
 	<div class="grid gap-5 lg:grid-cols-[minmax(0,1fr)_22rem]">
-		<section class="rounded-xl border bg-card shadow-sm flex flex-col">
-			<div class="border-b p-4"><h2 class="font-semibold">Chat</h2></div>
-			<ul class="max-h-72 min-h-40 space-y-3 overflow-y-auto p-4 flex-1">
-				{#each messages.data ?? [] as message (message._id)}
-					{@const memberColors = getMemberColors(message.user._id)}
-					<li class="flex gap-3">
-						<div class="min-w-0 flex-1 rounded-lg bg-muted px-3 py-2">
-							<div class="flex items-baseline justify-between gap-3">
-								<p
-									class="truncate text-xs font-semibold"
-									style:color={memberColors.accent}
-								>
-									{message.user.name ?? "Guest"}
-								</p>
-								<time class="shrink-0 text-[0.7rem] text-muted-foreground">
-									{new Date(message._creationTime).toLocaleTimeString([], {
-										hour: "numeric",
-										minute: "2-digit",
-									})}
-								</time>
-							</div>
-							<p class="mt-0.5 break-words text-sm">{message.body}</p>
-						</div>
-					</li>
-				{/each}
-				{#if (messages.data?.length ?? 0) === 0}
-					<li class="py-8 text-center text-sm text-muted-foreground">
-						No messages yet.
-					</li>
-				{/if}
-			</ul>
-			{#if playback.data?.permissions.sendChat}
-				<form class="flex gap-2 border-t p-3" onsubmit={submitMessage}>
-					<Input
-						maxlength={500}
-						bind:value={messageBody}
-						placeholder="Say something…"
-						aria-label="Chat message"
-					/>
-					<Button type="submit" disabled={!messageBody.trim()}>Send</Button>
-				</form>
-			{/if}
-			{#if chatError}<p class="px-4 pb-3 text-xs text-destructive" role="alert">
-					{chatError}
-				</p>{/if}
-		</section>
+		<RoomChat
+			messages={messages.data ?? []}
+			canSend={playback.data?.permissions.sendChat ?? false}
+			{onMessage}
+		/>
 
 		<aside class="space-y-5">
 			<section class="rounded-xl border bg-card p-4 shadow-sm">
