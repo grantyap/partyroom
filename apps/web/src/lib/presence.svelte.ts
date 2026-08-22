@@ -2,7 +2,7 @@ import { api } from "@partyroom/backend/convex/_generated/api";
 import type { Id } from "@partyroom/backend/convex/_generated/dataModel";
 import { getConvexClient } from "convex-svelte";
 import type { FunctionReturnType } from "convex/server";
-import { createSessionId } from "./session-id";
+import { createUuidInAnyContext } from "./context-uuid";
 
 /**
  * Presence state for a user within the given room.
@@ -27,7 +27,7 @@ export class Presence {
   readonly #heartbeat;
   readonly #disconnect;
 
-  #sessionId = $state(createSessionId());
+  #sessionId = $state(createUuidInAnyContext());
   #sessionToken = $state<string | null>(null);
   #roomToken = $state<string | null>(null);
 
@@ -180,7 +180,7 @@ export class Presence {
 
     void this.#disconnect();
 
-    this.#sessionId = createSessionId();
+    this.#sessionId = createUuidInAnyContext();
 
     void this.#heartbeat();
 

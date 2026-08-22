@@ -3,11 +3,11 @@ type CryptoSource = Pick<Crypto, "getRandomValues"> & {
 };
 
 /**
- * Creates a presence session ID in both secure and non-secure browser contexts.
+ * Creates a UUID in both secure and non-secure browser contexts.
  * `crypto.randomUUID` is restricted to secure contexts in some browsers, while
  * `crypto.getRandomValues` remains available when developing over a LAN URL.
  */
-export function createSessionId(cryptoSource: CryptoSource = crypto): string {
+export function createUuidInAnyContext(cryptoSource: CryptoSource = crypto): string {
   if (typeof cryptoSource.randomUUID === "function") {
     return cryptoSource.randomUUID();
   }
