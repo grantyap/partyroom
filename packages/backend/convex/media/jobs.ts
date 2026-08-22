@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 import { vWorkflowId, type WorkflowId } from "@convex-dev/workflow";
 import { type ArtifactId } from "@partyroom/activities";
-import type { Id } from "../_generated/dataModel";
+import type { Doc, Id } from "../_generated/dataModel";
 import { components, internal } from "../_generated/api";
 import {
   internalMutation,
@@ -396,14 +396,33 @@ export const getJob = query({
 });
 
 export const listRoomMedia = query({
-  args: { roomId: v.id("rooms") },
-  handler: async (ctx, { roomId }) => {
+  args: {
+    roomId: v.id("rooms"),
+    queuedOnly: v.optional(v.boolean()),
+  },
+  returns: v.any(),
+  handler: async (ctx, { roomId, queuedOnly }) => {
     await requireRoomAccess(ctx, roomId);
-    const associations = await ctx.db
-      .query("roomMedia")
-      .withIndex("by_room", (q) => q.eq("room", roomId))
-      .order("desc")
-      .take(200);
+    const associations = queuedOnly
+      ? (
+          await Promise.all(
+            [
+              ...new Set(
+                (
+                  await ctx.db
+                    .query("roomQueueItems")
+                    .withIndex("by_room_and_rank", (q) => q.eq("room", roomId))
+                    .take(200)
+                ).map(({ roomMedia }) => roomMedia),
+              ),
+            ].map(async (roomMediaId) => await ctx.db.get(roomMediaId)),
+          )
+        ).filter((association): association is Doc<"roomMedia"> => association?.room === roomId)
+      : await ctx.db
+          .query("roomMedia")
+          .withIndex("by_room", (q) => q.eq("room", roomId))
+          .order("desc")
+          .take(50);
 
     return await Promise.all(
       associations.map(async (association) => {

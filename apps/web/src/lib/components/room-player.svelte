@@ -29,7 +29,10 @@
 	} = $props();
 
 	const playback = useQuery(api.playback.get, () => ({ roomId }));
-	const roomMedia = useQuery(api.media.jobs.listRoomMedia, () => ({ roomId }));
+	const roomMedia = useQuery(api.media.jobs.listRoomMedia, () => ({
+		roomId,
+		queuedOnly: true,
+	}));
 	const requestMedia = useAction(api.media.actions.requestMedia);
 	const serverClock = useAction(api.playback.clock);
 	const play = useMutation(api.playback.play);
