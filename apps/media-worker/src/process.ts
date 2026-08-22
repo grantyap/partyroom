@@ -245,6 +245,43 @@ export async function reportFinalUpload(
   await reporter.progress("uploading", 1, message, true);
 }
 
+export function muxFfmpegCommand(video: string, instrumental: string, output: string) {
+  return [
+    "ffmpeg",
+    "-nostdin",
+    "-nostats",
+    "-y",
+    "-i",
+    video,
+    "-i",
+    instrumental,
+    "-map",
+    "0:v:0",
+    "-map",
+    "1:a:0",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "fast",
+    "-crf",
+    "23",
+    "-vf",
+    "scale=w=min(1920\\,iw):h=min(1080\\,ih):force_original_aspect_ratio=decrease:force_divisible_by=2,format=yuv420p",
+    "-c:a",
+    "aac",
+    "-b:a",
+    "256k",
+    "-shortest",
+    "-movflags",
+    "+faststart",
+    "-stats_period",
+    "1",
+    "-progress",
+    "pipe:1",
+    output,
+  ];
+}
+
 async function downloadFile(url: string, path: string) {
   const response = await fetch(url);
   if (!response.ok || !response.body) {
@@ -455,39 +492,7 @@ async function processMux(
     downloadFile(request.input.instrumentalUrl, instrumental),
   ]);
   const duration = await probeDuration(video, reporter);
-  await runFfmpeg(
-    [
-      "ffmpeg",
-      "-nostdin",
-      "-nostats",
-      "-y",
-      "-i",
-      video,
-      "-i",
-      instrumental,
-      "-map",
-      "0:v:0",
-      "-map",
-      "1:a:0",
-      "-c:v",
-      "copy",
-      "-c:a",
-      "aac",
-      "-b:a",
-      "256k",
-      "-shortest",
-      "-movflags",
-      "+faststart",
-      "-stats_period",
-      "1",
-      "-progress",
-      "pipe:1",
-      output,
-    ],
-    duration,
-    reporter,
-    "muxing",
-  );
+  await runFfmpeg(muxFfmpegCommand(video, instrumental, output), duration, reporter, "muxing");
   await reportFinalUpload(reporter, "Uploading final media");
   return {
     artifactId: await uploadOutput(reporter, "artifactId", output),

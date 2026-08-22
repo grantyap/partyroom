@@ -17,7 +17,9 @@ import {
 } from "./assets";
 import type { CoreMediaOperationKind, OperationKind } from "../validators";
 
-const mediaPipelineVersion = 4;
+// v5 emits browser-friendly H.264/AAC MP4s instead of preserving the source
+// video codec. Keep prior assets on their original cache version.
+const mediaPipelineVersion = 5;
 
 async function requireJob(ctx: Pick<QueryCtx, "db">, jobId: Id<"mediaJobs">) {
   const job = await ctx.db.get("mediaJobs", jobId);

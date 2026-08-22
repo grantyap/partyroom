@@ -1,11 +1,31 @@
 import { describe, expect, test } from "bun:test";
 import {
   parseYtDlpMetadata,
+  muxFfmpegCommand,
   reportFinalUpload,
   ytDlpDownloadCommand,
   ytDlpDownloadProgress,
   YtDlpProgressAggregator,
 } from "./process";
+
+describe("muxFfmpegCommand", () => {
+  test("produces a broadly supported H.264/AAC MP4", () => {
+    const command = muxFfmpegCommand("video", "instrumental", "karaoke.mp4");
+
+    expect(command.slice(command.indexOf("-c:v"), command.indexOf("-c:a"))).toEqual([
+      "-c:v",
+      "libx264",
+      "-preset",
+      "fast",
+      "-crf",
+      "23",
+      "-vf",
+      "scale=w=min(1920\\,iw):h=min(1080\\,ih):force_original_aspect_ratio=decrease:force_divisible_by=2,format=yuv420p",
+    ]);
+    expect(command).toContain("aac");
+    expect(command).toContain("+faststart");
+  });
+});
 
 describe("parseYtDlpMetadata", () => {
   test("parses the validated fields used by the media pipeline", () => {
