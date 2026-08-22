@@ -1,6 +1,4 @@
 <script lang="ts">
-	import { Button } from "$lib/components/ui/button";
-	import { Input } from "$lib/components/ui/input";
 	import { PUBLIC_CONVEX_URL } from "$env/static/public";
 	import {
 		findKaraokeCue,
@@ -31,7 +29,6 @@
 		onPauseRequest?: (positionMs: number) => void | Promise<void>;
 		onSeekRequest?: (positionMs: number) => void | Promise<void>;
 		onEnded?: () => void;
-		onLyricsChange?: (lyricsId: string | null, offsetMs: number) => void;
 		overlayMessages?: Array<{ id: string; body: string; color: string }>;
 	};
 
@@ -47,15 +44,12 @@
 		onPauseRequest,
 		onSeekRequest,
 		onEnded,
-		onLyricsChange,
 		overlayMessages = [],
 	}: Props = $props();
 
 	let video = $state<HTMLVideoElement>();
 	let currentTime = $state(0);
 	let cues = $state<KaraokeCue[]>([]);
-	let localSelectedLyricsId = $state<string | null>(null);
-	let lyricsOffsetsMs = $state<Record<string, number>>({});
 	let animationFrame: number | undefined;
 	let applyingAuthoritativeState = false;
 	let isScrubbing = $state(false);
@@ -77,7 +71,7 @@
 	);
 	const selectedLyrics = $derived(
 		availableLyrics.find(
-			({ id }) => id === (sharedSelectedLyricsId ?? localSelectedLyricsId),
+			({ id }) => id === sharedSelectedLyricsId,
 		) ??
 			availableLyrics[0],
 	);
@@ -95,9 +89,7 @@
 		sharedLyricsOffsetMs !== undefined
 			? sharedLyricsOffsetMs
 			: selectedLyrics
-			? (lyricsOffsetsMs[selectedLyrics.id] ??
-					selectedLyrics.suggestedOffsetMs ??
-					0)
+			? (selectedLyrics.suggestedOffsetMs ?? 0)
 			: 0,
 	);
 	const adjustedTime = $derived(
@@ -111,15 +103,6 @@
 	const nextCue = $derived(
 		activeCueIndex >= 0 ? cues[activeCueIndex + 1] : undefined,
 	);
-
-	$effect(() => {
-		if (
-			availableLyrics.length > 0 &&
-			!availableLyrics.some(({ id }) => id === localSelectedLyricsId)
-		) {
-			localSelectedLyricsId = availableLyrics[0].id;
-		}
-	});
 
 	$effect(() => {
 		const element = video;
@@ -232,27 +215,6 @@
 		return () => controller.abort();
 	});
 
-	function setLyricsOffset(value: number) {
-		if (!selectedLyrics) return;
-		const offset = Number.isFinite(value) ? value : 0;
-		const clamped = Math.max(
-			-30_000,
-			Math.min(30_000, offset),
-		);
-		lyricsOffsetsMs[selectedLyrics.id] = clamped;
-		onLyricsChange?.(selectedLyrics.id, clamped);
-	}
-
-	function selectLyrics(id: string) {
-		localSelectedLyricsId = id;
-		const track = availableLyrics.find((candidate) => candidate.id === id);
-		onLyricsChange?.(id, track?.suggestedOffsetMs ?? 0);
-	}
-
-	function nudgeLyrics(delta: number) {
-		setLyricsOffset(lyricsOffsetMs + delta);
-	}
-
 	function updateTime() {
 		if (!video) return;
 		currentTime = video.currentTime;
@@ -296,62 +258,6 @@
 </script>
 
 <div class={`relative overflow-hidden rounded-md bg-black ${className}`}>
-	{#if availableLyrics.length > 0}
-		<div
-			class="absolute top-2 right-2 z-10 flex flex-wrap items-center justify-end gap-1 rounded-4xl bg-black/75 p-1 text-white shadow-lg backdrop-blur-sm"
-		>
-			{#if availableLyrics.length > 1}
-				{#each availableLyrics as source (source.id)}
-					<Button
-						size="xs"
-						variant={selectedLyrics?.id === source.id ? "default" : "ghost"}
-						disabled={playback !== undefined && !playback.canControl}
-						onclick={() => selectLyrics(source.id)}
-						title={source.title ?? source.label}
-					>
-						{source.label}
-					</Button>
-				{/each}
-			{/if}
-			<div
-				class="flex flex-wrap items-center justify-end gap-1 border-l border-white/25 pl-1"
-			>
-				{#each [{ label: "−5s", delta: -5_000 }, { label: "−1s", delta: -1_000 }, { label: "−100ms", delta: -100 }] as adjustment (adjustment.delta)}
-					<Button
-						size="xs"
-						variant="ghost"
-						aria-label={`Show lyrics ${Math.abs(adjustment.delta)} milliseconds earlier`}
-						onclick={() => nudgeLyrics(adjustment.delta)}
-					>
-						{adjustment.label}
-					</Button>
-				{/each}
-				<Input
-					class="h-6 w-20 border-white/25 bg-black/30 px-1 text-center text-xs text-white"
-					type="number"
-					step="100"
-					min="-30000"
-					max="30000"
-					value={lyricsOffsetMs}
-					oninput={(event) =>
-						setLyricsOffset(event.currentTarget.valueAsNumber)}
-					aria-label="Lyrics offset in milliseconds"
-					title="Lyrics offset in milliseconds; positive values delay the lyrics"
-				/>
-				<span class="pr-0.5 text-[10px] text-white/70">ms</span>
-				{#each [{ label: "+100ms", delta: 100 }, { label: "+1s", delta: 1_000 }, { label: "+5s", delta: 5_000 }] as adjustment (adjustment.delta)}
-					<Button
-						size="xs"
-						variant="ghost"
-						aria-label={`Show lyrics ${adjustment.delta} milliseconds later`}
-						onclick={() => nudgeLyrics(adjustment.delta)}
-					>
-						{adjustment.label}
-					</Button>
-				{/each}
-			</div>
-		</div>
-	{/if}
 	<!-- svelte-ignore a11y_media_has_caption: a WebVTT fallback is included when available -->
 	<video
 		bind:this={video}

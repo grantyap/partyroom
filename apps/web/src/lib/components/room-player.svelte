@@ -1,5 +1,6 @@
 <script lang="ts">
 	import KaraokeVideo from "$lib/components/karaoke-video.svelte";
+	import LyricsPopover from "$lib/components/lyrics-popover.svelte";
 	import MediaProgressPopover from "$lib/components/media-progress-popover.svelte";
 	import ShareRoomPopover from "$lib/components/share-room-popover.svelte";
 	import { Badge } from "$lib/components/ui/badge";
@@ -251,6 +252,16 @@
 			</div>
 			<div class="flex items-center gap-2">
 				<ShareRoomPopover />
+				{#if currentMedia?.lyrics?.length}
+					<LyricsPopover
+						lyrics={currentMedia.lyrics}
+						selectedLyricsId={currentMedia.selectedLyricsId}
+						lyricsOffsetMs={currentMedia.lyricsOffsetMs}
+						canControl={playback.data?.permissions.controlPlayback ?? false}
+						onLyricsChange={(lyricsId, offsetMs) =>
+							void setLyrics({ roomId, lyricsId, offsetMs })}
+					/>
+				{/if}
 				<Button variant="outline" size="sm" onclick={toggleTvMode}>
 					<Maximize2 /> TV mode
 				</Button>
@@ -296,8 +307,6 @@
 							expectedRevision: playback.data.playback.revision,
 						});
 					}}
-					onLyricsChange={(lyricsId, offsetMs) =>
-						void setLyrics({ roomId, lyricsId, offsetMs })}
 				/>
 			{:else}
 				<div
