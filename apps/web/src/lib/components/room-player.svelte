@@ -5,7 +5,13 @@
 	import { Badge } from "$lib/components/ui/badge";
 	import { Button } from "$lib/components/ui/button";
 	import { Input } from "$lib/components/ui/input";
-	import { Maximize2, GripVertical, Plus, SkipForward, Trash2 } from "@lucide/svelte";
+	import {
+		Maximize2,
+		GripVertical,
+		Plus,
+		SkipForward,
+		Trash2,
+	} from "@lucide/svelte";
 	import { api } from "@partyroom/backend/convex/_generated/api";
 	import type { Id } from "@partyroom/backend/convex/_generated/dataModel";
 	import { useAction, useMutation, useQuery } from "convex-svelte";
@@ -55,7 +61,8 @@
 			tvMode = document.fullscreenElement === playerShell;
 		};
 		document.addEventListener("fullscreenchange", updateFullscreen);
-		return () => document.removeEventListener("fullscreenchange", updateFullscreen);
+		return () =>
+			document.removeEventListener("fullscreenchange", updateFullscreen);
 	});
 
 	onMount(() => {
@@ -91,7 +98,8 @@
 
 	async function toggleTvMode() {
 		if (!playerShell) return;
-		if (document.fullscreenElement === playerShell) await document.exitFullscreen();
+		if (document.fullscreenElement === playerShell)
+			await document.exitFullscreen();
 		else await playerShell.requestFullscreen();
 	}
 
@@ -101,19 +109,22 @@
 		draggedItem = null;
 		if (!moving || moving === targetId) return;
 		const withoutMoving = queue.filter(({ _id }) => _id !== moving);
-		const index = targetId === null
-			? withoutMoving.length
-			: withoutMoving.findIndex(({ _id }) => _id === targetId);
+		const index =
+			targetId === null
+				? withoutMoving.length
+				: withoutMoving.findIndex(({ _id }) => _id === targetId);
 		if (index < 0) return;
 		try {
 			await reorder({
 				roomId,
 				queueItemId: moving,
 				afterItemId: index > 0 ? withoutMoving[index - 1]._id : null,
-				beforeItemId: index < withoutMoving.length ? withoutMoving[index]._id : null,
+				beforeItemId:
+					index < withoutMoving.length ? withoutMoving[index]._id : null,
 			});
 		} catch (cause) {
-			error = cause instanceof Error ? cause.message : "Unable to reorder queue";
+			error =
+				cause instanceof Error ? cause.message : "Unable to reorder queue";
 		}
 	}
 
@@ -125,18 +136,24 @@
 				{ roomId, currentQueueItem, positionMs },
 				{
 					optimisticUpdate: (store, args) => {
-						const state = store.getQuery(api.playback.get, { roomId: args.roomId });
-						if (!state || state.current?._id !== args.currentQueueItem) return;
-						store.setQuery(api.playback.get, { roomId: args.roomId }, {
-							...state,
-							playback: {
-								...state.playback,
-								status: "playing",
-								anchorPositionMs: args.positionMs,
-								anchorUpdatedAt: Date.now() + clockOffsetMs,
-								revision: state.playback.revision + 1,
-							},
+						const state = store.getQuery(api.playback.get, {
+							roomId: args.roomId,
 						});
+						if (!state || state.current?._id !== args.currentQueueItem) return;
+						store.setQuery(
+							api.playback.get,
+							{ roomId: args.roomId },
+							{
+								...state,
+								playback: {
+									...state.playback,
+									status: "playing",
+									anchorPositionMs: args.positionMs,
+									anchorUpdatedAt: Date.now() + clockOffsetMs,
+									revision: state.playback.revision + 1,
+								},
+							},
+						);
 					},
 				},
 			);
@@ -153,18 +170,24 @@
 				{ roomId, currentQueueItem, positionMs },
 				{
 					optimisticUpdate: (store, args) => {
-						const state = store.getQuery(api.playback.get, { roomId: args.roomId });
-						if (!state || state.current?._id !== args.currentQueueItem) return;
-						store.setQuery(api.playback.get, { roomId: args.roomId }, {
-							...state,
-							playback: {
-								...state.playback,
-								status: "paused",
-								anchorPositionMs: args.positionMs,
-								anchorUpdatedAt: Date.now() + clockOffsetMs,
-								revision: state.playback.revision + 1,
-							},
+						const state = store.getQuery(api.playback.get, {
+							roomId: args.roomId,
 						});
+						if (!state || state.current?._id !== args.currentQueueItem) return;
+						store.setQuery(
+							api.playback.get,
+							{ roomId: args.roomId },
+							{
+								...state,
+								playback: {
+									...state.playback,
+									status: "paused",
+									anchorPositionMs: args.positionMs,
+									anchorUpdatedAt: Date.now() + clockOffsetMs,
+									revision: state.playback.revision + 1,
+								},
+							},
+						);
 					},
 				},
 			);
@@ -181,17 +204,23 @@
 				{ roomId, currentQueueItem, positionMs },
 				{
 					optimisticUpdate: (store, args) => {
-						const state = store.getQuery(api.playback.get, { roomId: args.roomId });
-						if (!state || state.current?._id !== args.currentQueueItem) return;
-						store.setQuery(api.playback.get, { roomId: args.roomId }, {
-							...state,
-							playback: {
-								...state.playback,
-								anchorPositionMs: args.positionMs,
-								anchorUpdatedAt: Date.now() + clockOffsetMs,
-								revision: state.playback.revision + 1,
-							},
+						const state = store.getQuery(api.playback.get, {
+							roomId: args.roomId,
 						});
+						if (!state || state.current?._id !== args.currentQueueItem) return;
+						store.setQuery(
+							api.playback.get,
+							{ roomId: args.roomId },
+							{
+								...state,
+								playback: {
+									...state.playback,
+									anchorPositionMs: args.positionMs,
+									anchorUpdatedAt: Date.now() + clockOffsetMs,
+									revision: state.playback.revision + 1,
+								},
+							},
+						);
 					},
 				},
 			);
@@ -214,7 +243,10 @@
 			<div>
 				<p class="text-sm font-medium">Now playing</p>
 				<p class="text-xs text-muted-foreground">
-					{currentMedia?.title ?? (playback.data?.queue.length ? "Preparing the next song…" : "The queue is empty")}
+					{currentMedia?.title ??
+						(playback.data?.queue.length
+							? "Preparing the next song…"
+							: "The queue is empty")}
 				</p>
 			</div>
 			<div class="flex items-center gap-2">
@@ -243,7 +275,7 @@
 					title={currentMedia.title}
 					selectedLyricsId={currentMedia.selectedLyricsId}
 					lyricsOffsetMs={currentMedia.lyricsOffsetMs}
-					overlayMessages={overlayMessages}
+					{overlayMessages}
 					playback={{
 						...playback.data.playback,
 						clockOffsetMs,
@@ -253,7 +285,11 @@
 					onPauseRequest={requestPause}
 					onSeekRequest={requestSeek}
 					onEnded={() => {
-						if (!playback.data?.permissions.controlPlayback || !playback.data.current) return;
+						if (
+							!playback.data?.permissions.controlPlayback ||
+							!playback.data.current
+						)
+							return;
 						void advance({
 							roomId,
 							currentQueueItem: playback.data.current._id,
@@ -264,10 +300,14 @@
 						void setLyrics({ roomId, lyricsId, offsetMs })}
 				/>
 			{:else}
-				<div class="flex aspect-video w-full items-center justify-center bg-zinc-950 p-8 text-center text-zinc-300">
+				<div
+					class="flex aspect-video w-full items-center justify-center bg-zinc-950 p-8 text-center text-zinc-300"
+				>
 					<div>
 						<p class="text-lg font-medium">
-							{playback.data?.queue.length ? "Preparing your music" : "Add a song to get started"}
+							{playback.data?.queue.length
+								? "Preparing your music"
+								: "Add a song to get started"}
 						</p>
 						<p class="mt-1 text-sm text-zinc-400">
 							{playback.data?.queue.length
@@ -283,9 +323,11 @@
 	<aside class="flex min-h-0 flex-col rounded-xl border bg-card shadow-sm">
 		<div class="border-b p-4">
 			<div class="flex items-center justify-between">
-				<h2 class="font-semibold">Queue</h2>
 				<div class="flex items-center gap-2">
+					<h2 class="font-semibold">Queue</h2>
 					<Badge variant="secondary">{playback.data?.queue.length ?? 0}</Badge>
+				</div>
+				<div class="flex items-center gap-2">
 					{#if playback.data?.permissions.controlPlayback && playback.data.current}
 						<Button
 							variant="outline"
@@ -311,12 +353,19 @@
 						bind:value={sourceUrl}
 						disabled={submitting}
 					/>
-					<Button size="icon" type="submit" disabled={submitting || !sourceUrl.trim()} aria-label="Add song">
+					<Button
+						size="icon"
+						type="submit"
+						disabled={submitting || !sourceUrl.trim()}
+						aria-label="Add song"
+					>
 						<Plus />
 					</Button>
 				</form>
 			{/if}
-			{#if error}<p class="mt-2 text-xs text-destructive" role="alert">{error}</p>{/if}
+			{#if error}<p class="mt-2 text-xs text-destructive" role="alert">
+					{error}
+				</p>{/if}
 		</div>
 
 		<ul class="min-h-24 flex-1 space-y-2 overflow-y-auto p-3">
@@ -337,17 +386,30 @@
 					class:opacity-50={draggedItem === item._id}
 				>
 					{#if playback.data?.permissions.reorderQueue}
-						<GripVertical class="size-4 shrink-0 cursor-grab text-muted-foreground" aria-hidden="true" />
+						<GripVertical
+							class="size-4 shrink-0 cursor-grab text-muted-foreground"
+							aria-hidden="true"
+						/>
 					{/if}
 					<div class="min-w-0 flex-1">
-						<p class="truncate text-sm font-medium">{media?.title ?? "Resolving media…"}</p>
+						<p class="text-sm font-medium">
+							{media?.title ?? "Resolving media…"}
+						</p>
 						<p class="text-xs text-muted-foreground">
-							{item.availability === "ready" ? "Ready" : item.availability === "processing" ? "Processing…" : "Unavailable"}
-							{#if formatDuration(media?.duration)} · {formatDuration(media?.duration)}{/if}
+							{item.availability === "ready"
+								? "Ready"
+								: item.availability === "processing"
+									? "Processing…"
+									: "Unavailable"}
+							{#if formatDuration(media?.duration)}
+								· {formatDuration(media?.duration)}{/if}
 						</p>
 					</div>
 					{#if item.availability === "processing" && media}
-						<MediaProgressPopover title={media.title ?? "Resolving media…"} steps={media.steps} />
+						<MediaProgressPopover
+							title={media.title ?? "Resolving media…"}
+							steps={media.steps}
+						/>
 					{/if}
 					{#if playback.data?.permissions.removeFromQueue}
 						<Button
@@ -362,7 +424,9 @@
 				</li>
 			{/each}
 			{#if (playback.data?.queue.length ?? 0) === 0}
-				<li class="p-5 text-center text-sm text-muted-foreground">Nothing queued yet.</li>
+				<li class="p-5 text-center text-sm text-muted-foreground">
+					Nothing queued yet.
+				</li>
 			{/if}
 			{#if draggedItem}
 				<li
@@ -372,7 +436,9 @@
 						event.preventDefault();
 						void dropBefore(null);
 					}}
-				>Drop at end</li>
+				>
+					Drop at end
+				</li>
 			{/if}
 		</ul>
 	</aside>
