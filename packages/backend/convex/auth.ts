@@ -3,7 +3,7 @@ import { convex } from "@convex-dev/better-auth/plugins";
 import { betterAuth } from "better-auth/minimal";
 import { components } from "./_generated/api";
 import { type DataModel } from "./_generated/dataModel";
-import { query, env, QueryCtx } from "./_generated/server";
+import { query, env, type QueryCtx } from "./_generated/server";
 import { anonymous } from "better-auth/plugins";
 import authConfig from "./auth.config";
 
@@ -41,7 +41,7 @@ export type User = Awaited<ReturnType<typeof authComponent.getAuthUser>>;
 
 /**
  * Gets the currently logged in user.
- * 
+ *
  * This correctly handles the "Act as user" checkbox in the Convex dashboard.
  */
 export async function getCurrentUserImpl(ctx: QueryCtx) {
