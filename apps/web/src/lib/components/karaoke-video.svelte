@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { PUBLIC_CONVEX_URL } from "$env/static/public";
+	import { Button } from "$lib/components/ui/button";
 	import {
 		findKaraokeCue,
 		karaokeWordProgress,
@@ -9,6 +10,7 @@
 		type LyricsTrack,
 	} from "$lib/karaoke";
 	import { browserReachableServiceUrl } from "$lib/service-url";
+	import { RefreshCw } from "@lucide/svelte";
 
 	type Props = {
 		src: string;
@@ -52,13 +54,22 @@
 	let cues = $state<KaraokeCue[]>([]);
 	let animationFrame: number | undefined;
 	let applyingAuthoritativeState = false;
+	let ignoredSeekCommands = 0;
+	let needsPlaybackSync = $state(false);
+	let syncError = $state<string | null>(null);
 	let isScrubbing = $state(false);
 	let pendingSeekCommands = $state(0);
 	let appliedPlaybackKey = "";
 	let initializedOverlayMessages = false;
 	let seenOverlayMessages = new Set<string>();
 	let flyingMessages = $state<
-		Array<{ id: string; body: string; color: string; lane: number; duration: number }>
+		Array<{
+			id: string;
+			body: string;
+			color: string;
+			lane: number;
+			duration: number;
+		}>
 	>([]);
 	const localSeekInFlight = $derived(isScrubbing || pendingSeekCommands > 0);
 
@@ -70,9 +81,7 @@
 		),
 	);
 	const selectedLyrics = $derived(
-		availableLyrics.find(
-			({ id }) => id === sharedSelectedLyricsId,
-		) ??
+		availableLyrics.find(({ id }) => id === sharedSelectedLyricsId) ??
 			availableLyrics[0],
 	);
 	const captionsUrl = $derived(
@@ -89,8 +98,8 @@
 		sharedLyricsOffsetMs !== undefined
 			? sharedLyricsOffsetMs
 			: selectedLyrics
-			? (selectedLyrics.suggestedOffsetMs ?? 0)
-			: 0,
+				? (selectedLyrics.suggestedOffsetMs ?? 0)
+				: 0,
 	);
 	const adjustedTime = $derived(
 		currentTime -
@@ -104,6 +113,54 @@
 		activeCueIndex >= 0 ? cues[activeCueIndex + 1] : undefined,
 	);
 
+	function authoritativePositionSeconds(state: NonNullable<Props["playback"]>) {
+		const authoritativeNow = Date.now() + state.clockOffsetMs;
+		return Math.max(
+			0,
+			(state.anchorPositionMs +
+				(state.status === "playing"
+					? Math.max(0, authoritativeNow - state.anchorUpdatedAt)
+					: 0)) /
+				1_000,
+		);
+	}
+
+	function seekToAuthoritativePosition(
+		element: HTMLVideoElement,
+		state: NonNullable<Props["playback"]>,
+	) {
+		const targetSeconds = authoritativePositionSeconds(state);
+		if (Math.abs(element.currentTime - targetSeconds) <= 0.5) return;
+		ignoredSeekCommands += 1;
+		element.currentTime = targetSeconds;
+	}
+
+	function finishApplyingAuthoritativeState() {
+		setTimeout(() => {
+			applyingAuthoritativeState = false;
+		}, 0);
+	}
+
+	async function syncPlayback() {
+		const element = video;
+		const state = playback;
+		if (!element || !state) return;
+
+		applyingAuthoritativeState = true;
+		syncError = null;
+		seekToAuthoritativePosition(element, state);
+		try {
+			if (state.status === "playing") await element.play();
+			else element.pause();
+			needsPlaybackSync = false;
+		} catch {
+			needsPlaybackSync = true;
+			syncError = "Safari still blocked playback. Tap Sync video again.";
+		} finally {
+			finishApplyingAuthoritativeState();
+		}
+	}
+
 	$effect(() => {
 		const element = video;
 		const state = playback;
@@ -115,50 +172,49 @@
 			!state ||
 			localSeekInFlight ||
 			appliedPlaybackKey === playbackKey
-		) return;
+		)
+			return;
 		appliedPlaybackKey = playbackKey;
 		applyingAuthoritativeState = true;
-		const authoritativeNow = Date.now() + state.clockOffsetMs;
-		const targetSeconds = Math.max(
-			0,
-			(state.anchorPositionMs +
-				(state.status === "playing"
-					? Math.max(0, authoritativeNow - state.anchorUpdatedAt)
-					: 0)) /
-				1_000,
-		);
-		if (Math.abs(element.currentTime - targetSeconds) > 0.5) {
-			element.currentTime = targetSeconds;
-		}
+		seekToAuthoritativePosition(element, state);
 		if (state.status === "playing") {
-			void element.play().catch(() => {
-				// Browsers may require a gesture before autoplay; the next user action resyncs.
-			});
+			void element
+				.play()
+				.then(() => {
+					needsPlaybackSync = false;
+					syncError = null;
+				})
+				.catch(() => {
+					// A user gesture is required by Safari and other autoplay-restricting browsers.
+					needsPlaybackSync = true;
+				})
+				.finally(finishApplyingAuthoritativeState);
 		} else {
 			element.pause();
+			needsPlaybackSync = false;
+			syncError = null;
+			finishApplyingAuthoritativeState();
 		}
-		setTimeout(() => {
-			applyingAuthoritativeState = false;
-		}, 0);
 	});
 
 	$effect(() => {
 		const element = video;
 		const state = playback;
-		if (!element || !state || state.status !== "playing" || localSeekInFlight) return;
+		if (!element || !state || state.status !== "playing" || localSeekInFlight)
+			return;
 		const timer = window.setInterval(() => {
 			if (localSeekInFlight) return;
 			const estimatedServerNow = Date.now() + state.clockOffsetMs;
 			const targetSeconds = Math.max(
 				0,
-				(state.anchorPositionMs + estimatedServerNow - state.anchorUpdatedAt) / 1_000,
+				(state.anchorPositionMs + estimatedServerNow - state.anchorUpdatedAt) /
+					1_000,
 			);
 			if (Math.abs(element.currentTime - targetSeconds) <= 0.5) return;
 			applyingAuthoritativeState = true;
+			ignoredSeekCommands += 1;
 			element.currentTime = targetSeconds;
-			setTimeout(() => {
-				applyingAuthoritativeState = false;
-			}, 0);
+			finishApplyingAuthoritativeState();
 		}, 5_000);
 		return () => window.clearInterval(timer);
 	});
@@ -195,9 +251,12 @@
 		}
 
 		const controller = new AbortController();
-		void fetch(browserReachableServiceUrl(track.content.url, PUBLIC_CONVEX_URL), {
-			signal: controller.signal,
-		})
+		void fetch(
+			browserReachableServiceUrl(track.content.url, PUBLIC_CONVEX_URL),
+			{
+				signal: controller.signal,
+			},
+		)
 			.then((response) => {
 				if (!response.ok)
 					throw new Error(`Unable to load lyrics: HTTP ${response.status}`);
@@ -270,12 +329,25 @@
 		onloadedmetadata={updateTime}
 		ontimeupdate={updateTime}
 		onseeking={() => {
-			if (!applyingAuthoritativeState) isScrubbing = true;
+			if (!applyingAuthoritativeState && ignoredSeekCommands === 0)
+				isScrubbing = true;
 		}}
-		onseeked={() => void commitSeek()}
+		onseeked={() => {
+			if (ignoredSeekCommands > 0) {
+				ignoredSeekCommands -= 1;
+				isScrubbing = false;
+				updateTime();
+				return;
+			}
+			void commitSeek();
+		}}
 		onplay={() => {
 			startTracking();
-			if (!applyingAuthoritativeState && playback?.status !== "playing") {
+			if (
+				!applyingAuthoritativeState &&
+				!needsPlaybackSync &&
+				playback?.status !== "playing"
+			) {
 				void onPlayRequest?.((video?.currentTime ?? 0) * 1_000);
 			}
 		}}
@@ -283,6 +355,7 @@
 			stopTracking();
 			if (
 				!applyingAuthoritativeState &&
+				!needsPlaybackSync &&
 				!video?.ended &&
 				playback?.status === "playing"
 			) {
@@ -304,7 +377,30 @@
 		{/if}
 	</video>
 
-	<div class="pointer-events-none absolute inset-0 z-20 overflow-hidden" aria-hidden="true">
+	{#if needsPlaybackSync}
+		<div
+			class="absolute inset-0 z-30 flex items-center justify-center bg-black/65 p-6 text-center"
+		>
+			<div class="flex max-w-sm flex-col items-center gap-3">
+				<div>
+					<p class="text-lg font-semibold text-white">
+						Ready to join the party?
+					</p>
+				</div>
+				<Button size="lg" onclick={() => void syncPlayback()}>
+					<RefreshCw /> Sync video
+				</Button>
+				{#if syncError}
+					<p class="text-xs text-red-300" role="alert">{syncError}</p>
+				{/if}
+			</div>
+		</div>
+	{/if}
+
+	<div
+		class="pointer-events-none absolute inset-0 z-20 overflow-hidden"
+		aria-hidden="true"
+	>
 		{#each flyingMessages as message (message.id)}
 			<p
 				class="flying-message"
