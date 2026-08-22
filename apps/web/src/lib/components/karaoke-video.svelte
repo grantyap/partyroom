@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Button } from "$lib/components/ui/button";
 	import { Input } from "$lib/components/ui/input";
+	import { PUBLIC_CONVEX_URL } from "$env/static/public";
 	import {
 		findKaraokeCue,
 		karaokeWordProgress,
@@ -9,6 +10,7 @@
 		type KaraokeCue,
 		type LyricsTrack,
 	} from "$lib/karaoke";
+	import { browserReachableServiceUrl } from "$lib/service-url";
 
 	type Props = {
 		src: string;
@@ -82,6 +84,12 @@
 	const captionsUrl = $derived(
 		selectedLyrics?.captionsUrl ??
 			availableLyrics.find(({ captionsUrl }) => captionsUrl)?.captionsUrl,
+	);
+	const videoUrl = $derived(browserReachableServiceUrl(src, PUBLIC_CONVEX_URL));
+	const publicCaptionsUrl = $derived(
+		captionsUrl
+			? browserReachableServiceUrl(captionsUrl, PUBLIC_CONVEX_URL)
+			: undefined,
 	);
 	const lyricsOffsetMs = $derived(
 		sharedLyricsOffsetMs !== undefined
@@ -204,7 +212,9 @@
 		}
 
 		const controller = new AbortController();
-		void fetch(track.content.url, { signal: controller.signal })
+		void fetch(browserReachableServiceUrl(track.content.url, PUBLIC_CONVEX_URL), {
+			signal: controller.signal,
+		})
 			.then((response) => {
 				if (!response.ok)
 					throw new Error(`Unable to load lyrics: HTTP ${response.status}`);
@@ -347,8 +357,9 @@
 		bind:this={video}
 		class="aspect-video w-full"
 		controls={playback?.canControl ?? true}
+		playsinline
 		preload="metadata"
-		{src}
+		src={videoUrl}
 		aria-label={title ? `Karaoke video: ${title}` : "Karaoke video"}
 		onloadedmetadata={updateTime}
 		ontimeupdate={updateTime}
@@ -377,11 +388,11 @@
 			onEnded?.();
 		}}
 	>
-		{#if captionsUrl}
+		{#if publicCaptionsUrl}
 			<track
 				default={availableLyrics.length === 0}
 				kind="captions"
-				src={captionsUrl}
+				src={publicCaptionsUrl}
 				label="Lyrics"
 			/>
 		{/if}
