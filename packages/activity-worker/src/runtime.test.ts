@@ -121,6 +121,60 @@ describe("ActivityWorker", () => {
     expect(health.eventLoopLagMs).toBeNumber();
   });
 
+  test("buffers progress until the lease loop survives a transient renewal failure", async () => {
+    let claimed = false;
+    let renewals = 0;
+    let reportedProgress = false;
+    let resolveCompleted!: () => void;
+    const completion = new Promise<void>((resolve) => (resolveCompleted = resolve));
+    const fetch = async (input: string | URL | Request, init?: RequestInit) => {
+      const path = new URL(input instanceof Request ? input.url : input).pathname;
+      if (path === "/workers/claim") {
+        if (claimed) return Response.json(null);
+        claimed = true;
+        return Response.json(claimBody(900));
+      }
+      if (path === "/workers/renew") {
+        renewals += 1;
+        if (renewals === 1) return Response.json({ error: "temporary" }, { status: 500 });
+        const body = JSON.parse(String(init?.body ?? "{}"));
+        if (body.progress === 0.5) reportedProgress = true;
+        return Response.json({
+          accepted: true,
+          cancelRequested: false,
+          leaseExpiresAt: Date.now() + 900,
+        });
+      }
+      if (path === "/workers/complete") {
+        resolveCompleted();
+        return Response.json({ accepted: true, duplicate: false });
+      }
+      throw new Error(`Unexpected path ${path}`);
+    };
+    const worker = new ActivityWorker({
+      apiUrl: "http://activities.test/workers/",
+      token: "token",
+      workerId: "worker",
+      taskQueue: "test",
+      activities: [
+        defineHandler(activity, async (context, input) => {
+          await context.reportProgress(0.5, "working");
+          await context.runProcess([process.execPath, "-e", "setTimeout(() => {}, 900)"]);
+          return { echoed: input.value };
+        }),
+      ],
+      idlePollIntervalMs: 100,
+      fetch: fetch as typeof globalThis.fetch,
+    });
+
+    worker.start();
+    await completion;
+    await worker.stop();
+
+    expect(renewals).toBeGreaterThanOrEqual(2);
+    expect(reportedProgress).toBeTrue();
+  });
+
   test("claims, validates, executes, and completes an activity", async () => {
     let claimed = false;
     let completed: Record<string, unknown> | undefined;

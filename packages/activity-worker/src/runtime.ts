@@ -380,10 +380,10 @@ export class ActivityWorker {
         progress.details = details;
         await renew();
       },
-      reportProgress: async (value, message) => {
+      reportProgress: (value, message) => {
         progress.value = Math.min(1, Math.max(0, value));
         progress.message = message;
-        await renew();
+        return Promise.resolve();
       },
       runProcess: async (command, options = {}) =>
         await runManagedProcess(command, {
