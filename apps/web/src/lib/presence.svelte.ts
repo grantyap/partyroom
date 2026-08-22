@@ -2,6 +2,7 @@ import { api } from "@partyroom/backend/convex/_generated/api";
 import type { Id } from "@partyroom/backend/convex/_generated/dataModel";
 import { getConvexClient } from "convex-svelte";
 import type { FunctionReturnType } from "convex/server";
+import { createSessionId } from "./session-id";
 
 /**
  * Presence state for a user within the given room.
@@ -26,7 +27,7 @@ export class Presence {
   readonly #heartbeat;
   readonly #disconnect;
 
-  #sessionId = $state(crypto.randomUUID());
+  #sessionId = $state(createSessionId());
   #sessionToken = $state<string | null>(null);
   #roomToken = $state<string | null>(null);
 
@@ -53,7 +54,6 @@ export class Presence {
     this.#heartbeat = singleFlight(async () => {
       const result = await this.#client.mutation(api.presence.heartbeat, {
         room: roomId as Id<"rooms">,
-        user: userId,
         session: this.#sessionId,
         interval: interval,
       });
@@ -65,7 +65,10 @@ export class Presence {
     this.#disconnect = singleFlight(async () => {
       if (!this.#sessionToken) return;
 
-      await this.#client.mutation(api.presence.disconnect, { sessionToken: this.#sessionToken });
+      await this.#client.mutation(api.presence.disconnect, {
+        sessionToken: this.#sessionToken,
+        room: this.roomId as Id<"rooms">,
+      });
 
       this.#sessionToken = null;
       this.#roomToken = null;
@@ -96,7 +99,7 @@ export class Presence {
           return;
         }
 
-        this.#client.query(api.presence.list, { roomToken: this.#roomToken }).then((users) => {
+        return this.#client.onUpdate(api.presence.list, { roomToken: this.#roomToken }, (users) => {
           this.#state = [...users].sort((a, b) => {
             if (a.userId === this.userId) return -1;
             if (b.userId === this.userId) return 1;
@@ -130,6 +133,7 @@ export class Presence {
                 path: "presence:disconnect",
                 args: {
                   sessionToken: this.#sessionToken,
+                  room: this.roomId,
                 },
               }),
             ],
@@ -176,7 +180,7 @@ export class Presence {
 
     void this.#disconnect();
 
-    this.#sessionId = crypto.randomUUID();
+    this.#sessionId = createSessionId();
 
     void this.#heartbeat();
 

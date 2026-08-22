@@ -70,6 +70,46 @@
   --sidebar-border: oklch(0.922 0.005 325.62);
 
   --sidebar-ring: oklch(0.711 0.019 323.02);
+
+  /* Member identity colors: accent text/borders, soft fills, and fill foregrounds. */
+  --member-accent-0: oklch(0.48 0.17 25);
+  --member-accent-1: oklch(0.46 0.15 55);
+  --member-accent-2: oklch(0.42 0.13 85);
+  --member-accent-3: oklch(0.42 0.14 125);
+  --member-accent-4: oklch(0.43 0.15 150);
+  --member-accent-5: oklch(0.42 0.11 185);
+  --member-accent-6: oklch(0.43 0.12 215);
+  --member-accent-7: oklch(0.48 0.17 250);
+  --member-accent-8: oklch(0.5 0.18 285);
+  --member-accent-9: oklch(0.48 0.18 310);
+  --member-accent-10: oklch(0.49 0.17 340);
+  --member-accent-11: oklch(0.48 0.18 5);
+
+  --member-fill-0: oklch(0.9 0.07 25);
+  --member-fill-1: oklch(0.91 0.07 55);
+  --member-fill-2: oklch(0.92 0.07 85);
+  --member-fill-3: oklch(0.92 0.07 125);
+  --member-fill-4: oklch(0.91 0.07 150);
+  --member-fill-5: oklch(0.91 0.06 185);
+  --member-fill-6: oklch(0.91 0.06 215);
+  --member-fill-7: oklch(0.9 0.07 250);
+  --member-fill-8: oklch(0.9 0.07 285);
+  --member-fill-9: oklch(0.9 0.07 310);
+  --member-fill-10: oklch(0.9 0.07 340);
+  --member-fill-11: oklch(0.9 0.07 5);
+
+  --member-on-fill-0: oklch(0.24 0.05 25);
+  --member-on-fill-1: oklch(0.24 0.05 55);
+  --member-on-fill-2: oklch(0.24 0.04 85);
+  --member-on-fill-3: oklch(0.24 0.04 125);
+  --member-on-fill-4: oklch(0.24 0.04 150);
+  --member-on-fill-5: oklch(0.24 0.04 185);
+  --member-on-fill-6: oklch(0.24 0.04 215);
+  --member-on-fill-7: oklch(0.24 0.05 250);
+  --member-on-fill-8: oklch(0.24 0.05 285);
+  --member-on-fill-9: oklch(0.24 0.05 310);
+  --member-on-fill-10: oklch(0.24 0.05 340);
+  --member-on-fill-11: oklch(0.24 0.05 5);
 }
 
 .dark {
@@ -134,6 +174,45 @@
   --sidebar-border: oklch(1 0 0 / 10%);
 
   --sidebar-ring: oklch(0.542 0.034 322.5);
+
+  --member-accent-0: oklch(0.76 0.17 25);
+  --member-accent-1: oklch(0.8 0.16 55);
+  --member-accent-2: oklch(0.84 0.15 85);
+  --member-accent-3: oklch(0.82 0.16 125);
+  --member-accent-4: oklch(0.78 0.16 150);
+  --member-accent-5: oklch(0.79 0.13 185);
+  --member-accent-6: oklch(0.81 0.13 215);
+  --member-accent-7: oklch(0.76 0.17 250);
+  --member-accent-8: oklch(0.77 0.18 285);
+  --member-accent-9: oklch(0.77 0.18 310);
+  --member-accent-10: oklch(0.79 0.17 340);
+  --member-accent-11: oklch(0.77 0.18 5);
+
+  --member-fill-0: oklch(0.36 0.11 25);
+  --member-fill-1: oklch(0.37 0.1 55);
+  --member-fill-2: oklch(0.38 0.09 85);
+  --member-fill-3: oklch(0.37 0.1 125);
+  --member-fill-4: oklch(0.36 0.1 150);
+  --member-fill-5: oklch(0.36 0.08 185);
+  --member-fill-6: oklch(0.36 0.08 215);
+  --member-fill-7: oklch(0.36 0.11 250);
+  --member-fill-8: oklch(0.36 0.11 285);
+  --member-fill-9: oklch(0.36 0.11 310);
+  --member-fill-10: oklch(0.36 0.11 340);
+  --member-fill-11: oklch(0.36 0.11 5);
+
+  --member-on-fill-0: oklch(0.95 0.03 25);
+  --member-on-fill-1: oklch(0.95 0.03 55);
+  --member-on-fill-2: oklch(0.95 0.03 85);
+  --member-on-fill-3: oklch(0.95 0.03 125);
+  --member-on-fill-4: oklch(0.95 0.03 150);
+  --member-on-fill-5: oklch(0.95 0.03 185);
+  --member-on-fill-6: oklch(0.95 0.03 215);
+  --member-on-fill-7: oklch(0.95 0.03 250);
+  --member-on-fill-8: oklch(0.95 0.03 285);
+  --member-on-fill-9: oklch(0.95 0.03 310);
+  --member-on-fill-10: oklch(0.95 0.03 340);
+  --member-on-fill-11: oklch(0.95 0.03 5);
 }
 
 @theme inline {

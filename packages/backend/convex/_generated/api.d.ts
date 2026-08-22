@@ -33,6 +33,7 @@ import type * as media_pipeline from "../media/pipeline.js";
 import type * as media_progress_model from "../media/progress/model.js";
 import type * as media_urls from "../media/urls.js";
 import type * as media_validators from "../media/validators.js";
+import type * as playback from "../playback.js";
 import type * as presence from "../presence.js";
 import type * as rooms from "../rooms.js";
 
@@ -68,6 +69,7 @@ declare const fullApi: ApiFromModules<{
   "media/progress/model": typeof media_progress_model;
   "media/urls": typeof media_urls;
   "media/validators": typeof media_validators;
+  playback: typeof playback;
   presence: typeof presence;
   rooms: typeof rooms;
 }>;

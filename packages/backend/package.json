@@ -27,6 +27,7 @@
     "better-auth": "catalog:",
     "convex": "catalog:",
     "dotenv": "catalog:",
+    "fractional-indexing": "^4.0.0",
     "random-word-slugs": "^0.1.7",
     "yaml": "^2.9.0",
     "zod": "catalog:"

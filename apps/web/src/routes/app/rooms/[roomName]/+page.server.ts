@@ -11,7 +11,7 @@ export const load: PageServerLoad = async ({ params, parent }) => {
   const [room, user] = await Promise.all([
     (async () => {
       try {
-        return await client.query(api.rooms.getRoomByName, { name: roomName });
+        return await client.mutation(api.rooms.recordRoomVisitByName, { name: roomName });
       } catch (err) {
         if (!(err instanceof Error)) {
           throw err;

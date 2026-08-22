@@ -6,6 +6,11 @@ import { encryptSourceUrl, hashRequest } from "./crypto";
 
 export const requestMedia = action({
   args: { roomId: v.id("rooms"), url: v.string() },
+  returns: v.object({
+    jobId: v.id("mediaJobs"),
+    roomMediaId: v.id("roomMedia"),
+    created: v.boolean(),
+  }),
   handler: async (
     ctx,
     { roomId, url },

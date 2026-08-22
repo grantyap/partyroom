@@ -11,8 +11,8 @@ import {
   type QueryCtx,
 } from "../_generated/server";
 import { activities, managedWorkflow } from "../activities/workflowManager";
-import { getCurrentUserImpl } from "../auth";
-import { userHasRoomPermission } from "../rooms";
+import { enqueueRoomMedia } from "../playback";
+import { requireRoomAction } from "../rooms";
 import { getMediaEnrichment } from "./domain/assets";
 import {
   attachWorkflowToJob,
@@ -76,34 +76,18 @@ async function workflowProgressSteps(
   return workflowPipelineStepStatuses(...workflows);
 }
 
-async function requireRoomAccess(
-  ctx: Parameters<typeof getCurrentUserImpl>[0],
-  roomId: Id<"rooms">,
-) {
-  const user = await getCurrentUserImpl(ctx);
-  if (!user) throw new Error("Unauthenticated");
-  const room = await ctx.db.get("rooms", roomId);
-  if (!room) throw new Error("Room not found");
-  const roomMember = await ctx.db
-    .query("roomMembers")
-    .withIndex("by_room_user", (q) => q.eq("room", roomId).eq("user", user._id))
-    .first();
-  if (
-    !userHasRoomPermission({
-      user: user._id,
-      room,
-      roomMember,
-      permission: "rooms:read",
-    })
-  ) {
-    throw new Error("User not in room");
-  }
+async function requireRoomAccess(ctx: QueryCtx, roomId: Id<"rooms">) {
+  const { user } = await requireRoomAction(ctx, roomId, "rooms:read");
   return user._id;
 }
 
 export const authorizeRequest = internalQuery({
   args: { roomId: v.id("rooms") },
-  handler: async (ctx, { roomId }) => await requireRoomAccess(ctx, roomId),
+  returns: v.string(),
+  handler: async (ctx, { roomId }) => {
+    const { user } = await requireRoomAction(ctx, roomId, "rooms:addToQueue");
+    return user._id;
+  },
 });
 
 export const getEncryptedSource = internalQuery({
@@ -134,19 +118,30 @@ export const request = internalMutation({
     encryptedSource: v.string(),
     sourceIv: v.string(),
   },
+  returns: v.object({
+    jobId: v.id("mediaJobs"),
+    roomMediaId: v.id("roomMedia"),
+    created: v.boolean(),
+  }),
   handler: async (ctx, args) => {
     const result = await createOrJoinMedia(ctx, args);
-    if (!result.created) return result;
-    const workflowId = await managedWorkflow.start(
-      ctx,
-      internal.media.pipeline.mediaPipeline,
-      { jobId: result.jobId },
-      {
-        onComplete: internal.media.pipeline.onPipelineComplete,
-        context: { jobId: result.jobId },
-      },
-    );
-    await attachWorkflowToJob(ctx, result.jobId, workflowId);
+    if (result.created) {
+      const workflowId = await managedWorkflow.start(
+        ctx,
+        internal.media.pipeline.mediaPipeline,
+        { jobId: result.jobId },
+        {
+          onComplete: internal.media.pipeline.onPipelineComplete,
+          context: { jobId: result.jobId },
+        },
+      );
+      await attachWorkflowToJob(ctx, result.jobId, workflowId);
+    }
+    await enqueueRoomMedia(ctx, {
+      roomId: args.roomId,
+      roomMediaId: result.roomMediaId,
+      addedBy: args.requestedBy,
+    });
     return result;
   },
 });
@@ -158,9 +153,18 @@ export const attachWorkflow = internalMutation({
 
 export const removeFromRoom = mutation({
   args: { roomId: v.id("rooms"), roomMediaId: v.id("roomMedia") },
+  returns: v.null(),
   handler: async (ctx, args) => {
     await requireRoomAccess(ctx, args.roomId);
+    const queued = await ctx.db
+      .query("roomQueueItems")
+      .withIndex("by_room_media", (q) =>
+        q.eq("room", args.roomId).eq("roomMedia", args.roomMediaId),
+      )
+      .first();
+    if (queued) throw new Error("Remove this media from the queue first");
     await removeRoomMedia(ctx, args);
+    return null;
   },
 });
 
@@ -266,12 +270,42 @@ export const recordLyricTrack = internalMutation({
 
 export const completeFromAsset = internalMutation({
   args: { jobId: v.id("mediaJobs"), assetId: v.id("mediaAssets") },
-  handler: async (ctx, { jobId, assetId }) => await completeJobFromAsset(ctx, jobId, assetId),
+  returns: v.null(),
+  handler: async (ctx, { jobId, assetId }) => {
+    await completeJobFromAsset(ctx, jobId, assetId);
+    const associations = await ctx.db
+      .query("roomMedia")
+      .withIndex("by_job", (q) => q.eq("job", jobId))
+      .take(100);
+    await Promise.all(
+      associations.map((association) =>
+        ctx.scheduler.runAfter(0, internal.playback.onRoomMediaReady, {
+          roomMediaId: association._id,
+        }),
+      ),
+    );
+    return null;
+  },
 });
 
 export const finalizeAsset = internalMutation({
   args: { jobId: v.id("mediaJobs") },
-  handler: async (ctx, { jobId }) => await finalizeAssetForJob(ctx, jobId),
+  returns: v.id("mediaAssets"),
+  handler: async (ctx, { jobId }) => {
+    const assetId = await finalizeAssetForJob(ctx, jobId);
+    const associations = await ctx.db
+      .query("roomMedia")
+      .withIndex("by_asset", (q) => q.eq("asset", assetId))
+      .take(100);
+    await Promise.all(
+      associations.map((association) =>
+        ctx.scheduler.runAfter(0, internal.playback.onRoomMediaReady, {
+          roomMediaId: association._id,
+        }),
+      ),
+    );
+    return assetId;
+  },
 });
 
 export const failJob = internalMutation({
@@ -369,7 +403,7 @@ export const listRoomMedia = query({
       .query("roomMedia")
       .withIndex("by_room", (q) => q.eq("room", roomId))
       .order("desc")
-      .take(20);
+      .take(200);
 
     return await Promise.all(
       associations.map(async (association) => {
@@ -424,6 +458,8 @@ export const listRoomMedia = query({
         ).filter((track) => track !== null);
         return {
           _id: association._id,
+          selectedLyricsId: association.selectedLyricsId,
+          lyricsOffsetMs: association.lyricsOffsetMs ?? 0,
           jobId: association.job,
           state: job?.state ?? "failed",
           steps:

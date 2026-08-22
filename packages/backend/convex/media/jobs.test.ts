@@ -7,10 +7,15 @@ import schema from "../schema";
 import { modules } from "../test.setup";
 import { removeFromRoomImpl } from "./jobs";
 import { recordActivityTerminal, requeueRoomMedia } from "./domain/jobs";
+import { defaultRoomMemberPermissions } from "../rooms.schema";
 
 async function seedRoom(t: ReturnType<typeof convexTest>) {
   return await t.run(async (ctx) => {
-    return await ctx.db.insert("rooms", { owner: "owner", name: crypto.randomUUID() });
+    return await ctx.db.insert("rooms", {
+      owner: "owner",
+      name: crypto.randomUUID(),
+      memberPermissions: defaultRoomMemberPermissions,
+    });
   });
 }
 

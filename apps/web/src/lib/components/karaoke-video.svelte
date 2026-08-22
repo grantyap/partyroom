@@ -15,16 +15,56 @@
 		lyrics?: LyricsTrack[];
 		title?: string | null;
 		class?: string;
+		selectedLyricsId?: string | null;
+		lyricsOffsetMs?: number;
+		playback?: {
+			status: "idle" | "playing" | "paused";
+			anchorPositionMs: number;
+			anchorUpdatedAt: number;
+			revision: number;
+			clockOffsetMs: number;
+			canControl: boolean;
+		};
+		onPlayRequest?: (positionMs: number) => void | Promise<void>;
+		onPauseRequest?: (positionMs: number) => void | Promise<void>;
+		onSeekRequest?: (positionMs: number) => void | Promise<void>;
+		onEnded?: () => void;
+		onLyricsChange?: (lyricsId: string | null, offsetMs: number) => void;
+		overlayMessages?: Array<{ id: string; body: string; color: string }>;
 	};
 
-	let { src, lyrics = [], title, class: className = "" }: Props = $props();
+	let {
+		src,
+		lyrics = [],
+		title,
+		class: className = "",
+		selectedLyricsId: sharedSelectedLyricsId,
+		lyricsOffsetMs: sharedLyricsOffsetMs,
+		playback,
+		onPlayRequest,
+		onPauseRequest,
+		onSeekRequest,
+		onEnded,
+		onLyricsChange,
+		overlayMessages = [],
+	}: Props = $props();
 
 	let video = $state<HTMLVideoElement>();
 	let currentTime = $state(0);
 	let cues = $state<KaraokeCue[]>([]);
-	let selectedLyricsId = $state<string | null>(null);
+	let localSelectedLyricsId = $state<string | null>(null);
 	let lyricsOffsetsMs = $state<Record<string, number>>({});
 	let animationFrame: number | undefined;
+	let applyingAuthoritativeState = false;
+	let isScrubbing = $state(false);
+	let pendingSeekCommands = $state(0);
+	let appliedPlaybackKey = "";
+	let initializedOverlayMessages = false;
+	let seenOverlayMessages = new Set<string>();
+	let flyingMessages = $state<
+		Array<{ id: string; body: string; color: string; lane: number; duration: number }>
+	>([]);
+	const localSeekInFlight = $derived(isScrubbing || pendingSeekCommands > 0);
 
 	const availableLyrics = $derived(
 		lyrics.filter(({ content }) =>
@@ -34,7 +74,9 @@
 		),
 	);
 	const selectedLyrics = $derived(
-		availableLyrics.find(({ id }) => id === selectedLyricsId) ??
+		availableLyrics.find(
+			({ id }) => id === (sharedSelectedLyricsId ?? localSelectedLyricsId),
+		) ??
 			availableLyrics[0],
 	);
 	const captionsUrl = $derived(
@@ -42,7 +84,9 @@
 			availableLyrics.find(({ captionsUrl }) => captionsUrl)?.captionsUrl,
 	);
 	const lyricsOffsetMs = $derived(
-		selectedLyrics
+		sharedLyricsOffsetMs !== undefined
+			? sharedLyricsOffsetMs
+			: selectedLyrics
 			? (lyricsOffsetsMs[selectedLyrics.id] ??
 					selectedLyrics.suggestedOffsetMs ??
 					0)
@@ -63,9 +107,90 @@
 	$effect(() => {
 		if (
 			availableLyrics.length > 0 &&
-			!availableLyrics.some(({ id }) => id === selectedLyricsId)
+			!availableLyrics.some(({ id }) => id === localSelectedLyricsId)
 		) {
-			selectedLyricsId = availableLyrics[0].id;
+			localSelectedLyricsId = availableLyrics[0].id;
+		}
+	});
+
+	$effect(() => {
+		const element = video;
+		const state = playback;
+		const playbackKey = state
+			? `${state.revision}:${state.status}:${state.anchorPositionMs}:${state.anchorUpdatedAt}`
+			: "";
+		if (
+			!element ||
+			!state ||
+			localSeekInFlight ||
+			appliedPlaybackKey === playbackKey
+		) return;
+		appliedPlaybackKey = playbackKey;
+		applyingAuthoritativeState = true;
+		const authoritativeNow = Date.now() + state.clockOffsetMs;
+		const targetSeconds = Math.max(
+			0,
+			(state.anchorPositionMs +
+				(state.status === "playing"
+					? Math.max(0, authoritativeNow - state.anchorUpdatedAt)
+					: 0)) /
+				1_000,
+		);
+		if (Math.abs(element.currentTime - targetSeconds) > 0.5) {
+			element.currentTime = targetSeconds;
+		}
+		if (state.status === "playing") {
+			void element.play().catch(() => {
+				// Browsers may require a gesture before autoplay; the next user action resyncs.
+			});
+		} else {
+			element.pause();
+		}
+		setTimeout(() => {
+			applyingAuthoritativeState = false;
+		}, 0);
+	});
+
+	$effect(() => {
+		const element = video;
+		const state = playback;
+		if (!element || !state || state.status !== "playing" || localSeekInFlight) return;
+		const timer = window.setInterval(() => {
+			if (localSeekInFlight) return;
+			const estimatedServerNow = Date.now() + state.clockOffsetMs;
+			const targetSeconds = Math.max(
+				0,
+				(state.anchorPositionMs + estimatedServerNow - state.anchorUpdatedAt) / 1_000,
+			);
+			if (Math.abs(element.currentTime - targetSeconds) <= 0.5) return;
+			applyingAuthoritativeState = true;
+			element.currentTime = targetSeconds;
+			setTimeout(() => {
+				applyingAuthoritativeState = false;
+			}, 0);
+		}, 5_000);
+		return () => window.clearInterval(timer);
+	});
+
+	$effect(() => {
+		const incoming = overlayMessages;
+		if (!initializedOverlayMessages) {
+			seenOverlayMessages = new Set(incoming.map(({ id }) => id));
+			initializedOverlayMessages = true;
+			return;
+		}
+		for (const message of incoming) {
+			if (seenOverlayMessages.has(message.id)) continue;
+			seenOverlayMessages.add(message.id);
+			const flying = {
+				...message,
+				lane: Math.floor(Math.random() * 6),
+				duration: 7 + Math.random() * 4,
+			};
+			flyingMessages = [...flyingMessages, flying];
+			setTimeout(() => {
+				flyingMessages = flyingMessages.filter(({ id }) => id !== message.id);
+			}, flying.duration * 1_000);
 		}
 	});
 
@@ -100,10 +225,18 @@
 	function setLyricsOffset(value: number) {
 		if (!selectedLyrics) return;
 		const offset = Number.isFinite(value) ? value : 0;
-		lyricsOffsetsMs[selectedLyrics.id] = Math.max(
+		const clamped = Math.max(
 			-30_000,
 			Math.min(30_000, offset),
 		);
+		lyricsOffsetsMs[selectedLyrics.id] = clamped;
+		onLyricsChange?.(selectedLyrics.id, clamped);
+	}
+
+	function selectLyrics(id: string) {
+		localSelectedLyricsId = id;
+		const track = availableLyrics.find((candidate) => candidate.id === id);
+		onLyricsChange?.(id, track?.suggestedOffsetMs ?? 0);
 	}
 
 	function nudgeLyrics(delta: number) {
@@ -133,6 +266,20 @@
 		updateTime();
 	}
 
+	async function commitSeek() {
+		updateTime();
+		if (applyingAuthoritativeState) return;
+		isScrubbing = false;
+		pendingSeekCommands += 1;
+		try {
+			await onSeekRequest?.((video?.currentTime ?? 0) * 1_000);
+		} catch (error) {
+			console.error("Unable to seek room playback", error);
+		} finally {
+			pendingSeekCommands -= 1;
+		}
+	}
+
 	$effect(() => () => {
 		if (animationFrame !== undefined) cancelAnimationFrame(animationFrame);
 	});
@@ -148,7 +295,8 @@
 					<Button
 						size="xs"
 						variant={selectedLyrics?.id === source.id ? "default" : "ghost"}
-						onclick={() => (selectedLyricsId = source.id)}
+						disabled={playback !== undefined && !playback.canControl}
+						onclick={() => selectLyrics(source.id)}
 						title={source.title ?? source.label}
 					>
 						{source.label}
@@ -198,16 +346,36 @@
 	<video
 		bind:this={video}
 		class="aspect-video w-full"
-		controls
+		controls={playback?.canControl ?? true}
 		preload="metadata"
 		{src}
 		aria-label={title ? `Karaoke video: ${title}` : "Karaoke video"}
 		onloadedmetadata={updateTime}
 		ontimeupdate={updateTime}
-		onseeked={updateTime}
-		onplay={startTracking}
-		onpause={stopTracking}
-		onended={stopTracking}
+		onseeking={() => {
+			if (!applyingAuthoritativeState) isScrubbing = true;
+		}}
+		onseeked={() => void commitSeek()}
+		onplay={() => {
+			startTracking();
+			if (!applyingAuthoritativeState && playback?.status !== "playing") {
+				void onPlayRequest?.((video?.currentTime ?? 0) * 1_000);
+			}
+		}}
+		onpause={() => {
+			stopTracking();
+			if (
+				!applyingAuthoritativeState &&
+				!video?.ended &&
+				playback?.status === "playing"
+			) {
+				void onPauseRequest?.((video?.currentTime ?? 0) * 1_000);
+			}
+		}}
+		onended={() => {
+			stopTracking();
+			onEnded?.();
+		}}
 	>
 		{#if captionsUrl}
 			<track
@@ -218,6 +386,17 @@
 			/>
 		{/if}
 	</video>
+
+	<div class="pointer-events-none absolute inset-0 z-20 overflow-hidden" aria-hidden="true">
+		{#each flyingMessages as message (message.id)}
+			<p
+				class="flying-message"
+				style={`--lane: ${message.lane}; --duration: ${message.duration}s; --member-color: ${message.color}`}
+			>
+				{message.body}
+			</p>
+		{/each}
+	</div>
 
 	{#if activeCue}
 		<div
@@ -248,6 +427,32 @@
 </div>
 
 <style>
+	.flying-message {
+		position: absolute;
+		top: calc(8% + var(--lane) * 11%);
+		left: 100%;
+		width: max-content;
+		max-width: 80%;
+		animation: fly var(--duration) linear forwards;
+		color: var(--member-color);
+		font-size: clamp(1rem, 2.2vw, 2rem);
+		font-weight: 700;
+		text-shadow:
+			-2px -2px 0 rgb(0 0 0 / 0.9),
+			2px -2px 0 rgb(0 0 0 / 0.9),
+			-2px 2px 0 rgb(0 0 0 / 0.9),
+			2px 2px 0 rgb(0 0 0 / 0.9);
+	}
+
+	@keyframes fly {
+		from {
+			transform: translateX(0);
+		}
+		to {
+			transform: translateX(calc(-100vw - 100%));
+		}
+	}
+
 	.karaoke-line {
 		font-size: clamp(1.125rem, 3.4vw, 2rem);
 		font-weight: 800;

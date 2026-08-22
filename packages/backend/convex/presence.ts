@@ -1,8 +1,8 @@
 import { Presence } from "@convex-dev/presence";
-import { components } from "./_generated/api";
+import { components, internal } from "./_generated/api";
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
-import { requireRoomPermission } from "./rooms";
+import { requireRoomAction } from "./rooms";
 import { authComponent } from "./auth";
 
 export const presence = new Presence(components.presence);
@@ -10,28 +10,15 @@ export const presence = new Presence(components.presence);
 export const heartbeat = mutation({
   args: {
     room: v.id("rooms"),
-    user: v.string(),
     session: v.string(),
     interval: v.number(),
   },
-  handler: async (ctx, { room: roomId, user, session, interval }) => {
-    const [room, roomMember] = await Promise.all([
-      ctx.db.get("rooms", roomId).then((room) => {
-        if (!room) {
-          throw new Error("Room not found");
-        }
-
-        return room;
-      }),
-      ctx.db
-        .query("roomMembers")
-        .withIndex("by_room_user", (q) => q.eq("room", roomId).eq("user", user))
-        .first(),
-    ]);
-
-    requireRoomPermission({ user, room, roomMember, permission: "rooms:read" });
-
-    return await presence.heartbeat(ctx, roomId, user, session, interval);
+  returns: v.object({ roomToken: v.string(), sessionToken: v.string() }),
+  handler: async (ctx, { room: roomId, session, interval }) => {
+    const { user } = await requireRoomAction(ctx, roomId, "rooms:read");
+    const result = await presence.heartbeat(ctx, roomId, user._id, session, interval);
+    await ctx.scheduler.runAfter(0, internal.playback.recordOccupied, { roomId });
+    return result;
   },
 });
 
@@ -39,6 +26,17 @@ export const list = query({
   args: {
     roomToken: v.string(),
   },
+  returns: v.array(
+    v.object({
+      userId: v.string(),
+      online: v.boolean(),
+      lastDisconnected: v.number(),
+      data: v.optional(v.any()),
+      name: v.optional(v.string()),
+      username: v.optional(v.union(v.string(), v.null())),
+      image: v.optional(v.union(v.string(), v.null())),
+    }),
+  ),
   handler: async (ctx, { roomToken }) => {
     return await presence.list(ctx, roomToken).then(async (presenceUsers) => {
       const userPromises = presenceUsers.map(async (presenceUser) => {
@@ -65,8 +63,12 @@ export const list = query({
 export const disconnect = mutation({
   args: {
     sessionToken: v.string(),
+    room: v.id("rooms"),
   },
-  handler: async (ctx, { sessionToken }) => {
-    return await presence.disconnect(ctx, sessionToken);
+  returns: v.null(),
+  handler: async (ctx, { sessionToken, room }) => {
+    await presence.disconnect(ctx, sessionToken);
+    await ctx.scheduler.runAfter(0, internal.playback.observePresence, { roomId: room });
+    return null;
   },
 });

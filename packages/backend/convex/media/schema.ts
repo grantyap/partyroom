@@ -112,6 +112,8 @@ export const mediaTables = {
     asset: v.optional(v.id("mediaAssets")),
     requestedBy: v.string(),
     createdAt: v.number(),
+    selectedLyricsId: v.optional(v.string()),
+    lyricsOffsetMs: v.optional(v.number()),
   })
     .index("by_room", ["room"])
     .index("by_job", ["job"])
