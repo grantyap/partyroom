@@ -254,9 +254,14 @@
 
 	{#if canControl}
 		<media-gesture
-			class="absolute inset-x-0 top-0 z-10 block aspect-video cursor-pointer"
+			class="player-gesture absolute inset-x-0 top-0 z-10 block aspect-video cursor-pointer"
 			event="pointerup"
 			action="toggle:paused"
+		></media-gesture>
+		<media-gesture
+			class="player-gesture absolute inset-x-0 top-0 z-10 block aspect-video"
+			event="pointerup"
+			action="toggle:controls"
 		></media-gesture>
 	{/if}
 
@@ -303,6 +308,18 @@
 		width: 100%;
 		height: 100%;
 		object-fit: contain;
+	}
+
+	@media (pointer: coarse) {
+		.player-gesture[action="toggle:paused"] {
+			display: none;
+		}
+	}
+
+	@media not (pointer: coarse) {
+		.player-gesture[action="toggle:controls"] {
+			display: none;
+		}
 	}
 
 </style>
