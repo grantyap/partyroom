@@ -356,12 +356,12 @@ export async function advanceRoomPlayback(
   args: {
     roomId: Id<"rooms">;
     currentQueueItem: Id<"roomQueueItems">;
-    expectedRevision: number;
+    expectedRevision?: number;
   },
 ) {
   const playback = await playbackForRoom(ctx, args.roomId);
   if (
-    playback.revision !== args.expectedRevision ||
+    (args.expectedRevision !== undefined && playback.revision !== args.expectedRevision) ||
     playback.currentQueueItem !== args.currentQueueItem
   ) {
     return;
@@ -384,7 +384,6 @@ export const advance = mutation({
   args: {
     roomId: v.id("rooms"),
     currentQueueItem: v.id("roomQueueItems"),
-    expectedRevision: v.number(),
   },
   returns: v.null(),
   handler: async (ctx, args) => {

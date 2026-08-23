@@ -38,7 +38,6 @@
 		await advance({
 			roomId,
 			currentQueueItem: playback.current._id,
-			expectedRevision: playback.playback.revision,
 		});
 	}
 </script>

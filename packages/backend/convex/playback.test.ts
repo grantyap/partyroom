@@ -130,6 +130,29 @@ describe("room playback", () => {
     expect(result.played).toBeNull();
   });
 
+  test("manual advancement tolerates timing-only revision changes", async () => {
+    const t = convexTest(schema, modules);
+    const { roomId, playbackId } = await seedRoom(t);
+    const readyA = await createRoomMedia(t, roomId, "ready");
+    const readyB = await createRoomMedia(t, roomId, "ready");
+    const itemA = await enqueue(t, roomId, readyA);
+    const itemB = await enqueue(t, roomId, readyB);
+
+    await t.run(async (ctx) => {
+      await ctx.db.patch("roomPlayback", playbackId, { revision: 2 });
+      await advanceRoomPlayback(ctx, {
+        roomId,
+        currentQueueItem: itemA,
+      });
+    });
+
+    expect(await t.run(async (ctx) => await ctx.db.get("roomPlayback", playbackId))).toMatchObject({
+      currentQueueItem: itemB,
+      revision: 3,
+      status: "playing",
+    });
+  });
+
   test("a processing-only queue starts when its media becomes ready", async () => {
     const t = convexTest(schema, modules);
     const { roomId, playbackId } = await seedRoom(t);
