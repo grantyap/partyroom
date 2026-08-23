@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { PUBLIC_CONVEX_URL } from "$env/static/public";
 	import { Button } from "$lib/components/ui/button";
+	import KaraokeVideoControls from "$lib/components/karaoke-video-controls.svelte";
 	import {
 		findKaraokeCue,
 		karaokeWordProgress,
@@ -12,8 +13,15 @@
 	import { MediaPlaybackSync } from "$lib/media-playback-sync.svelte";
 	import type { OnlineTimingObject } from "$lib/online-timing-object.svelte";
 	import { browserReachableServiceUrl } from "$lib/service-url";
-	import type { TimingStateVectorUpdate } from "$lib/timing-object";
-	import { Pause, Play, RefreshCw } from "@lucide/svelte";
+	import { RefreshCw } from "@lucide/svelte";
+	import {
+		isVideoProvider,
+		type MediaProviderAdapter,
+		type MediaSeekRequestEvent,
+	} from "vidstack";
+	import type { MediaPlayerElement } from "vidstack/elements";
+	import "vidstack/player";
+	import "vidstack/player/ui";
 
 	type Props = {
 		src: string;
@@ -43,9 +51,6 @@
 
 	let video = $state<HTMLVideoElement>();
 	let currentTime = $state(0);
-	let duration = $state(0);
-	let isScrubbing = $state(false);
-	let scrubPosition = $state(0);
 	let cues = $state<KaraokeCue[]>([]);
 	let animationFrame: number | undefined;
 	let initializedOverlayMessages = false;
@@ -64,9 +69,6 @@
 		getTimingObject: () => timing,
 		alignmentToleranceSeconds: 0.01,
 	});
-	const isPlaying = $derived(timing?.targetVelocity === 1);
-	const controlsReady = $derived(timing?.readyState === "open");
-	const displayedTime = $derived(isScrubbing ? scrubPosition : currentTime);
 
 	const availableLyrics = $derived(
 		lyrics.filter(({ content }) =>
@@ -189,18 +191,77 @@
 		updateTime();
 	}
 
-	function formatTime(seconds: number) {
-		const whole = Math.max(0, Math.floor(seconds));
-		return `${Math.floor(whole / 60)}:${(whole % 60).toString().padStart(2, "0")}`;
+	function setProvider(provider: MediaProviderAdapter | null) {
+		video = isVideoProvider(provider) ? provider.video : undefined;
 	}
 
-	async function requestTimingUpdate(update: TimingStateVectorUpdate) {
-		if (!timing) return;
-		try {
-			await timing.update(update);
-		} catch (cause) {
+	function updateTiming(update: { position?: number; velocity?: 0 | 1 }) {
+		if (!timing || !canControl) return;
+		void timing.update(update).catch((cause: unknown) => {
 			console.error("Unable to update timing resource", cause);
+		});
+	}
+
+	function handleControlRequest(event: Event) {
+		if (!timing) return;
+		event.preventDefault();
+		if (!canControl) return;
+		switch (event.type) {
+			case "media-play-request":
+				updateTiming({ velocity: 1 });
+				break;
+			case "media-pause-request":
+				updateTiming({ velocity: 0 });
+				break;
+			case "media-seek-request":
+				updateTiming({ position: (event as MediaSeekRequestEvent).detail });
 		}
+	}
+
+	function listenForPlayerEvents(node: HTMLElement) {
+		const player = node as MediaPlayerElement;
+		const listeners = {
+			"provider-change": (event: Event) =>
+				setProvider((event as CustomEvent<MediaProviderAdapter | null>).detail),
+			"loaded-metadata": () => {
+				updateTime();
+				playbackSync.handleLoadedMetadata();
+			},
+			play: startTracking,
+			playing: playbackSync.handlePlaying,
+			pause: stopTracking,
+			"time-update": () => {
+				if (!timing) updateTime();
+			},
+			"can-play": playbackSync.handleCanPlay,
+			ended: () => {
+				stopTracking();
+				onEnded?.();
+			},
+		};
+		for (const [type, listener] of Object.entries(listeners)) {
+			node.addEventListener(type, listener);
+		}
+		const controlRequestTypes = [
+			"media-play-request",
+			"media-pause-request",
+			"media-seeking-request",
+			"media-seek-request",
+		] as const;
+		for (const type of controlRequestTypes) {
+			node.addEventListener(type, handleControlRequest, true);
+		}
+		setProvider(player.provider);
+		return {
+			destroy() {
+				for (const [type, listener] of Object.entries(listeners)) {
+					node.removeEventListener(type, listener);
+				}
+				for (const type of controlRequestTypes) {
+					node.removeEventListener(type, handleControlRequest, true);
+				}
+			},
+		};
 	}
 
 	$effect(() => {
@@ -216,37 +277,18 @@
 	});
 </script>
 
-<div class={`relative overflow-hidden rounded-md bg-black ${className}`}>
-	<!-- svelte-ignore a11y_media_has_caption: a WebVTT fallback is included when available -->
-	<video
-		bind:this={video}
-		class="aspect-video w-full"
-		controls={!timing && canControl}
-		playsinline
-		preload="auto"
-		src={videoUrl}
-		aria-label={title ? `Karaoke video: ${title}` : "Karaoke video"}
-		onloadedmetadata={() => {
-			duration = video?.duration ?? 0;
-			updateTime();
-			playbackSync.handleLoadedMetadata();
-		}}
-		onplay={() => {
-			startTracking();
-		}}
-		onplaying={playbackSync.handlePlaying}
-		onpause={() => {
-			stopTracking();
-		}}
-		ontimeupdate={() => {
-			if (!timing) updateTime();
-		}}
-		oncanplay={playbackSync.handleCanPlay}
-		onended={() => {
-			stopTracking();
-			onEnded?.();
-		}}
-	>
+<media-player
+	use:listenForPlayerEvents
+	class={`relative block overflow-hidden rounded-md bg-black ${className}`}
+	src={{ src: videoUrl, type: "video/mp4" }}
+	title={title ?? undefined}
+	playsInline
+	load="eager"
+	preload="auto"
+	keyDisabled={Boolean(timing) && !canControl}
+	aria-label={title ? `Karaoke video: ${title}` : "Karaoke video"}
+>
+	<media-provider class="player-provider block aspect-video w-full bg-black">
 		{#if publicCaptionsUrl}
 			<track
 				default={availableLyrics.length === 0}
@@ -255,54 +297,13 @@
 				label="Lyrics"
 			/>
 		{/if}
-	</video>
+	</media-provider>
 
-	{#if timing && canControl}
-		<div class="flex items-center gap-3 bg-zinc-950 px-3 py-2 text-white">
-			<Button
-				variant="ghost"
-				size="icon"
-				class="text-white hover:bg-white/15 hover:text-white"
-				disabled={!controlsReady}
-				aria-label={isPlaying ? "Pause" : "Play"}
-				onclick={() =>
-					void requestTimingUpdate({ velocity: isPlaying ? 0 : 1 })}
-			>
-				{#if isPlaying}<Pause />{:else}<Play />{/if}
-			</Button>
-			<span class="w-10 text-right text-xs tabular-nums"
-				>{formatTime(displayedTime)}</span
-			>
-			<input
-				type="range"
-				class="min-w-0 flex-1 accent-white"
-				min="0"
-				max={Math.max(duration, 0)}
-				step="0.01"
-				value={Math.min(displayedTime, duration || displayedTime)}
-				disabled={!controlsReady || duration <= 0}
-				aria-label="Seek video"
-				oninput={(event) => {
-					isScrubbing = true;
-					scrubPosition = Number(event.currentTarget.value);
-				}}
-				onchange={(event) => {
-					const requestedPosition = Number(event.currentTarget.value);
-					isScrubbing = false;
-					event.currentTarget.value = String(currentTime);
-					void requestTimingUpdate({ position: requestedPosition });
-				}}
-				onpointercancel={() => {
-					isScrubbing = false;
-				}}
-			/>
-			<span class="w-10 text-xs tabular-nums">{formatTime(duration)}</span>
-		</div>
-	{/if}
+	<KaraokeVideoControls {timing} {canControl} />
 
 	{#if playbackSync.needsUserGesture}
 		<div
-			class="absolute inset-0 z-30 flex items-center justify-center bg-black/65 p-6 text-center"
+			class="absolute inset-x-0 top-0 z-30 flex aspect-video items-center justify-center bg-black/65 p-6 text-center"
 		>
 			<div class="flex max-w-sm flex-col items-center gap-3">
 				<div>
@@ -321,7 +322,7 @@
 	{/if}
 
 	<div
-		class="pointer-events-none absolute inset-0 z-20 overflow-hidden"
+		class="pointer-events-none absolute inset-x-0 top-0 z-20 aspect-video overflow-hidden"
 		aria-hidden="true"
 	>
 		{#each flyingMessages as message (message.id)}
@@ -336,7 +337,7 @@
 
 	{#if activeCue}
 		<div
-			class="pointer-events-none absolute inset-x-0 bottom-0 flex min-h-[28%] flex-col justify-end bg-linear-to-t from-black/80 via-black/25 to-transparent px-4 text-center sm:pb-14 sm:px-8 pb-12"
+			class="pointer-events-none absolute inset-x-0 top-0 flex aspect-video flex-col justify-end bg-linear-to-t from-black/80 via-black/25 to-transparent px-4 pb-12 text-center sm:px-8 sm:pb-14"
 			aria-hidden="true"
 		>
 			<p class="karaoke-line">
@@ -360,9 +361,15 @@
 			{/if}
 		</div>
 	{/if}
-</div>
+</media-player>
 
 <style>
+	.player-provider :global(video) {
+		width: 100%;
+		height: 100%;
+		object-fit: contain;
+	}
+
 	.flying-message {
 		position: absolute;
 		top: calc(8% + var(--lane) * 11%);
