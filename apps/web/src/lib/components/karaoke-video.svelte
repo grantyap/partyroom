@@ -299,6 +299,14 @@
 		{/if}
 	</media-provider>
 
+	{#if canControl}
+		<media-gesture
+			class="absolute inset-x-0 top-0 z-10 block aspect-video cursor-pointer"
+			event="pointerup"
+			action="toggle:paused"
+		></media-gesture>
+	{/if}
+
 	<KaraokeVideoControls {timing} {canControl} />
 
 	{#if playbackSync.needsUserGesture}
