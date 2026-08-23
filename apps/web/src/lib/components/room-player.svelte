@@ -2,6 +2,7 @@
 	import KaraokeVideo from "$lib/components/karaoke-video.svelte";
 	import LyricsPopover from "$lib/components/lyrics-popover.svelte";
 	import MediaProgressPopover from "$lib/components/media-progress-popover.svelte";
+	import { OnlineTimingObject } from "$lib/online-timing-object.svelte";
 	import ShareRoomPopover from "$lib/components/share-room-popover.svelte";
 	import { Badge } from "$lib/components/ui/badge";
 	import { Button } from "$lib/components/ui/button";
@@ -35,13 +36,38 @@
 	}));
 	const requestMedia = useAction(api.media.actions.requestMedia);
 	const serverClock = useAction(api.playback.clock);
-	const play = useMutation(api.playback.play);
-	const pause = useMutation(api.playback.pause);
-	const seek = useMutation(api.playback.seek);
+	const updateTiming = useMutation(api.playback.update);
 	const advance = useMutation(api.playback.advance);
 	const remove = useMutation(api.playback.remove);
 	const reorder = useMutation(api.playback.reorder);
 	const setLyrics = useMutation(api.playback.setLyrics);
+	const timing = new OnlineTimingObject({
+		playStartDelaySeconds: 0,
+		getProviderState: () =>
+			playback.data
+				? {
+						vector: playback.data.playback.vector,
+						revision: playback.data.playback.revision,
+					}
+				: undefined,
+		readProviderClock: () => serverClock({}),
+		updateProvider: async (vector, { playStartDelaySeconds }) => {
+			const currentQueueItem = playback.data?.current?._id;
+			if (!currentQueueItem) throw new Error("Nothing is playing");
+			try {
+				await updateTiming({
+					roomId,
+					currentQueueItem,
+					vector,
+					playStartDelaySeconds,
+				});
+			} catch (cause) {
+				error =
+					cause instanceof Error ? cause.message : "Unable to update playback";
+				throw cause;
+			}
+		},
+	});
 
 	const mediaById = $derived(
 		new Map((roomMedia.data ?? []).map((media) => [media._id, media])),
@@ -58,7 +84,6 @@
 	let draggedItem = $state<Id<"roomQueueItems"> | null>(null);
 	let playerShell = $state<HTMLElement>();
 	let tvMode = $state(false);
-	let clockOffsetMs = $state(0);
 
 	onMount(() => {
 		const updateFullscreen = () => {
@@ -69,21 +94,7 @@
 			document.removeEventListener("fullscreenchange", updateFullscreen);
 	});
 
-	onMount(() => {
-		async function synchronizeClock() {
-			const startedAt = Date.now();
-			try {
-				const serverNow = await serverClock({});
-				const completedAt = Date.now();
-				clockOffsetMs = serverNow - (startedAt + completedAt) / 2;
-			} catch {
-				// Local wall time is a reasonable fallback until the next sample succeeds.
-			}
-		}
-		void synchronizeClock();
-		const timer = window.setInterval(() => void synchronizeClock(), 60_000);
-		return () => window.clearInterval(timer);
-	});
+	onMount(() => timing.start());
 
 	async function addSong(event: SubmitEvent) {
 		event.preventDefault();
@@ -129,107 +140,6 @@
 		} catch (cause) {
 			error =
 				cause instanceof Error ? cause.message : "Unable to reorder queue";
-		}
-	}
-
-	async function requestPlay(positionMs: number) {
-		const currentQueueItem = playback.data?.current?._id;
-		if (!currentQueueItem) return;
-		try {
-			await play(
-				{ roomId, currentQueueItem, positionMs },
-				{
-					optimisticUpdate: (store, args) => {
-						const state = store.getQuery(api.playback.get, {
-							roomId: args.roomId,
-						});
-						if (!state || state.current?._id !== args.currentQueueItem) return;
-						store.setQuery(
-							api.playback.get,
-							{ roomId: args.roomId },
-							{
-								...state,
-								playback: {
-									...state.playback,
-									status: "playing",
-									anchorPositionMs: args.positionMs,
-									anchorUpdatedAt: Date.now() + clockOffsetMs,
-									revision: state.playback.revision + 1,
-								},
-							},
-						);
-					},
-				},
-			);
-		} catch (cause) {
-			error = cause instanceof Error ? cause.message : "Unable to play media";
-		}
-	}
-
-	async function requestPause(positionMs: number) {
-		const currentQueueItem = playback.data?.current?._id;
-		if (!currentQueueItem) return;
-		try {
-			await pause(
-				{ roomId, currentQueueItem, positionMs },
-				{
-					optimisticUpdate: (store, args) => {
-						const state = store.getQuery(api.playback.get, {
-							roomId: args.roomId,
-						});
-						if (!state || state.current?._id !== args.currentQueueItem) return;
-						store.setQuery(
-							api.playback.get,
-							{ roomId: args.roomId },
-							{
-								...state,
-								playback: {
-									...state.playback,
-									status: "paused",
-									anchorPositionMs: args.positionMs,
-									anchorUpdatedAt: Date.now() + clockOffsetMs,
-									revision: state.playback.revision + 1,
-								},
-							},
-						);
-					},
-				},
-			);
-		} catch (cause) {
-			error = cause instanceof Error ? cause.message : "Unable to pause media";
-		}
-	}
-
-	async function requestSeek(positionMs: number) {
-		const currentQueueItem = playback.data?.current?._id;
-		if (!currentQueueItem) return;
-		try {
-			await seek(
-				{ roomId, currentQueueItem, positionMs },
-				{
-					optimisticUpdate: (store, args) => {
-						const state = store.getQuery(api.playback.get, {
-							roomId: args.roomId,
-						});
-						if (!state || state.current?._id !== args.currentQueueItem) return;
-						store.setQuery(
-							api.playback.get,
-							{ roomId: args.roomId },
-							{
-								...state,
-								playback: {
-									...state.playback,
-									anchorPositionMs: args.positionMs,
-									anchorUpdatedAt: Date.now() + clockOffsetMs,
-									revision: state.playback.revision + 1,
-								},
-							},
-						);
-					},
-				},
-			);
-		} catch (cause) {
-			error = cause instanceof Error ? cause.message : "Unable to seek media";
 		}
 	}
 
@@ -290,14 +200,8 @@
 					selectedLyricsId={currentMedia.selectedLyricsId}
 					lyricsOffsetMs={currentMedia.lyricsOffsetMs}
 					{overlayMessages}
-					playback={{
-						...playback.data.playback,
-						clockOffsetMs,
-						canControl: playback.data.permissions.controlPlayback,
-					}}
-					onPlayRequest={requestPlay}
-					onPauseRequest={requestPause}
-					onSeekRequest={requestSeek}
+					{timing}
+					canControl={playback.data.permissions.controlPlayback}
 					onEnded={() => {
 						if (
 							!playback.data?.permissions.controlPlayback ||

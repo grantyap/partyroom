@@ -18,6 +18,7 @@ const PRESENCE_CHECK_INTERVAL_MS = 30_000;
 const EMPTY_PAUSE_GRACE_MS = 15_000;
 const EMPTY_ROOM_LIFETIME_MS = 10 * 60_000;
 const MAX_QUEUE_ITEMS = 200;
+const DEFAULT_PLAY_START_DELAY_MS = 1_000;
 
 const playbackStatus = v.union(v.literal("idle"), v.literal("playing"), v.literal("paused"));
 const queueAvailability = v.union(v.literal("ready"), v.literal("processing"), v.literal("failed"));
@@ -30,10 +31,13 @@ const queueItemResult = v.object({
   availability: queueAvailability,
 });
 const playbackResult = v.object({
-  status: playbackStatus,
   currentQueueItem: v.optional(v.id("roomQueueItems")),
-  anchorPositionMs: v.number(),
-  anchorUpdatedAt: v.number(),
+  vector: v.object({
+    position: v.number(),
+    velocity: v.number(),
+    acceleration: v.number(),
+    timestamp: v.number(),
+  }),
   revision: v.number(),
   queueRevision: v.number(),
 });
@@ -100,11 +104,12 @@ async function scheduleAutomaticAdvance(
   item: Doc<"roomQueueItems">,
   revision: number,
   positionMs: number,
+  startDelayMs = 0,
 ) {
   const durationMs = await queueItemDurationMs(ctx, item);
   if (durationMs === null) return;
   await ctx.scheduler.runAfter(
-    Math.max(0, durationMs - positionMs),
+    startDelayMs + Math.max(0, durationMs - positionMs),
     internal.playback.finishIfCurrent,
     {
       roomId: item.room,
@@ -133,9 +138,17 @@ async function startFirstReadyIfIdle(
   return true;
 }
 
-function projectedPosition(playback: Doc<"roomPlayback">, now: number) {
+/**
+ * Queries the persisted timing resource at `now` using its state vector.
+ * Partyroom only supports velocity 0 or 1 and acceleration 0, but exposes the
+ * complete W3C four-tuple so clients consume a genuine timing source rather
+ * than treating a browser playhead as shared state.
+ *
+ * @see https://www.w3.org/community/reports/webtiming/CG-FINAL-timingobject-20241203/#media-elements-and-the-timing-object
+ */
+function projectedPositionMs(playback: Doc<"roomPlayback">, now: number) {
   if (playback.status !== "playing") return playback.anchorPositionMs;
-  return Math.max(0, playback.anchorPositionMs + now - playback.anchorUpdatedAt);
+  return Math.max(0, playback.anchorPositionMs + Math.max(0, now - playback.anchorUpdatedAt));
 }
 
 function userCan(room: Doc<"rooms">, userId: string, permission: RoomPermission) {
@@ -167,10 +180,13 @@ export const get = query({
     const current = results.find((item) => item._id === playback.currentQueueItem) ?? null;
     return {
       playback: {
-        status: playback.status,
         currentQueueItem: playback.currentQueueItem,
-        anchorPositionMs: playback.anchorPositionMs,
-        anchorUpdatedAt: playback.anchorUpdatedAt,
+        vector: {
+          position: playback.anchorPositionMs / 1_000,
+          velocity: playback.status === "playing" ? 1 : 0,
+          acceleration: 0,
+          timestamp: playback.anchorUpdatedAt / 1_000,
+        },
         revision: playback.revision,
         queueRevision: playback.queueRevision,
       },
@@ -190,8 +206,8 @@ export const get = query({
 
 export const clock = action({
   args: {},
-  returns: v.number(),
-  handler: async () => Date.now(),
+  returns: v.object({ timestamp: v.number() }),
+  handler: async () => ({ timestamp: Date.now() / 1_000 }),
 });
 
 export async function enqueueRoomMedia(
@@ -230,78 +246,107 @@ export const add = mutation({
   },
 });
 
-export const play = mutation({
-  args: {
-    roomId: v.id("rooms"),
-    currentQueueItem: v.id("roomQueueItems"),
-    positionMs: v.number(),
+export type TimingStateVectorUpdate = {
+  position?: number;
+  velocity?: number;
+  acceleration?: number;
+};
+
+/**
+ * Applies a partial W3C Timing Object state-vector update. Omitted fields are
+ * queried from the current vector, and the resulting vector is multicast
+ * through the reactive `get` query. A vector that starts forward playback is
+ * timestamped slightly in the future so every client can prepare its decoder
+ * and activate against one shared provider-clock instant.
+ *
+ * Partyroom currently supports media's forward-play and paused states only:
+ * velocity must be 0 or 1 and acceleration must be 0.
+ *
+ * @see https://www.w3.org/community/reports/webtiming/CG-FINAL-timingobject-20241203/#process-an-update-operation-timing-provider
+ */
+export async function updateRoomTiming(
+  ctx: MutationCtx,
+  {
+    roomId,
+    currentQueueItem,
+    update,
+    playStartDelayMs = DEFAULT_PLAY_START_DELAY_MS,
+  }: {
+    roomId: Id<"rooms">;
+    currentQueueItem: Id<"roomQueueItems">;
+    update: TimingStateVectorUpdate;
+    playStartDelayMs?: number;
   },
-  returns: v.null(),
-  handler: async (ctx, { roomId, currentQueueItem, positionMs }) => {
-    await requireRoomAction(ctx, roomId, "rooms:controlPlayback");
-    const playback = await playbackForRoom(ctx, roomId);
-    if (playback.currentQueueItem !== currentQueueItem) return null;
-    const now = Date.now();
-    const clampedPosition = Math.max(0, positionMs);
-    await ctx.db.patch("roomPlayback", playback._id, {
-      status: "playing",
-      anchorPositionMs: clampedPosition,
-      anchorUpdatedAt: now,
-      revision: playback.revision + 1,
-    });
+  now = Date.now(),
+) {
+  if (
+    update.position === undefined &&
+    update.velocity === undefined &&
+    update.acceleration === undefined
+  ) {
+    throw new Error("A timing update must change at least one vector component");
+  }
+  if (update.position !== undefined && (!Number.isFinite(update.position) || update.position < 0)) {
+    throw new Error("Timing position must be a finite non-negative number");
+  }
+  if (update.velocity !== undefined && update.velocity !== 0 && update.velocity !== 1) {
+    throw new Error("Partyroom only supports timing velocity 0 or 1");
+  }
+  if (update.acceleration !== undefined && update.acceleration !== 0) {
+    throw new Error("Partyroom only supports timing acceleration 0");
+  }
+  if (!Number.isFinite(playStartDelayMs) || playStartDelayMs < 0) {
+    throw new Error("Playback start delay must be a finite non-negative number");
+  }
+
+  const playback = await playbackForRoom(ctx, roomId);
+  if (playback.currentQueueItem !== currentQueueItem) return;
+  const positionMs =
+    update.position === undefined ? projectedPositionMs(playback, now) : update.position * 1_000;
+  const velocity = update.velocity ?? (playback.status === "playing" ? 1 : 0);
+  const startDelayMs = velocity === 1 ? playStartDelayMs : 0;
+  await ctx.db.patch("roomPlayback", playback._id, {
+    status: velocity === 1 ? "playing" : "paused",
+    anchorPositionMs: positionMs,
+    anchorUpdatedAt: now + startDelayMs,
+    revision: playback.revision + 1,
+  });
+  if (velocity === 1) {
     const item = await ctx.db.get("roomQueueItems", playback.currentQueueItem);
     if (item) {
-      await scheduleAutomaticAdvance(ctx, item, playback.revision + 1, clampedPosition);
+      await scheduleAutomaticAdvance(ctx, item, playback.revision + 1, positionMs, startDelayMs);
     }
-    return null;
-  },
-});
+  }
+}
 
-export const pause = mutation({
+/**
+ * Requests an update to the room's online timing resource. Per the W3C model,
+ * this mutation only forwards the request; clients update their local timing
+ * object after the resulting vector arrives through `get`.
+ *
+ * @see https://www.w3.org/community/reports/webtiming/CG-FINAL-timingobject-20241203/#state-vector-synchronization
+ */
+export const update = mutation({
   args: {
     roomId: v.id("rooms"),
     currentQueueItem: v.id("roomQueueItems"),
-    positionMs: v.number(),
+    vector: v.object({
+      position: v.optional(v.number()),
+      velocity: v.optional(v.number()),
+      acceleration: v.optional(v.number()),
+    }),
+    playStartDelaySeconds: v.optional(v.number()),
   },
   returns: v.null(),
-  handler: async (ctx, { roomId, currentQueueItem, positionMs }) => {
+  handler: async (ctx, { roomId, currentQueueItem, vector, playStartDelaySeconds }) => {
     await requireRoomAction(ctx, roomId, "rooms:controlPlayback");
-    const playback = await playbackForRoom(ctx, roomId);
-    if (playback.currentQueueItem !== currentQueueItem) return null;
-    const now = Date.now();
-    await ctx.db.patch("roomPlayback", playback._id, {
-      status: "paused",
-      anchorPositionMs: Math.max(0, positionMs),
-      anchorUpdatedAt: now,
-      revision: playback.revision + 1,
+    await updateRoomTiming(ctx, {
+      roomId,
+      currentQueueItem,
+      update: vector,
+      playStartDelayMs:
+        playStartDelaySeconds === undefined ? undefined : playStartDelaySeconds * 1_000,
     });
-    return null;
-  },
-});
-
-export const seek = mutation({
-  args: {
-    roomId: v.id("rooms"),
-    currentQueueItem: v.id("roomQueueItems"),
-    positionMs: v.number(),
-  },
-  returns: v.null(),
-  handler: async (ctx, { roomId, currentQueueItem, positionMs }) => {
-    await requireRoomAction(ctx, roomId, "rooms:controlPlayback");
-    const playback = await playbackForRoom(ctx, roomId);
-    if (playback.currentQueueItem !== currentQueueItem) return null;
-    const now = Date.now();
-    await ctx.db.patch("roomPlayback", playback._id, {
-      anchorPositionMs: Math.max(0, positionMs),
-      anchorUpdatedAt: now,
-      revision: playback.revision + 1,
-    });
-    if (playback.status === "playing") {
-      const item = await ctx.db.get("roomQueueItems", playback.currentQueueItem);
-      if (item) {
-        await scheduleAutomaticAdvance(ctx, item, playback.revision + 1, Math.max(0, positionMs));
-      }
-    }
     return null;
   },
 });
@@ -571,7 +616,7 @@ export const pauseIfEmpty = internalMutation({
     const now = Date.now();
     await ctx.db.patch("roomPlayback", playback._id, {
       status: "paused",
-      anchorPositionMs: projectedPosition(playback, now),
+      anchorPositionMs: projectedPositionMs(playback, now),
       anchorUpdatedAt: now,
       revision: playback.revision + 1,
     });

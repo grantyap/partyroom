@@ -28,6 +28,8 @@
     "convex-svelte": "catalog:",
     "dotenv": "catalog:",
     "qrcode": "^1.5.4",
+    "timing-object": "^3.1.98",
+    "timingsrc": "^1.4.37",
     "zod": "catalog:"
   },
   "devDependencies": {

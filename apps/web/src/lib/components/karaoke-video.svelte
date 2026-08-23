@@ -9,8 +9,11 @@
 		type KaraokeCue,
 		type LyricsTrack,
 	} from "$lib/karaoke";
+	import { MediaPlaybackSync } from "$lib/media-playback-sync.svelte";
+	import type { OnlineTimingObject } from "$lib/online-timing-object.svelte";
 	import { browserReachableServiceUrl } from "$lib/service-url";
-	import { RefreshCw } from "@lucide/svelte";
+	import type { TimingStateVectorUpdate } from "$lib/timing-object";
+	import { Pause, Play, RefreshCw } from "@lucide/svelte";
 
 	type Props = {
 		src: string;
@@ -19,17 +22,8 @@
 		class?: string;
 		selectedLyricsId?: string | null;
 		lyricsOffsetMs?: number;
-		playback?: {
-			status: "idle" | "playing" | "paused";
-			anchorPositionMs: number;
-			anchorUpdatedAt: number;
-			revision: number;
-			clockOffsetMs: number;
-			canControl: boolean;
-		};
-		onPlayRequest?: (positionMs: number) => void | Promise<void>;
-		onPauseRequest?: (positionMs: number) => void | Promise<void>;
-		onSeekRequest?: (positionMs: number) => void | Promise<void>;
+		timing?: OnlineTimingObject;
+		canControl?: boolean;
 		onEnded?: () => void;
 		overlayMessages?: Array<{ id: string; body: string; color: string }>;
 	};
@@ -41,25 +35,19 @@
 		class: className = "",
 		selectedLyricsId: sharedSelectedLyricsId,
 		lyricsOffsetMs: sharedLyricsOffsetMs,
-		playback,
-		onPlayRequest,
-		onPauseRequest,
-		onSeekRequest,
+		timing,
+		canControl = true,
 		onEnded,
 		overlayMessages = [],
 	}: Props = $props();
 
 	let video = $state<HTMLVideoElement>();
 	let currentTime = $state(0);
+	let duration = $state(0);
+	let isScrubbing = $state(false);
+	let scrubPosition = $state(0);
 	let cues = $state<KaraokeCue[]>([]);
 	let animationFrame: number | undefined;
-	let applyingAuthoritativeState = false;
-	let ignoredSeekCommands = 0;
-	let needsPlaybackSync = $state(false);
-	let syncError = $state<string | null>(null);
-	let isScrubbing = $state(false);
-	let pendingSeekCommands = $state(0);
-	let appliedPlaybackKey = "";
 	let initializedOverlayMessages = false;
 	let seenOverlayMessages = new Set<string>();
 	let flyingMessages = $state<
@@ -71,7 +59,14 @@
 			duration: number;
 		}>
 	>([]);
-	const localSeekInFlight = $derived(isScrubbing || pendingSeekCommands > 0);
+	const playbackSync = new MediaPlaybackSync({
+		getElement: () => video,
+		getTimingObject: () => timing,
+		alignmentToleranceSeconds: 0.01,
+	});
+	const isPlaying = $derived(timing?.targetVelocity === 1);
+	const controlsReady = $derived(timing?.readyState === "open");
+	const displayedTime = $derived(isScrubbing ? scrubPosition : currentTime);
 
 	const availableLyrics = $derived(
 		lyrics.filter(({ content }) =>
@@ -112,112 +107,6 @@
 	const nextCue = $derived(
 		activeCueIndex >= 0 ? cues[activeCueIndex + 1] : undefined,
 	);
-
-	function authoritativePositionSeconds(state: NonNullable<Props["playback"]>) {
-		const authoritativeNow = Date.now() + state.clockOffsetMs;
-		return Math.max(
-			0,
-			(state.anchorPositionMs +
-				(state.status === "playing"
-					? Math.max(0, authoritativeNow - state.anchorUpdatedAt)
-					: 0)) /
-				1_000,
-		);
-	}
-
-	function seekToAuthoritativePosition(
-		element: HTMLVideoElement,
-		state: NonNullable<Props["playback"]>,
-	) {
-		const targetSeconds = authoritativePositionSeconds(state);
-		if (Math.abs(element.currentTime - targetSeconds) <= 0.5) return;
-		ignoredSeekCommands += 1;
-		element.currentTime = targetSeconds;
-	}
-
-	function finishApplyingAuthoritativeState() {
-		setTimeout(() => {
-			applyingAuthoritativeState = false;
-		}, 0);
-	}
-
-	async function syncPlayback() {
-		const element = video;
-		const state = playback;
-		if (!element || !state) return;
-
-		applyingAuthoritativeState = true;
-		syncError = null;
-		seekToAuthoritativePosition(element, state);
-		try {
-			if (state.status === "playing") await element.play();
-			else element.pause();
-			needsPlaybackSync = false;
-		} catch {
-			needsPlaybackSync = true;
-			syncError = "Safari still blocked playback. Tap Sync video again.";
-		} finally {
-			finishApplyingAuthoritativeState();
-		}
-	}
-
-	$effect(() => {
-		const element = video;
-		const state = playback;
-		const playbackKey = state
-			? `${state.revision}:${state.status}:${state.anchorPositionMs}:${state.anchorUpdatedAt}`
-			: "";
-		if (
-			!element ||
-			!state ||
-			localSeekInFlight ||
-			appliedPlaybackKey === playbackKey
-		)
-			return;
-		appliedPlaybackKey = playbackKey;
-		applyingAuthoritativeState = true;
-		seekToAuthoritativePosition(element, state);
-		if (state.status === "playing") {
-			void element
-				.play()
-				.then(() => {
-					needsPlaybackSync = false;
-					syncError = null;
-				})
-				.catch(() => {
-					// A user gesture is required by Safari and other autoplay-restricting browsers.
-					needsPlaybackSync = true;
-				})
-				.finally(finishApplyingAuthoritativeState);
-		} else {
-			element.pause();
-			needsPlaybackSync = false;
-			syncError = null;
-			finishApplyingAuthoritativeState();
-		}
-	});
-
-	$effect(() => {
-		const element = video;
-		const state = playback;
-		if (!element || !state || state.status !== "playing" || localSeekInFlight)
-			return;
-		const timer = window.setInterval(() => {
-			if (localSeekInFlight) return;
-			const estimatedServerNow = Date.now() + state.clockOffsetMs;
-			const targetSeconds = Math.max(
-				0,
-				(state.anchorPositionMs + estimatedServerNow - state.anchorUpdatedAt) /
-					1_000,
-			);
-			if (Math.abs(element.currentTime - targetSeconds) <= 0.5) return;
-			applyingAuthoritativeState = true;
-			ignoredSeekCommands += 1;
-			element.currentTime = targetSeconds;
-			finishApplyingAuthoritativeState();
-		}, 5_000);
-		return () => window.clearInterval(timer);
-	});
 
 	$effect(() => {
 		const incoming = overlayMessages;
@@ -275,13 +164,16 @@
 	});
 
 	function updateTime() {
-		if (!video) return;
-		currentTime = video.currentTime;
+		currentTime = timing?.query()?.position ?? video?.currentTime ?? 0;
 	}
 
 	function trackPlayback() {
 		updateTime();
-		if (video && !video.paused && !video.ended) {
+		if (
+			timing
+				? timing.query()?.velocity === 1
+				: video && !video.paused && !video.ended
+		) {
 			animationFrame = requestAnimationFrame(trackPlayback);
 		}
 	}
@@ -297,19 +189,27 @@
 		updateTime();
 	}
 
-	async function commitSeek() {
-		updateTime();
-		if (applyingAuthoritativeState) return;
-		isScrubbing = false;
-		pendingSeekCommands += 1;
+	function formatTime(seconds: number) {
+		const whole = Math.max(0, Math.floor(seconds));
+		return `${Math.floor(whole / 60)}:${(whole % 60).toString().padStart(2, "0")}`;
+	}
+
+	async function requestTimingUpdate(update: TimingStateVectorUpdate) {
+		if (!timing) return;
 		try {
-			await onSeekRequest?.((video?.currentTime ?? 0) * 1_000);
-		} catch (error) {
-			console.error("Unable to seek room playback", error);
-		} finally {
-			pendingSeekCommands -= 1;
+			await timing.update(update);
+		} catch (cause) {
+			console.error("Unable to update timing resource", cause);
 		}
 	}
+
+	$effect(() => {
+		if (!timing) return;
+		timing.revision;
+		updateTime();
+		if (timing.query()?.velocity === 1) startTracking();
+		else stopTracking();
+	});
 
 	$effect(() => () => {
 		if (animationFrame !== undefined) cancelAnimationFrame(animationFrame);
@@ -321,47 +221,27 @@
 	<video
 		bind:this={video}
 		class="aspect-video w-full"
-		controls={playback?.canControl ?? true}
+		controls={!timing && canControl}
 		playsinline
-		preload="metadata"
+		preload="auto"
 		src={videoUrl}
 		aria-label={title ? `Karaoke video: ${title}` : "Karaoke video"}
-		onloadedmetadata={updateTime}
-		ontimeupdate={updateTime}
-		onseeking={() => {
-			if (!applyingAuthoritativeState && ignoredSeekCommands === 0)
-				isScrubbing = true;
-		}}
-		onseeked={() => {
-			if (ignoredSeekCommands > 0) {
-				ignoredSeekCommands -= 1;
-				isScrubbing = false;
-				updateTime();
-				return;
-			}
-			void commitSeek();
+		onloadedmetadata={() => {
+			duration = video?.duration ?? 0;
+			updateTime();
+			playbackSync.handleLoadedMetadata();
 		}}
 		onplay={() => {
 			startTracking();
-			if (
-				!applyingAuthoritativeState &&
-				!needsPlaybackSync &&
-				playback?.status !== "playing"
-			) {
-				void onPlayRequest?.((video?.currentTime ?? 0) * 1_000);
-			}
 		}}
+		onplaying={playbackSync.handlePlaying}
 		onpause={() => {
 			stopTracking();
-			if (
-				!applyingAuthoritativeState &&
-				!needsPlaybackSync &&
-				!video?.ended &&
-				playback?.status === "playing"
-			) {
-				void onPauseRequest?.((video?.currentTime ?? 0) * 1_000);
-			}
 		}}
+		ontimeupdate={() => {
+			if (!timing) updateTime();
+		}}
+		oncanplay={playbackSync.handleCanPlay}
 		onended={() => {
 			stopTracking();
 			onEnded?.();
@@ -377,7 +257,50 @@
 		{/if}
 	</video>
 
-	{#if needsPlaybackSync}
+	{#if timing && canControl}
+		<div class="flex items-center gap-3 bg-zinc-950 px-3 py-2 text-white">
+			<Button
+				variant="ghost"
+				size="icon"
+				class="text-white hover:bg-white/15 hover:text-white"
+				disabled={!controlsReady}
+				aria-label={isPlaying ? "Pause" : "Play"}
+				onclick={() =>
+					void requestTimingUpdate({ velocity: isPlaying ? 0 : 1 })}
+			>
+				{#if isPlaying}<Pause />{:else}<Play />{/if}
+			</Button>
+			<span class="w-10 text-right text-xs tabular-nums"
+				>{formatTime(displayedTime)}</span
+			>
+			<input
+				type="range"
+				class="min-w-0 flex-1 accent-white"
+				min="0"
+				max={Math.max(duration, 0)}
+				step="0.01"
+				value={Math.min(displayedTime, duration || displayedTime)}
+				disabled={!controlsReady || duration <= 0}
+				aria-label="Seek video"
+				oninput={(event) => {
+					isScrubbing = true;
+					scrubPosition = Number(event.currentTarget.value);
+				}}
+				onchange={(event) => {
+					const requestedPosition = Number(event.currentTarget.value);
+					isScrubbing = false;
+					event.currentTarget.value = String(currentTime);
+					void requestTimingUpdate({ position: requestedPosition });
+				}}
+				onpointercancel={() => {
+					isScrubbing = false;
+				}}
+			/>
+			<span class="w-10 text-xs tabular-nums">{formatTime(duration)}</span>
+		</div>
+	{/if}
+
+	{#if playbackSync.needsUserGesture}
 		<div
 			class="absolute inset-0 z-30 flex items-center justify-center bg-black/65 p-6 text-center"
 		>
@@ -387,11 +310,11 @@
 						Ready to join the party?
 					</p>
 				</div>
-				<Button size="lg" onclick={() => void syncPlayback()}>
+				<Button size="lg" onclick={() => void playbackSync.resume()}>
 					<RefreshCw /> Sync video
 				</Button>
-				{#if syncError}
-					<p class="text-xs text-red-300" role="alert">{syncError}</p>
+				{#if playbackSync.error}
+					<p class="text-xs text-red-300" role="alert">{playbackSync.error}</p>
 				{/if}
 			</div>
 		</div>

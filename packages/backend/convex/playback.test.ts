@@ -2,7 +2,7 @@ import { convexTest } from "convex-test";
 import { describe, expect, test } from "vitest";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
-import { advanceRoomPlayback, enqueueRoomMedia } from "./playback";
+import { advanceRoomPlayback, enqueueRoomMedia, updateRoomTiming } from "./playback";
 import { defaultRoomMemberPermissions } from "./rooms.schema";
 import schema from "./schema";
 import { modules } from "./test.setup";
@@ -162,6 +162,77 @@ describe("room playback", () => {
     expect(await t.run(async (ctx) => await ctx.db.get("roomPlayback", playbackId))).toMatchObject({
       currentQueueItem: queueItemId,
       status: "playing",
+    });
+  });
+
+  test("forward playback is future-dated so clients share one start instant", async () => {
+    const t = convexTest(schema, modules);
+    const { roomId, playbackId } = await seedRoom(t);
+    const media = await createRoomMedia(t, roomId, "ready");
+    const currentQueueItem = await enqueue(t, roomId, media);
+
+    await t.run(async (ctx) => {
+      await ctx.db.patch("roomPlayback", playbackId, {
+        status: "playing",
+        anchorPositionMs: 10_000,
+        anchorUpdatedAt: 100_000,
+        revision: 5,
+      });
+    });
+
+    await t.run(
+      async (ctx) =>
+        await updateRoomTiming(ctx, { roomId, currentQueueItem, update: { velocity: 0 } }, 102_500),
+    );
+    expect(await t.run(async (ctx) => await ctx.db.get("roomPlayback", playbackId))).toMatchObject({
+      status: "paused",
+      anchorPositionMs: 12_500,
+      anchorUpdatedAt: 102_500,
+      revision: 6,
+    });
+
+    await t.run(
+      async (ctx) =>
+        await updateRoomTiming(ctx, { roomId, currentQueueItem, update: { velocity: 1 } }, 104_000),
+    );
+    expect(await t.run(async (ctx) => await ctx.db.get("roomPlayback", playbackId))).toMatchObject({
+      status: "playing",
+      anchorPositionMs: 12_500,
+      anchorUpdatedAt: 105_000,
+      revision: 7,
+    });
+  });
+
+  test("a playing position update receives a coordinated future start", async () => {
+    const t = convexTest(schema, modules);
+    const { roomId, playbackId } = await seedRoom(t);
+    const media = await createRoomMedia(t, roomId, "ready");
+    const currentQueueItem = await enqueue(t, roomId, media);
+
+    await t.run(async (ctx) => {
+      await ctx.db.patch("roomPlayback", playbackId, {
+        status: "playing",
+        anchorPositionMs: 5_000,
+        anchorUpdatedAt: 90_000,
+        revision: 4,
+      });
+      await updateRoomTiming(
+        ctx,
+        {
+          roomId,
+          currentQueueItem,
+          update: { position: 30 },
+          playStartDelayMs: 250,
+        },
+        100_075,
+      );
+    });
+
+    expect(await t.run(async (ctx) => await ctx.db.get("roomPlayback", playbackId))).toMatchObject({
+      status: "playing",
+      anchorPositionMs: 30_000,
+      anchorUpdatedAt: 100_325,
+      revision: 5,
     });
   });
 });
