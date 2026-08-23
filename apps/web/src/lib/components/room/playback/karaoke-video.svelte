@@ -15,7 +15,6 @@
 	import {
 		isVideoProvider,
 		type MediaProviderAdapter,
-		type MediaSeekRequestEvent,
 	} from "vidstack";
 	import type { MediaPlayerElement } from "vidstack/elements";
 	import "vidstack/player";
@@ -60,6 +59,8 @@
 	const playbackSync = new MediaPlaybackSync({
 		getElement: () => video,
 		getTimingObject: () => timing,
+		canControl: () => canControl,
+		onSkip: () => onSkip?.(),
 		alignmentToleranceSeconds: 0.01,
 	});
 
@@ -166,29 +167,6 @@
 		video = isVideoProvider(provider) ? provider.video : undefined;
 	}
 
-	function updateTiming(update: { position?: number; velocity?: 0 | 1 }) {
-		if (!timing || !canControl) return;
-		void timing.update(update).catch((cause: unknown) => {
-			console.error("Unable to update timing resource", cause);
-		});
-	}
-
-	function handleControlRequest(event: Event) {
-		if (!timing) return;
-		event.preventDefault();
-		if (!canControl) return;
-		switch (event.type) {
-			case "media-play-request":
-				updateTiming({ velocity: 1 });
-				break;
-			case "media-pause-request":
-				updateTiming({ velocity: 0 });
-				break;
-			case "media-seek-request":
-				updateTiming({ position: (event as MediaSeekRequestEvent).detail });
-		}
-	}
-
 	function listenForPlayerEvents(node: HTMLElement) {
 		const player = node as MediaPlayerElement;
 		const listeners = {
@@ -220,7 +198,7 @@
 			"media-seek-request",
 		] as const;
 		for (const type of controlRequestTypes) {
-			node.addEventListener(type, handleControlRequest, true);
+			node.addEventListener(type, playbackSync.handleControlRequest, true);
 		}
 		setProvider(player.provider);
 		return {
@@ -229,7 +207,11 @@
 					node.removeEventListener(type, listener);
 				}
 				for (const type of controlRequestTypes) {
-					node.removeEventListener(type, handleControlRequest, true);
+					node.removeEventListener(
+						type,
+						playbackSync.handleControlRequest,
+						true,
+					);
 				}
 			},
 		};
@@ -278,7 +260,11 @@
 		></media-gesture>
 	{/if}
 
-	<KaraokeVideoControls {timing} {canControl} {onSkip} />
+	<KaraokeVideoControls
+		{timing}
+		{canControl}
+		onSkip={onSkip ? playbackSync.handleSkipRequest : undefined}
+	/>
 
 	{#if playbackSync.needsUserGesture}
 		<div

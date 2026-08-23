@@ -5,6 +5,7 @@ import {
   createUpdateStepwise,
   setTimingsrcWithCustomUpdateFunction,
 } from "timingsrc";
+import type { MediaSeekRequestEvent } from "vidstack";
 
 /** Configuration for connecting a media element to an online Timing Object. */
 export type MediaPlaybackSyncOptions = {
@@ -14,6 +15,10 @@ export type MediaPlaybackSyncOptions = {
   getTimingObject: () => OnlineTimingObject | undefined;
   /** Maximum ignored playhead error in seconds; defaults to `timingsrc`'s 0.025. */
   alignmentToleranceSeconds?: number;
+  /** Whether this client may send transport updates to the shared timing resource. */
+  canControl?: () => boolean;
+  /** Advances to the next media resource when the transport requests a skip. */
+  onSkip?: () => void | Promise<void>;
 };
 
 const DEFAULT_ALIGNMENT_TOLERANCE_SECONDS = 0.025;
@@ -74,6 +79,11 @@ const createConfiguredTimingsrc = (alignmentToleranceSeconds: number) => {
 
 /**
  * Connects one `HTMLVideoElement` to Partyroom's W3C-style Timing Object.
+ *
+ * This is the required entry point for anything that changes video playback.
+ * Play, pause, seek, skip, resume, and future transport controls must be routed
+ * through this class so the local media element stays synchronized with the
+ * server's authoritative timing state.
  *
  * Browser-specific time alignment is delegated to the maintained `timingsrc`
  * library. Partyroom retains only Svelte lifecycle integration, autoplay
@@ -190,6 +200,62 @@ export class MediaPlaybackSync {
     this.#mediaTimelineRevision += 1;
     this.align();
   };
+
+  /** Requests shared playback through the authoritative timing resource. */
+  readonly handlePlayRequest = () => {
+    this.#updateTiming({ velocity: 1 });
+  };
+
+  /** Requests a shared pause through the authoritative timing resource. */
+  readonly handlePauseRequest = () => {
+    this.#updateTiming({ velocity: 0 });
+  };
+
+  /** Requests a shared seek through the authoritative timing resource. */
+  readonly handleSeekRequest = (position: number) => {
+    this.#updateTiming({ position });
+  };
+
+  /** Requests the next media resource through the injected room transport action. */
+  readonly handleSkipRequest = () => {
+    if (!this.#canControl()) return;
+    try {
+      void Promise.resolve(this.#options.onSkip?.()).catch((cause: unknown) => {
+        console.error("Unable to skip media", cause);
+      });
+    } catch (cause) {
+      console.error("Unable to skip media", cause);
+    }
+  };
+
+  /** Intercepts Vidstack transport requests when playback is timing-resource-backed. */
+  readonly handleControlRequest = (event: Event) => {
+    if (!this.#options.getTimingObject()) return;
+    event.preventDefault();
+    if (!this.#canControl()) return;
+    switch (event.type) {
+      case "media-play-request":
+        this.handlePlayRequest();
+        break;
+      case "media-pause-request":
+        this.handlePauseRequest();
+        break;
+      case "media-seek-request":
+        this.handleSeekRequest((event as MediaSeekRequestEvent).detail);
+    }
+  };
+
+  #canControl() {
+    return this.#options.canControl?.() ?? true;
+  }
+
+  #updateTiming(update: { position?: number; velocity?: 0 | 1 }) {
+    const timing = this.#options.getTimingObject();
+    if (!timing || !this.#canControl()) return;
+    void timing.update(update).catch((cause: unknown) => {
+      console.error("Unable to update timing resource", cause);
+    });
+  }
 
   /** Rejoins authoritative playback from a browser-approved user gesture. */
   readonly resume = async () => {
