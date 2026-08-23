@@ -73,7 +73,7 @@
 
 <section class="space-y-4">
 	<div>
-		<h2 class="text-xl font-medium">Media</h2>
+		<h2 class="font-heading text-xl font-medium">Media</h2>
 		<p class="text-sm text-muted-foreground">
 			Paste a video URL to prepare a vocal-free version for this room.
 		</p>

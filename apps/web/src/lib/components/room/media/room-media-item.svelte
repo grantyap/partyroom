@@ -31,7 +31,7 @@
 <li class="space-y-3 rounded-lg border p-4">
 	<div class="flex items-start justify-between gap-4">
 		<div>
-			<h3 class="font-medium">{media.title ?? "Resolving media…"}</h3>
+			<h3 class="font-heading font-medium">{media.title ?? "Resolving media…"}</h3>
 			<p class="text-xs text-muted-foreground">
 				{media.state === "processing" ? "Processing media" : stageLabel(media.state)}
 				{#if formatDuration(media.duration)} · {formatDuration(media.duration)}{/if}

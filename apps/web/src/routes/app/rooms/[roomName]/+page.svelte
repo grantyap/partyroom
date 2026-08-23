@@ -106,7 +106,7 @@
 				><ArrowLeftIcon /> All rooms</Button
 			>
 			<div>
-				<h1 class="text-xl font-semibold">{room.data?.name}</h1>
+				<h1 class="font-heading text-xl font-semibold">{room.data?.name}</h1>
 				<p class="text-xs text-muted-foreground">
 					{onlineUsers.length}
 					{onlineUsers.length === 1 ? "person" : "people"} here
