@@ -29,6 +29,9 @@ type LyricsLookup = FunctionReference<
     jobId: Id<"mediaJobs">;
     title: string;
     duration?: number;
+    trackName?: string;
+    artistName?: string;
+    albumName?: string;
   },
   {
     state: "ready" | "not_found";
@@ -155,6 +158,9 @@ export const mediaPipeline = mediaPipelineDefinition.handler(async (step, { jobI
         jobId,
         title: resolved.title ?? "Untitled media",
         duration: resolved.duration,
+        trackName: resolved.track,
+        artistName: resolved.artist,
+        albumName: resolved.album,
       });
       await step.runMutation(
         internal.media.jobs.recordLyricTrack,

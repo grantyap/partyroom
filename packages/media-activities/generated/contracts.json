@@ -31,6 +31,24 @@
           "value": {
             "kind": "number"
           }
+        },
+        "track": {
+          "kind": "optional",
+          "value": {
+            "kind": "string"
+          }
+        },
+        "artist": {
+          "kind": "optional",
+          "value": {
+            "kind": "string"
+          }
+        },
+        "album": {
+          "kind": "optional",
+          "value": {
+            "kind": "string"
+          }
         }
       }
     },

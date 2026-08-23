@@ -59,6 +59,9 @@ describe("parseYtDlpMetadata", () => {
           extractor_key: "Youtube",
           title: "Example",
           duration: 120,
+          track: "Example Track",
+          artist: "Example Artist",
+          album: "Example Album",
           ignored: true,
         }),
       ),
@@ -67,7 +70,22 @@ describe("parseYtDlpMetadata", () => {
       extractor_key: "Youtube",
       title: "Example",
       duration: 120,
+      track: "Example Track",
+      artist: "Example Artist",
+      album: "Example Album",
     });
+  });
+
+  test("accepts an artists list when a singular artist is unavailable", () => {
+    expect(
+      parseYtDlpMetadata(
+        JSON.stringify({
+          id: "source-id",
+          extractor: "generic",
+          artists: ["First Artist", "Second Artist"],
+        }),
+      ),
+    ).toMatchObject({ artists: ["First Artist", "Second Artist"] });
   });
 
   test("rejects malformed or incomplete metadata", () => {

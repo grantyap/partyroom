@@ -59,6 +59,10 @@ const ytDlpMetadataSchema = z
     extractor: z.string().min(1).nullish(),
     title: z.string().nullish(),
     duration: z.number().finite().nonnegative().nullish(),
+    track: z.string().min(1).nullish(),
+    artist: z.string().min(1).nullish(),
+    artists: z.array(z.string().min(1)).nullish(),
+    album: z.string().min(1).nullish(),
   })
   .passthrough()
   .refine((metadata) => metadata.extractor_key || metadata.extractor, {
@@ -444,11 +448,15 @@ async function processResolve(
 ) {
   await reporter.progress("resolving", 0, "Resolving media source", true);
   const metadata = await resolveSource(request.input.sourceUrl, reporter);
+  const artist = metadata.artist ?? metadata.artists?.join(", ") ?? undefined;
   return {
     extractor: metadata.extractor_key ?? metadata.extractor ?? "unknown",
     sourceId: metadata.id!,
     title: metadata.title ?? "Untitled media",
     duration: metadata.duration ?? 0,
+    ...(metadata.track ? { track: metadata.track } : {}),
+    ...(artist ? { artist } : {}),
+    ...(metadata.album ? { album: metadata.album } : {}),
   } satisfies WorkerResult;
 }
 

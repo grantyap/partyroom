@@ -7,7 +7,7 @@ import { lyricObservation } from "./validators";
 const LRCLIB_ORIGIN = "https://lrclib.net";
 const USER_AGENT = "Partyroom/1.0 (https://github.com/grantyap/partyroom)";
 const MAX_RATE_LIMIT_ATTEMPTS = 3;
-const PRODUCTION_LABEL = String.raw`(?:official\s+)?(?:music\s+video|video|audio|lyric(?:s)?\s+video|visuali[sz]er)`;
+const PRODUCTION_LABEL = String.raw`(?:official\s+)?(?:m\s*\/?\s*v|music\s+video|video|audio|lyric(?:s)?\s+video|visuali[sz]er)`;
 const BRACKETED_PRODUCTION_LABEL = new RegExp(
   String.raw`\s*[\[(]\s*${PRODUCTION_LABEL}\s*[\])]\s*`,
   "gi",
@@ -16,8 +16,28 @@ const DELIMITED_PRODUCTION_LABEL = new RegExp(
   String.raw`\s*(?:[-–—|•:]\s*)${PRODUCTION_LABEL}\s*$`,
   "i",
 );
+const TRAILING_PRODUCTION_LABEL = new RegExp(String.raw`\s+${PRODUCTION_LABEL}\s*$`, "i");
+const QUOTED_TITLE = /[‘’'“”"]([^‘’'“”"]{1,200})[‘’'“”"]/gu;
+const VERSION_TOKENS = new Set([
+  "acoustic",
+  "cover",
+  "demo",
+  "edit",
+  "instrumental",
+  "karaoke",
+  "live",
+  "remaster",
+  "remastered",
+  "remix",
+  "slowed",
+  "sped",
+]);
+const MAX_SEARCH_ATTEMPTS = 3;
+const SEARCH_ATTEMPT_DELAY_MS = 250;
+const MIN_MATCH_SCORE = 78;
+const MIN_MATCH_MARGIN = 8;
 
-type LrclibRecord = {
+export type LrclibRecord = {
   id: number;
   trackName: string;
   artistName: string;
@@ -42,6 +62,13 @@ export type NormalizedLyrics = {
 };
 
 type TimedText = { time: number; value: string };
+
+export type LrclibSearchCandidate = {
+  query?: string;
+  trackName?: string;
+  artistName?: string;
+  albumName?: string;
+};
 
 const lyricsfileSchema = z.object({
   version: z.literal("1.0"),
@@ -223,41 +250,172 @@ export function lrclibSearchTitle(title: string) {
   return title
     .replace(BRACKETED_PRODUCTION_LABEL, " ")
     .replace(DELIMITED_PRODUCTION_LABEL, "")
+    .replace(TRAILING_PRODUCTION_LABEL, "")
     .replace(/\s+/g, " ")
     .trim();
 }
 
-function bestMatch(
+function trimWrappingQuotes(value: string) {
+  return value.replace(/^[\s‘’'“”"]+|[\s‘’'“”"]+$/gu, "").trim();
+}
+
+function artistWithoutTrailingAlias(value: string) {
+  return value.replace(/\s+(?:\([^)]{1,80}\)|\[[^\]]{1,80}\])\s*$/u, "").trim();
+}
+
+function parsedTitleParts(title: string) {
+  const cleaned = lrclibSearchTitle(title);
+  const quotedMatches = [...cleaned.matchAll(QUOTED_TITLE)];
+  const quoted = quotedMatches[quotedMatches.length - 1];
+  if (quoted?.index !== undefined) {
+    const artist = artistWithoutTrailingAlias(
+      cleaned.slice(0, quoted.index).replace(/\s*[-–—|•:]\s*$/u, ""),
+    );
+    const track = trimWrappingQuotes(quoted[1]);
+    if (artist && track) return { artist, track };
+  }
+
+  const delimiter = /\s+[-–—|•]\s+/u.exec(cleaned);
+  if (!delimiter?.index) return null;
+  const artist = artistWithoutTrailingAlias(cleaned.slice(0, delimiter.index));
+  const track = trimWrappingQuotes(cleaned.slice(delimiter.index + delimiter[0].length));
+  return artist && track ? { artist, track } : null;
+}
+
+export function lrclibSearchCandidates({
+  title,
+  trackName,
+  artistName,
+  albumName,
+}: {
+  title: string;
+  trackName?: string;
+  artistName?: string;
+  albumName?: string;
+}) {
+  const candidates: LrclibSearchCandidate[] = [];
+  const candidateKey = (candidate: LrclibSearchCandidate) =>
+    candidate.query
+      ? `q:${normalize(candidate.query)}`
+      : `fields:${normalize(`${candidate.artistName ?? ""}\n${candidate.trackName ?? ""}`)}`;
+  const add = (candidate: LrclibSearchCandidate) => {
+    const key = candidateKey(candidate);
+    if (key && !candidates.some((existing) => candidateKey(existing) === key)) {
+      candidates.push(candidate);
+    }
+  };
+
+  if (trackName?.trim() && artistName?.trim()) {
+    const track = trackName.trim();
+    const artist = artistName.trim();
+    add({
+      trackName: track,
+      artistName: artist,
+      albumName: albumName?.trim() || undefined,
+    });
+    add({ query: `${artist} ${track}` });
+  }
+
+  const parsed = parsedTitleParts(title);
+  if (parsed) {
+    add({ trackName: parsed.track, artistName: parsed.artist });
+    add({ query: `${parsed.artist} ${parsed.track}` });
+    add({ query: parsed.track });
+  } else {
+    const cleaned = lrclibSearchTitle(title) || title;
+    add({ query: cleaned });
+  }
+  return candidates.slice(0, MAX_SEARCH_ATTEMPTS);
+}
+
+function tokenSimilarity(left: string, right: string) {
+  const leftTokens = new Set(tokens(left));
+  const rightTokens = new Set(tokens(right));
+  if (leftTokens.size === 0 || rightTokens.size === 0) return 0;
+  let intersection = 0;
+  leftTokens.forEach((token) => {
+    if (rightTokens.has(token)) intersection += 1;
+  });
+  return (2 * intersection) / (leftTokens.size + rightTokens.size);
+}
+
+function versionMismatchCount(expected: string, actual: string) {
+  const expectedVersions = new Set(tokens(expected).filter((token) => VERSION_TOKENS.has(token)));
+  const actualVersions = new Set(tokens(actual).filter((token) => VERSION_TOKENS.has(token)));
+  let mismatch = 0;
+  expectedVersions.forEach((token) => {
+    if (!actualVersions.has(token)) mismatch += 1;
+  });
+  actualVersions.forEach((token) => {
+    if (!expectedVersions.has(token)) mismatch += 1;
+  });
+  return mismatch;
+}
+
+function candidateIdentityScore(record: LrclibRecord, candidate: LrclibSearchCandidate) {
+  if (candidate.trackName) {
+    const trackWeight = candidate.artistName ? 55 : 75;
+    const artistScore = candidate.artistName
+      ? tokenSimilarity(candidate.artistName, record.artistName) * 30
+      : 0;
+    const albumScore = candidate.albumName
+      ? tokenSimilarity(candidate.albumName, record.albumName) * 5
+      : 0;
+    return (
+      tokenSimilarity(candidate.trackName, record.trackName) * trackWeight +
+      artistScore +
+      albumScore -
+      versionMismatchCount(candidate.trackName, record.trackName) * 25
+    );
+  }
+  if (!candidate.query) return 0;
+  const signature = `${record.artistName} ${record.trackName}`;
+  return Math.max(
+    tokenSimilarity(candidate.query, signature) * 85,
+    tokenSimilarity(candidate.query, record.trackName) * 75,
+  );
+}
+
+export function rankLrclibMatches(
   records: LrclibRecord[],
-  { title, duration }: { title: string; duration?: number },
+  {
+    candidates,
+    duration,
+  }: {
+    candidates: LrclibSearchCandidate[];
+    duration?: number;
+  },
 ) {
-  const expectedTitle = normalize(title);
-  return records
+  const ranked = records
     .filter((record) => record.lyricsfile?.trim() || record.syncedLyrics?.trim())
     .map((record) => {
-      const recordTitle = normalize(record.trackName);
-      const recordSignature = normalize(`${record.artistName} ${record.trackName}`);
-      const titleScore =
-        recordTitle === expectedTitle || recordSignature === expectedTitle
-          ? 100
-          : recordTitle.includes(expectedTitle) ||
-              expectedTitle.includes(recordTitle) ||
-              recordSignature.includes(expectedTitle) ||
-              expectedTitle.includes(recordSignature)
-            ? 50
-            : 0;
-      const durationPenalty =
-        duration === undefined ? 0 : Math.min(40, Math.abs(record.duration - duration) * 2);
+      const identityScore = Math.max(
+        0,
+        ...candidates.map((candidate) => candidateIdentityScore(record, candidate)),
+      );
+      const durationScore =
+        duration === undefined
+          ? 0
+          : Math.max(0, 10 - Math.max(0, Math.abs(record.duration - duration) - 2) * 0.75);
+      const parsedLyricsfile = record.lyricsfile ? parseLyricsfile(record.lyricsfile) : null;
+      const wordTimed = parsedLyricsfile?.timing === "word";
       return {
         record,
-        score: titleScore - durationPenalty,
-        hasLyricsfile: !!record.lyricsfile?.trim(),
+        score: identityScore + durationScore + (wordTimed ? 5 : 0),
+        wordTimed,
       };
     })
     .sort(
-      (left, right) =>
-        right.score - left.score || Number(right.hasLyricsfile) - Number(left.hasLyricsfile),
-    )[0];
+      (left, right) => right.score - left.score || Number(right.wordTimed) - Number(left.wordTimed),
+    );
+  const best = ranked[0];
+  if (!best || best.score < MIN_MATCH_SCORE) return undefined;
+  const bestIdentity = normalize(`${best.record.artistName}\n${best.record.trackName}`);
+  const runnerUp = ranked.find(
+    ({ record }) => normalize(`${record.artistName}\n${record.trackName}`) !== bestIdentity,
+  );
+  if (runnerUp && best.score - runnerUp.score < MIN_MATCH_MARGIN) return undefined;
+  return best;
 }
 
 export function parseSyncedLyrics(
@@ -355,25 +513,53 @@ async function fetchLyrics(args: {
   jobId: string;
   title: string;
   duration?: number;
+  trackName?: string;
+  artistName?: string;
+  albumName?: string;
 }): Promise<NormalizedLyrics> {
-  const query = lrclibSearchTitle(args.title) || args.title;
-  const params = new URLSearchParams({ q: query });
-  const path = `/api/search?${params}`;
+  const candidates = lrclibSearchCandidates(args);
+  const recordsById = new Map<number, LrclibRecord>();
   log("search.started", {
     jobId: args.jobId,
     originalTitle: args.title,
-    query,
+    queryCount: candidates.length,
     duration: args.duration,
-    url: `${LRCLIB_ORIGIN}${path}`,
   });
-  const response = await request(path, args.jobId);
-  if (!response.ok) throw new Error(`LRCLIB search failed with HTTP ${response.status}`);
-  const value: unknown = await response.json();
-  if (!Array.isArray(value)) throw new Error("LRCLIB search returned an invalid response");
-  const records = value.filter(isRecord);
-  const match = bestMatch(records, { title: query, duration: args.duration });
+  let match: ReturnType<typeof rankLrclibMatches> = undefined;
+  let attemptCount = 0;
+  for (const [index, candidate] of candidates.entries()) {
+    attemptCount += 1;
+    if (index > 0) await wait(SEARCH_ATTEMPT_DELAY_MS);
+    const params = candidate.query
+      ? new URLSearchParams({ q: candidate.query })
+      : new URLSearchParams({
+          track_name: candidate.trackName!,
+          artist_name: candidate.artistName!,
+        });
+    const path = `/api/search?${params}`;
+    log("search.attempted", {
+      jobId: args.jobId,
+      attempt: index + 1,
+      query: candidate.query,
+      trackName: candidate.trackName,
+      artistName: candidate.artistName,
+      url: `${LRCLIB_ORIGIN}${path}`,
+    });
+    const response = await request(path, args.jobId);
+    if (!response.ok) throw new Error(`LRCLIB search failed with HTTP ${response.status}`);
+    const value: unknown = await response.json();
+    if (!Array.isArray(value)) throw new Error("LRCLIB search returned an invalid response");
+    value.filter(isRecord).forEach((record) => recordsById.set(record.id, record));
+    match = rankLrclibMatches([...recordsById.values()], {
+      candidates: candidates.slice(0, index + 1),
+      duration: args.duration,
+    });
+    if (match) break;
+  }
+  const records = [...recordsById.values()];
   log("search.completed", {
     jobId: args.jobId,
+    attemptCount,
     resultCount: records.length,
     syncedResultCount: records.filter((record) => record.syncedLyrics?.trim()).length,
     lyricsfileResultCount: records.filter((record) => record.lyricsfile?.trim()).length,
@@ -382,7 +568,7 @@ async function fetchLyrics(args: {
   if (!match) {
     log("search.not_found", {
       jobId: args.jobId,
-      query,
+      originalTitle: args.title,
       reason: "no_timed_results",
     });
     return { state: "not_found", timing: "line", observations: [] };
@@ -399,7 +585,7 @@ async function fetchLyrics(args: {
   if (!normalized) {
     log("search.not_found", {
       jobId: args.jobId,
-      query,
+      originalTitle: args.title,
       providerId: record.id,
       reason: "selected_timed_lyrics_could_not_be_parsed",
     });
@@ -436,6 +622,9 @@ export const lookup = internalAction({
     jobId: v.id("mediaJobs"),
     title: v.string(),
     duration: v.optional(v.number()),
+    trackName: v.optional(v.string()),
+    artistName: v.optional(v.string()),
+    albumName: v.optional(v.string()),
   },
   returns: v.object({
     state: v.union(v.literal("ready"), v.literal("not_found")),
