@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as RoomTabs from "$lib/components/room/tabs";
 	import { Button } from "$lib/components/ui/button";
 	import { Input } from "$lib/components/ui/input";
 	import { GripVertical, Plus, Trash2 } from "@lucide/svelte";
@@ -67,56 +68,58 @@
 
 <div class="flex h-full min-h-0 flex-col" data-slot="playback-queue">
 	{#if canAdd || error}
-		<div class="border-b p-3">
+		<RoomTabs.Header class="border-b p-3">
 			{#if canAdd}
-			<form class="flex gap-2" onsubmit={addSong}>
-				<Input type="url" placeholder="Paste video URL" aria-label="Video URL" bind:value={sourceUrl} disabled={submitting} />
-				<Button size="icon" type="submit" disabled={submitting || !sourceUrl.trim()} aria-label="Add song"><Plus /></Button>
-			</form>
+				<form class="flex gap-2" onsubmit={addSong}>
+					<Input type="url" placeholder="Paste video URL" aria-label="Video URL" bind:value={sourceUrl} disabled={submitting} />
+					<Button size="icon" type="submit" disabled={submitting || !sourceUrl.trim()} aria-label="Add song"><Plus /></Button>
+				</form>
 			{/if}
 			{#if error}<p class="mt-2 text-xs text-destructive" role="alert">{error}</p>{/if}
-		</div>
+		</RoomTabs.Header>
 	{/if}
 
-	<ul class="min-h-24 flex-1 space-y-2 overflow-y-auto p-3">
-		{#each playback?.queue ?? [] as item (item._id)}
-			{@const media = mediaById.get(item.roomMedia)}
-			<li
-				draggable={playback?.permissions.reorderQueue ?? false}
-				ondragstart={() => (draggedItem = item._id)}
-				ondragend={() => (draggedItem = null)}
-				ondragover={(event) => { if (draggedItem) event.preventDefault(); }}
-				ondrop={(event) => { event.preventDefault(); void dropBefore(item._id); }}
-				class="group flex items-center gap-2 rounded-lg border bg-background p-2"
-				class:opacity-50={draggedItem === item._id}
-			>
-				{#if playback?.permissions.reorderQueue}
-					<GripVertical class="size-4 shrink-0 cursor-grab text-muted-foreground" aria-hidden="true" />
-				{/if}
-				<div class="min-w-0 flex-1">
-					<p class="text-sm font-medium">{media?.title ?? "Resolving media…"}</p>
-					<p class="text-xs text-muted-foreground">
-						{item.availability === "ready" ? "Ready" : item.availability === "processing" ? "Processing…" : "Unavailable"}
-						{#if formatDuration(media?.duration)} · {formatDuration(media?.duration)}{/if}
-					</p>
-				</div>
-				{#if item.availability === "processing" && media}
-					<MediaProgressPopover title={media.title ?? "Resolving media…"} steps={media.steps} />
-				{/if}
-				{#if playback?.permissions.removeFromQueue}
-					<Button variant="ghost" size="icon-sm" aria-label={`Remove ${media?.title ?? "song"} from queue`} onclick={() => void remove({ roomId, queueItemId: item._id })}>
-						<Trash2 />
-					</Button>
-				{/if}
-			</li>
-		{/each}
-		{#if (playback?.queue.length ?? 0) === 0}
-			<li class="p-5 text-center text-sm text-muted-foreground">Nothing queued yet.</li>
-		{/if}
-		{#if draggedItem}
-			<li class="rounded-lg border border-dashed p-3 text-center text-xs text-muted-foreground" ondragover={(event) => event.preventDefault()} ondrop={(event) => { event.preventDefault(); void dropBefore(null); }}>
-				Drop at end
-			</li>
-		{/if}
-	</ul>
+	<RoomTabs.ScrollArea>
+		<ul class="min-h-24 space-y-2 p-3">
+			{#each playback?.queue ?? [] as item (item._id)}
+				{@const media = mediaById.get(item.roomMedia)}
+				<li
+					draggable={playback?.permissions.reorderQueue ?? false}
+					ondragstart={() => (draggedItem = item._id)}
+					ondragend={() => (draggedItem = null)}
+					ondragover={(event) => { if (draggedItem) event.preventDefault(); }}
+					ondrop={(event) => { event.preventDefault(); void dropBefore(item._id); }}
+					class="group flex items-center gap-2 rounded-lg border bg-background p-2"
+					class:opacity-50={draggedItem === item._id}
+				>
+					{#if playback?.permissions.reorderQueue}
+						<GripVertical class="size-4 shrink-0 cursor-grab text-muted-foreground" aria-hidden="true" />
+					{/if}
+					<div class="min-w-0 flex-1">
+						<p class="text-sm font-medium">{media?.title ?? "Resolving media…"}</p>
+						<p class="text-xs text-muted-foreground">
+							{item.availability === "ready" ? "Ready" : item.availability === "processing" ? "Processing…" : "Unavailable"}
+							{#if formatDuration(media?.duration)} · {formatDuration(media?.duration)}{/if}
+						</p>
+					</div>
+					{#if item.availability === "processing" && media}
+						<MediaProgressPopover title={media.title ?? "Resolving media…"} steps={media.steps} />
+					{/if}
+					{#if playback?.permissions.removeFromQueue}
+						<Button variant="ghost" size="icon-sm" aria-label={`Remove ${media?.title ?? "song"} from queue`} onclick={() => void remove({ roomId, queueItemId: item._id })}>
+							<Trash2 />
+						</Button>
+					{/if}
+				</li>
+			{/each}
+			{#if (playback?.queue.length ?? 0) === 0}
+				<li class="p-5 text-center text-sm text-muted-foreground">Nothing queued yet.</li>
+			{/if}
+			{#if draggedItem}
+				<li class="rounded-lg border border-dashed p-3 text-center text-xs text-muted-foreground" ondragover={(event) => event.preventDefault()} ondrop={(event) => { event.preventDefault(); void dropBefore(null); }}>
+					Drop at end
+				</li>
+			{/if}
+		</ul>
+	</RoomTabs.ScrollArea>
 </div>

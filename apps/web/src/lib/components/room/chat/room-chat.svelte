@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as RoomTabs from "$lib/components/room/tabs";
 	import { Button } from "$lib/components/ui/button";
 	import { Input } from "$lib/components/ui/input";
 	import { getMemberColors } from "$lib/member-colors";
@@ -30,16 +31,20 @@
 
 	let messageBody = $state("");
 	let chatError = $state<string | null>(null);
-	let messageList: HTMLUListElement;
+	let messageList = $state<HTMLDivElement | null>(null);
 	let isAtBottom = $state(true);
 
 	function updateScrollPosition() {
+		if (!messageList) return;
 		isAtBottom =
-			messageList.scrollHeight - messageList.scrollTop - messageList.clientHeight <=
+			messageList.scrollHeight -
+				messageList.scrollTop -
+				messageList.clientHeight <=
 			bottomThreshold;
 	}
 
 	function scrollToBottom(behavior: ScrollBehavior = "smooth") {
+		if (!messageList) return;
 		messageList.scrollTo({ top: messageList.scrollHeight, behavior });
 	}
 
@@ -68,39 +73,44 @@
 
 <section class="flex h-full min-h-0 flex-col" data-slot="room-chat">
 	<div class="relative min-h-0 flex-1">
-		<ul
-			bind:this={messageList}
+		<RoomTabs.ScrollArea
+			bind:ref={messageList}
 			onscroll={updateScrollPosition}
-			class="h-full min-h-40 space-y-3 overflow-y-auto p-4"
+			class="h-full"
 		>
-			{#each messages as message (message._id)}
-				{@const memberColors = getMemberColors(message.user._id)}
-				<li class="flex gap-3">
-					<div class="min-w-0 flex-1 rounded-lg bg-muted px-3 py-2">
-						<div class="flex items-baseline justify-between gap-3">
-							<p
-								class="truncate text-xs font-semibold"
-								style:color={memberColors.accent}
-							>
-								{message.user.name ?? "Guest"}
-							</p>
-							<time class="shrink-0 text-[0.7rem] text-muted-foreground">
-								{new Date(message._creationTime).toLocaleTimeString([], {
-									hour: "numeric",
-									minute: "2-digit",
-								})}
-							</time>
+			<ul class="space-y-3 p-4 pb-0">
+				{#each messages as message (message._id)}
+					{@const memberColors = getMemberColors(message.user._id)}
+					<li class="flex gap-3">
+						<div class="min-w-0 flex-1 rounded-lg bg-muted px-3 py-2">
+							<div class="flex items-baseline justify-between gap-3">
+								<p
+									class="truncate text-xs font-semibold"
+									style:color={memberColors.accent}
+								>
+									{message.user.name ?? "Guest"}
+								</p>
+								<time class="shrink-0 text-[0.7rem] text-muted-foreground">
+									{new Date(message._creationTime).toLocaleTimeString([], {
+										hour: "numeric",
+										minute: "2-digit",
+									})}
+								</time>
+							</div>
+							<p class="mt-0.5 wrap-break-word text-sm">{message.body}</p>
 						</div>
-						<p class="mt-0.5 break-words text-sm">{message.body}</p>
-					</div>
+					</li>
+				{/each}
+				{#if messages.length === 0}
+					<li class="py-8 text-center text-sm text-muted-foreground">
+						No messages yet.
+					</li>
+				{/if}
+				<li class="-mt-3 flex items-center">
+					<RoomMembersPopover {members} />
 				</li>
-			{/each}
-			{#if messages.length === 0}
-				<li class="py-8 text-center text-sm text-muted-foreground">
-					No messages yet.
-				</li>
-			{/if}
-		</ul>
+			</ul>
+		</RoomTabs.ScrollArea>
 
 		{#if !isAtBottom}
 			<Button
@@ -115,24 +125,24 @@
 		{/if}
 	</div>
 
-	<div class="flex shrink-0 items-center px-3">
-		<RoomMembersPopover {members} />
-	</div>
-
-	{#if canSend}
-		<form class="flex gap-2 border-t p-3" onsubmit={submitMessage}>
-			<Input
-				maxlength={500}
-				bind:value={messageBody}
-				placeholder="Say something…"
-				aria-label="Chat message"
-			/>
-			<Button type="submit" disabled={!messageBody.trim()}>Send</Button>
-		</form>
-	{/if}
-	{#if chatError}
-		<p class="px-4 pb-3 text-xs text-destructive" role="alert">
-			{chatError}
-		</p>
+	{#if canSend || chatError}
+		<RoomTabs.Footer>
+			{#if canSend}
+				<form class="flex gap-2 border-t p-3" onsubmit={submitMessage}>
+					<Input
+						maxlength={500}
+						bind:value={messageBody}
+						placeholder="Say something…"
+						aria-label="Chat message"
+					/>
+					<Button type="submit" disabled={!messageBody.trim()}>Send</Button>
+				</form>
+			{/if}
+			{#if chatError}
+				<p class="px-4 pb-3 text-xs text-destructive" role="alert">
+					{chatError}
+				</p>
+			{/if}
+		</RoomTabs.Footer>
 	{/if}
 </section>

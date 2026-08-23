@@ -5,9 +5,9 @@
 		type ChatMessage,
 	} from "$lib/components/room";
 	import * as Playback from "$lib/components/room/playback";
-	import { createUuidInAnyContext } from "$lib/context-uuid";
+	import * as RoomTabs from "$lib/components/room/tabs";
 	import { Button } from "$lib/components/ui/button";
-	import * as Tabs from "$lib/components/ui/tabs";
+	import { createUuidInAnyContext } from "$lib/context-uuid";
 	import { getMemberColor } from "$lib/member-colors";
 	import { Presence } from "$lib/presence.svelte";
 	import ArrowLeftIcon from "@lucide/svelte/icons/arrow-left";
@@ -99,7 +99,7 @@
 	}
 </script>
 
-<div class="mx-auto w-full max-w-[96rem] space-y-5 p-4 sm:p-6">
+<div class="mx-auto w-full max-w-384 space-y-5 p-4 sm:p-6">
 	<header class="flex flex-wrap items-center justify-between gap-3">
 		<div class="flex items-center gap-3">
 			<Button href="/app" variant="outline" size="sm"
@@ -117,24 +117,19 @@
 
 	<Playback.Root {roomId} {overlayMessages}>
 		<Playback.Stage />
-		<Tabs.Root
-			bind:value={panelTab}
-			class="min-h-0 gap-0 overflow-hidden rounded-xl border bg-card shadow-sm"
-		>
-			<div class="border-b p-3">
-				<Tabs.List class="grid w-full grid-cols-2">
-					<Tabs.Trigger value="queue">
-						Queue
-						<Playback.QueueCount />
-					</Tabs.Trigger>
-					<Tabs.Trigger value="chat">Chat</Tabs.Trigger>
-				</Tabs.List>
-			</div>
+		<RoomTabs.Root bind:value={panelTab}>
+			<RoomTabs.List>
+				<RoomTabs.Trigger value="queue">
+					Queue
+					<Playback.QueueCount />
+				</RoomTabs.Trigger>
+				<RoomTabs.Trigger value="chat">Chat</RoomTabs.Trigger>
+			</RoomTabs.List>
 
-			<Tabs.Content value="queue" class="m-0 min-h-0 overflow-hidden">
+			<RoomTabs.Content value="queue">
 				<Playback.Queue />
-			</Tabs.Content>
-			<Tabs.Content value="chat" class="m-0 min-h-0 overflow-hidden">
+			</RoomTabs.Content>
+			<RoomTabs.Content value="chat">
 				<RoomChat
 					messages={messages.data ?? []}
 					canSend={playback.data?.permissions.sendChat ?? false}
@@ -142,8 +137,8 @@
 					active={panelTab === "chat"}
 					{onMessage}
 				/>
-			</Tabs.Content>
-		</Tabs.Root>
+			</RoomTabs.Content>
+		</RoomTabs.Root>
 	</Playback.Root>
 
 	<div class="grid gap-5 md:grid-cols-2">
