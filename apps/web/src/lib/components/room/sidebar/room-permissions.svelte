@@ -1,4 +1,6 @@
 <script lang="ts">
+	import * as Card from "$lib/components/ui/card";
+
 	type MemberPermissions = {
 		controlPlayback: boolean;
 		addToQueue: boolean;
@@ -27,23 +29,29 @@
 	];
 </script>
 
-<section class="rounded-xl border bg-card p-4 shadow-sm">
-	<h2 class="font-semibold">Visitor permissions</h2>
-	<p class="mt-1 text-xs text-muted-foreground">
-		Choose what visitors can do in this room.
-	</p>
-	<div class="mt-3 space-y-3">
-		{#each permissionOptions as permission (permission.key)}
-			<label class="flex cursor-pointer items-center justify-between gap-3 text-sm">
-				<span>{permission.label}</span>
-				<input
-					type="checkbox"
-					class="size-4 accent-primary"
-					checked={permissions[permission.key]}
-					onchange={(event) =>
-						onChange(permission.key, event.currentTarget.checked)}
-				/>
-			</label>
-		{/each}
-	</div>
+<section>
+	<Card.Root size="sm">
+		<Card.Header>
+			<Card.Title><h2>Visitor permissions</h2></Card.Title>
+			<Card.Description
+				>Choose what visitors can do in this room.</Card.Description
+			>
+		</Card.Header>
+		<Card.Content class="space-y-3">
+			{#each permissionOptions as permission (permission.key)}
+				<label
+					class="flex cursor-pointer items-center justify-between gap-3 text-sm"
+				>
+					<span>{permission.label}</span>
+					<input
+						type="checkbox"
+						class="size-4 accent-primary"
+						checked={permissions[permission.key]}
+						onchange={(event) =>
+							onChange(permission.key, event.currentTarget.checked)}
+					/>
+				</label>
+			{/each}
+		</Card.Content>
+	</Card.Root>
 </section>
