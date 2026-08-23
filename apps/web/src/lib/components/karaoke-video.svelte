@@ -205,7 +205,7 @@
 
 	$effect(() => {
 		if (!timing) return;
-		timing.revision;
+		timing.changeRevision;
 		updateTime();
 		if (timing.query()?.velocity === 1) startTracking();
 		else stopTracking();

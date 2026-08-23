@@ -12,6 +12,12 @@ type ClockSample = {
   providerTimeOrigin: number;
 };
 
+type OptimisticTimingState = {
+  expectedProviderRevision: number;
+  requestSequence: number;
+  vector: TimingStateVector;
+};
+
 /** Configuration for a provider-backed W3C-style Timing Object. */
 export type OnlineTimingObjectOptions = {
   /** Reads the most recent vector multicast by the online provider. */
@@ -34,9 +40,9 @@ export type TimingObjectReadyState = "connecting" | "open" | "closed";
  * A local W3C-style Timing Object backed by Partyroom's online timing resource.
  *
  * Provider vectors are translated into the `performance.now()` clock domain and
- * queried locally. Update requests are only forwarded: this object deliberately
- * keeps its old vector until Convex multicasts the provider's resulting state to
- * every subscriber, including the client that initiated the request.
+ * queried locally. Update requests immediately install a provisional local
+ * vector, then reconcile it with the revision Convex multicasts to every client.
+ * Provider timestamps remain authoritative once that revision arrives.
  *
  * @see https://www.w3.org/community/reports/webtiming/CG-FINAL-timingobject-20241203/#connecting-the-timing-object
  * @see https://www.w3.org/community/reports/webtiming/CG-FINAL-timingobject-20241203/#state-vector-synchronization
@@ -58,10 +64,14 @@ export class OnlineTimingObject extends EventTarget implements ITimingObject {
   #readyState = $state<TimingObjectReadyState>("connecting");
   #providerTimeOrigin = $state<number>();
   #uncertainty = $state(Number.POSITIVE_INFINITY);
+  #changeRevision = $state(0);
   #samples: ClockSample[] = [];
   #changeTimer: number | undefined;
   #notifiedRevision: number | undefined;
   #notifiedProviderTimeOrigin: number | undefined;
+  #optimisticState = $state<OptimisticTimingState>();
+  #providerUpdateQueue: Promise<void> = Promise.resolve();
+  #requestSequence = 0;
 
   /**
    * Creates a local proxy without starting provider clock synchronization.
@@ -79,10 +89,14 @@ export class OnlineTimingObject extends EventTarget implements ITimingObject {
     this.#options = options;
     $effect(() => {
       const state = options.getProviderState();
+      const optimisticState = this.#optimisticState;
       const readyState = state && this.#providerTimeOrigin !== undefined ? "open" : "connecting";
       if (readyState !== this.#readyState) {
         this.#readyState = readyState;
         this.#emit("readystatechange");
+      }
+      if (state && optimisticState && state.revision >= optimisticState.expectedProviderRevision) {
+        this.#optimisticState = undefined;
       }
       if (
         state &&
@@ -99,6 +113,7 @@ export class OnlineTimingObject extends EventTarget implements ITimingObject {
   }
 
   #emit(type: "change" | "readystatechange") {
+    if (type === "change") this.#changeRevision += 1;
     const event = new Event(type);
     this.dispatchEvent(event);
     const handler = type === "change" ? this.onchange : this.onreadystatechange;
@@ -134,20 +149,32 @@ export class OnlineTimingObject extends EventTarget implements ITimingObject {
     return this.#options.getProviderState()?.revision;
   }
 
+  /** Monotonically increasing revision of the effective local vector. */
+  get changeRevision() {
+    return this.#changeRevision;
+  }
+
   /**
    * Velocity requested by the latest provider vector, including a future-dated
    * vector that has not activated yet. Controls use this authoritative intent
    * so a scheduled or active play operation can always be paused.
    */
   get targetVelocity() {
-    return this.#options.getProviderState()?.vector.velocity;
+    return (
+      this.#optimisticState?.vector.velocity ?? this.#options.getProviderState()?.vector.velocity
+    );
   }
 
   /**
    * Queries the timing resource at a local monotonic timestamp. The returned
-   * vector is wholly derived from the latest provider notification.
+   * vector comes from the latest provisional update until the provider
+   * acknowledges it, then from the provider's authoritative notification.
    */
   query(localTimestamp = performance.now() / 1_000): TimingStateVector {
+    const optimisticState = this.#optimisticState;
+    if (optimisticState) {
+      return queryTimingStateVector(optimisticState.vector, localTimestamp);
+    }
     const state = this.#options.getProviderState();
     const origin = this.#providerTimeOrigin;
     if (!state || origin === undefined) {
@@ -164,6 +191,12 @@ export class OnlineTimingObject extends EventTarget implements ITimingObject {
    * @see https://www.w3.org/community/reports/webtiming/CG-FINAL-timingobject-20241203/#process-a-timing-provider-statevector-change-notification
    */
   nextChangeTimestamp(localTimestamp = performance.now() / 1_000): number | undefined {
+    const optimisticState = this.#optimisticState;
+    if (optimisticState) {
+      return optimisticState.vector.timestamp > localTimestamp
+        ? optimisticState.vector.timestamp
+        : undefined;
+    }
     const state = this.#options.getProviderState();
     const origin = this.#providerTimeOrigin;
     if (!state || origin === undefined) return undefined;
@@ -172,21 +205,70 @@ export class OnlineTimingObject extends EventTarget implements ITimingObject {
   }
 
   /**
-   * Forwards a partial state-vector update to the provider without changing the
-   * local vector. Callers observe the result only after the provider notification.
+   * Applies a partial state-vector update optimistically, then forwards it to the
+   * provider. The provisional vector is replaced by the provider revision or
+   * rolled back if the update fails.
    */
   async update(update: TimingStateVectorUpdate | TTimingStateVectorUpdate) {
     if (this.#readyState !== "open") throw new Error("Timing resource is not connected");
-    await this.#options.updateProvider(
-      {
-        position: update.position ?? undefined,
-        velocity: update.velocity ?? undefined,
-        acceleration: update.acceleration ?? undefined,
+    const providerState = this.#options.getProviderState();
+    if (!providerState) throw new Error("Timing resource has no provider state");
+    const localTimestamp = performance.now() / 1_000;
+    const current = this.query(localTimestamp);
+    const velocity = update.velocity ?? this.targetVelocity ?? current.velocity;
+    const playStartDelaySeconds = this.#options.playStartDelaySeconds ?? 1;
+    const requestSequence = ++this.#requestSequence;
+    const previousExpectedRevision = this.#optimisticState?.expectedProviderRevision;
+    const expectedProviderRevision =
+      previousExpectedRevision === undefined
+        ? providerState.revision + 1
+        : Math.max(providerState.revision, previousExpectedRevision) + 1;
+    this.#optimisticState = {
+      expectedProviderRevision,
+      requestSequence,
+      vector: {
+        position: update.position ?? current.position,
+        velocity,
+        acceleration: update.acceleration ?? current.acceleration,
+        timestamp: localTimestamp + (velocity === 0 ? 0 : playStartDelaySeconds),
       },
-      {
-        playStartDelaySeconds: this.#options.playStartDelaySeconds ?? 1,
-      },
+    };
+    this.#emit("change");
+    this.#scheduleFutureChange();
+
+    const providerUpdate = this.#providerUpdateQueue.then(() =>
+      this.#options.updateProvider(
+        {
+          position: update.position ?? undefined,
+          velocity: update.velocity ?? undefined,
+          acceleration: update.acceleration ?? undefined,
+        },
+        { playStartDelaySeconds },
+      ),
     );
+    this.#providerUpdateQueue = providerUpdate.then(
+      () => undefined,
+      () => undefined,
+    );
+    try {
+      await providerUpdate;
+    } catch (cause) {
+      const optimisticState = this.#optimisticState;
+      if (optimisticState?.requestSequence === requestSequence) {
+        this.#optimisticState = undefined;
+      } else if (
+        optimisticState &&
+        optimisticState.expectedProviderRevision >= expectedProviderRevision
+      ) {
+        this.#optimisticState = {
+          ...optimisticState,
+          expectedProviderRevision: optimisticState.expectedProviderRevision - 1,
+        };
+      }
+      this.#emit("change");
+      this.#scheduleFutureChange();
+      throw cause;
+    }
   }
 
   async #sampleClock() {
@@ -237,6 +319,7 @@ export class OnlineTimingObject extends EventTarget implements ITimingObject {
       if (this.#changeTimer !== undefined) window.clearTimeout(this.#changeTimer);
       this.#changeTimer = undefined;
       document.removeEventListener("visibilitychange", handleVisibilityChange);
+      this.#optimisticState = undefined;
       this.#readyState = "closed";
       this.#emit("readystatechange");
     };
