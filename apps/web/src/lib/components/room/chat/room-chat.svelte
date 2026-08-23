@@ -5,15 +5,23 @@
 	import ChevronDownIcon from "@lucide/svelte/icons/chevron-down";
 	import { tick } from "svelte";
 	import type { ChatMessage } from "../types";
+	import RoomMembersPopover from "./room-members-popover.svelte";
 
 	let {
 		messages,
 		canSend,
+		members,
 		onMessage,
 		active = true,
 	}: {
 		messages: ChatMessage[];
 		canSend: boolean;
+		members: Array<{
+			userId: string;
+			name?: string | null;
+			username?: string | null;
+			image?: string | null;
+		}>;
 		onMessage: (body: string) => void;
 		active?: boolean;
 	} = $props();
@@ -105,6 +113,10 @@
 				Scroll to bottom
 			</Button>
 		{/if}
+	</div>
+
+	<div class="flex shrink-0 items-center px-3">
+		<RoomMembersPopover {members} />
 	</div>
 
 	{#if canSend}

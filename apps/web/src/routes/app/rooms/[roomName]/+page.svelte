@@ -1,7 +1,6 @@
 <script lang="ts">
 	import {
 		RoomChat,
-		RoomMembers,
 		RoomPermissions,
 		type ChatMessage,
 	} from "$lib/components/room";
@@ -139,6 +138,7 @@
 				<RoomChat
 					messages={messages.data ?? []}
 					canSend={playback.data?.permissions.sendChat ?? false}
+					members={onlineUsers}
 					active={panelTab === "chat"}
 					{onMessage}
 				/>
@@ -147,8 +147,6 @@
 	</Playback.Root>
 
 	<div class="grid gap-5 md:grid-cols-2">
-		<RoomMembers members={onlineUsers} />
-
 		{#if playback.data?.permissions.updateRoom && room.data}
 			<RoomPermissions
 				permissions={room.data.memberPermissions}
