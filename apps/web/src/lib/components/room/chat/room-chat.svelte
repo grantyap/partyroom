@@ -3,20 +3,19 @@
 	import { Input } from "$lib/components/ui/input";
 	import { getMemberColors } from "$lib/member-colors";
 	import ChevronDownIcon from "@lucide/svelte/icons/chevron-down";
-	import { api } from "@partyroom/backend/convex/_generated/api";
-	import type { FunctionReturnType } from "convex/server";
 	import { tick } from "svelte";
-
-	type ChatMessage = FunctionReturnType<(typeof api.chat)["getMessages"]>[number];
+	import type { ChatMessage } from "../types";
 
 	let {
 		messages,
 		canSend,
 		onMessage,
+		active = true,
 	}: {
 		messages: ChatMessage[];
 		canSend: boolean;
 		onMessage: (body: string) => void;
+		active?: boolean;
 	} = $props();
 
 	const bottomThreshold = 8;
@@ -38,7 +37,7 @@
 
 	$effect(() => {
 		const latestMessageId = messages.at(-1)?._id;
-		if (!latestMessageId || !isAtBottom) return;
+		if (!active || !latestMessageId || !isAtBottom) return;
 
 		void tick().then(() => scrollToBottom("instant"));
 	});
@@ -59,13 +58,12 @@
 	}
 </script>
 
-<section class="flex flex-col rounded-xl border bg-card shadow-sm">
-	<div class="border-b p-4"><h2 class="font-semibold">Chat</h2></div>
-	<div class="relative flex-1">
+<section class="flex h-full min-h-0 flex-col" data-slot="room-chat">
+	<div class="relative min-h-0 flex-1">
 		<ul
 			bind:this={messageList}
 			onscroll={updateScrollPosition}
-			class="max-h-72 min-h-40 space-y-3 overflow-y-auto p-4"
+			class="h-full min-h-40 space-y-3 overflow-y-auto p-4"
 		>
 			{#each messages as message (message._id)}
 				{@const memberColors = getMemberColors(message.user._id)}

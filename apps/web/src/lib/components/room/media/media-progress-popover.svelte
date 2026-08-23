@@ -4,16 +4,13 @@
 	import { Progress } from "$lib/components/ui/progress";
 	import { Check, Circle, LoaderCircle, Timer, X } from "@lucide/svelte";
 	import { onMount } from "svelte";
-
-	type MediaStep = {
-		kind: string;
-		label?: string;
-		state: string;
-		progress: number;
-		message?: string;
-		startedAt?: number;
-		completedAt?: number;
-	};
+	import {
+		formatElapsed,
+		stageLabel,
+		statusLabel,
+		stepTimingLabel,
+	} from "../media-format";
+	import type { MediaStep } from "../types";
 
 	let {
 		title,
@@ -45,53 +42,6 @@
 		}, 1_000);
 		return () => window.clearInterval(timer);
 	});
-
-	function stageLabel(stage: string) {
-		const labels: Record<string, string> = {
-			resolve: "Resolve source",
-			fetchLyrics: "Fetch synced lyrics",
-			download: "Download source",
-			extractAudio: "Extract audio",
-			separate: "Separate stems",
-			transcribe: "Transcribe lyrics",
-			alignLyrics: "Align LRCLIB lyrics",
-			analyzeMelody: "Analyze melody",
-			mux: "Build final video",
-			assembleAnnotations: "Assemble annotations",
-		};
-		return (
-			labels[stage] ??
-			stage
-				.replace(/([A-Z])/g, " $1")
-				.replace(/^./, (letter) => letter.toUpperCase())
-		);
-	}
-
-	function statusLabel(status: string) {
-		if (status === "running") return "Working";
-		if (status === "queued") return "Queued";
-		if (status === "completed") return "Done";
-		if (status === "failed") return "Unavailable";
-		if (status === "canceled") return "Canceled";
-		if (status === "skipped") return "Not needed";
-		return "Waiting";
-	}
-
-	function formatElapsed(milliseconds: number) {
-		const totalSeconds = Math.max(0, Math.floor(milliseconds / 1_000));
-		const minutes = Math.floor(totalSeconds / 60);
-		const seconds = totalSeconds % 60;
-		return `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
-	}
-
-	function stepTimingLabel(step: MediaStep) {
-		if (step.startedAt === undefined) return null;
-		const elapsed = formatElapsed((step.completedAt ?? currentTime) - step.startedAt);
-		if (step.state === "completed") return `Completed in ${elapsed}`;
-		if (step.state === "failed") return `Stopped after ${elapsed}`;
-		if (step.state === "running") return elapsed;
-		return null;
-	}
 
 	function totalElapsed() {
 		const startedSteps = steps.filter(
@@ -137,7 +87,7 @@
 
 		<ul class="max-h-72 space-y-2 overflow-y-auto pr-1">
 			{#each steps as step (step.kind)}
-				{@const timing = stepTimingLabel(step)}
+				{@const timing = stepTimingLabel(step, currentTime)}
 				<li class="rounded-lg border bg-muted/20 p-2.5">
 					<div class="flex items-center gap-2 text-xs">
 						{#if step.state === "running"}

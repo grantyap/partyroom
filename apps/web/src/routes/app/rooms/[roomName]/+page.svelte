@@ -1,23 +1,21 @@
 <script lang="ts">
-	import RoomPlayer from "$lib/components/room-player.svelte";
-	import RoomChat from "$lib/components/room-chat.svelte";
-	import { createUuidInAnyContext } from "$lib/context-uuid";
 	import {
-		Avatar,
-		AvatarFallback,
-		AvatarImage,
-	} from "$lib/components/ui/avatar";
+		RoomChat,
+		RoomMembers,
+		RoomPermissions,
+		type ChatMessage,
+	} from "$lib/components/room";
+	import * as Playback from "$lib/components/room/playback";
+	import { createUuidInAnyContext } from "$lib/context-uuid";
 	import { Button } from "$lib/components/ui/button";
-	import { getMemberColor, getMemberColors } from "$lib/member-colors";
+	import * as Tabs from "$lib/components/ui/tabs";
+	import { getMemberColor } from "$lib/member-colors";
 	import { Presence } from "$lib/presence.svelte";
 	import ArrowLeftIcon from "@lucide/svelte/icons/arrow-left";
 	import { api } from "@partyroom/backend/convex/_generated/api";
 	import type { Id } from "@partyroom/backend/convex/_generated/dataModel";
 	import { useMutation, useQuery } from "convex-svelte";
-	import type { FunctionReturnType } from "convex/server";
 	import type { PageProps } from "./$types";
-
-	type ChatMessage = FunctionReturnType<(typeof api.chat)["getMessages"]>[number];
 
 	const { params, data }: PageProps = $props();
 
@@ -34,6 +32,7 @@
 	const updateMemberPermissions = useMutation(
 		api.rooms.updateMemberPermissions,
 	);
+	let panelTab = $state("queue");
 
 	const presence = new Presence({
 		get roomId() {
@@ -117,74 +116,45 @@
 		</div>
 	</header>
 
-	<RoomPlayer {roomId} {overlayMessages} />
+	<Playback.Root {roomId} {overlayMessages}>
+		<Playback.Stage />
+		<Tabs.Root
+			bind:value={panelTab}
+			class="min-h-0 gap-0 overflow-hidden rounded-xl border bg-card shadow-sm"
+		>
+			<div class="border-b p-3">
+				<Tabs.List class="grid w-full grid-cols-2">
+					<Tabs.Trigger value="queue">
+						Queue
+						<Playback.QueueCount />
+					</Tabs.Trigger>
+					<Tabs.Trigger value="chat">Chat</Tabs.Trigger>
+				</Tabs.List>
+			</div>
 
-	<div class="grid gap-5 lg:grid-cols-[minmax(0,1fr)_22rem]">
-		<RoomChat
-			messages={messages.data ?? []}
-			canSend={playback.data?.permissions.sendChat ?? false}
-			{onMessage}
-		/>
+			<Tabs.Content value="queue" class="m-0 min-h-0 overflow-hidden">
+				<Playback.Queue />
+			</Tabs.Content>
+			<Tabs.Content value="chat" class="m-0 min-h-0 overflow-hidden">
+				<RoomChat
+					messages={messages.data ?? []}
+					canSend={playback.data?.permissions.sendChat ?? false}
+					active={panelTab === "chat"}
+					{onMessage}
+				/>
+			</Tabs.Content>
+		</Tabs.Root>
+	</Playback.Root>
 
-		<aside class="space-y-5">
-			<section class="rounded-xl border bg-card p-4 shadow-sm">
-				<h2 class="font-semibold">In the room</h2>
-				<ul class="mt-3 space-y-3">
-					{#each onlineUsers as user (user.userId)}
-						{@const memberColors = getMemberColors(user.userId)}
-						<li class="flex items-center gap-2">
-							<Avatar
-								class="size-8 border-2"
-								style={`border-color: ${memberColors.accent}`}
-							>
-								{#if user.image}<AvatarImage src={user.image} alt="" />{/if}
-								<AvatarFallback
-									style={`background-color: ${memberColors.fill}; color: ${memberColors.foreground}`}
-									class="font-semibold"
-								>
-									{(user.name ?? "?").slice(0, 1).toUpperCase()}
-								</AvatarFallback>
-							</Avatar>
-							<span
-								class="truncate text-sm font-medium"
-								style:color={memberColors.accent}
-							>
-								{user.name ?? user.username ?? "Guest"}
-							</span>
-						</li>
-					{/each}
-				</ul>
-			</section>
+	<div class="grid gap-5 md:grid-cols-2">
+		<RoomMembers members={onlineUsers} />
 
-			{#if playback.data?.permissions.updateRoom && room.data}
-				<section class="rounded-xl border bg-card p-4 shadow-sm">
-					<h2 class="font-semibold">Visitor permissions</h2>
-					<p class="mt-1 text-xs text-muted-foreground">
-						Choose what visitors can do in this room.
-					</p>
-					<div class="mt-3 space-y-3">
-						{#each [{ key: "controlPlayback", label: "Control playback" }, { key: "addToQueue", label: "Add songs" }, { key: "reorderQueue", label: "Reorder queue" }, { key: "removeFromQueue", label: "Remove queued songs" }, { key: "sendChat", label: "Send chat messages" }] as permission (permission.key)}
-							<label
-								class="flex cursor-pointer items-center justify-between gap-3 text-sm"
-							>
-								<span>{permission.label}</span>
-								<input
-									type="checkbox"
-									class="size-4 accent-primary"
-									checked={room.data.memberPermissions[
-										permission.key as keyof typeof room.data.memberPermissions
-									]}
-									onchange={(event) =>
-										void setMemberPermission(
-											permission.key as keyof typeof room.data.memberPermissions,
-											event.currentTarget.checked,
-										)}
-								/>
-							</label>
-						{/each}
-					</div>
-				</section>
-			{/if}
-		</aside>
+		{#if playback.data?.permissions.updateRoom && room.data}
+			<RoomPermissions
+				permissions={room.data.memberPermissions}
+				onChange={(permission, enabled) =>
+					void setMemberPermission(permission, enabled)}
+			/>
+		{/if}
 	</div>
 </div>

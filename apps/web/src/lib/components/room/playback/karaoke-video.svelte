@@ -1,10 +1,8 @@
 <script lang="ts">
 	import { PUBLIC_CONVEX_URL } from "$env/static/public";
 	import { Button } from "$lib/components/ui/button";
-	import KaraokeVideoControls from "$lib/components/karaoke-video-controls.svelte";
 	import {
 		findKaraokeCue,
-		karaokeWordProgress,
 		lyricsIntoCues,
 		parseLyricObservations,
 		type KaraokeCue,
@@ -22,6 +20,10 @@
 	import type { MediaPlayerElement } from "vidstack/elements";
 	import "vidstack/player";
 	import "vidstack/player/ui";
+	import ChatOverlay from "../chat/chat-overlay.svelte";
+	import KaraokeLyricsOverlay from "./karaoke-lyrics-overlay.svelte";
+	import KaraokeVideoControls from "./karaoke-video-controls.svelte";
+	import type { OverlayMessage } from "../types";
 
 	type Props = {
 		src: string;
@@ -33,7 +35,8 @@
 		timing?: OnlineTimingObject;
 		canControl?: boolean;
 		onEnded?: () => void;
-		overlayMessages?: Array<{ id: string; body: string; color: string }>;
+		onSkip?: () => void;
+		overlayMessages?: OverlayMessage[];
 	};
 
 	let {
@@ -46,6 +49,7 @@
 		timing,
 		canControl = true,
 		onEnded,
+		onSkip,
 		overlayMessages = [],
 	}: Props = $props();
 
@@ -53,17 +57,6 @@
 	let currentTime = $state(0);
 	let cues = $state<KaraokeCue[]>([]);
 	let animationFrame: number | undefined;
-	let initializedOverlayMessages = false;
-	let seenOverlayMessages = new Set<string>();
-	let flyingMessages = $state<
-		Array<{
-			id: string;
-			body: string;
-			color: string;
-			lane: number;
-			duration: number;
-		}>
-	>([]);
 	const playbackSync = new MediaPlaybackSync({
 		getElement: () => video,
 		getTimingObject: () => timing,
@@ -109,28 +102,6 @@
 	const nextCue = $derived(
 		activeCueIndex >= 0 ? cues[activeCueIndex + 1] : undefined,
 	);
-
-	$effect(() => {
-		const incoming = overlayMessages;
-		if (!initializedOverlayMessages) {
-			seenOverlayMessages = new Set(incoming.map(({ id }) => id));
-			initializedOverlayMessages = true;
-			return;
-		}
-		for (const message of incoming) {
-			if (seenOverlayMessages.has(message.id)) continue;
-			seenOverlayMessages.add(message.id);
-			const flying = {
-				...message,
-				lane: Math.floor(Math.random() * 6),
-				duration: 7 + Math.random() * 4,
-			};
-			flyingMessages = [...flyingMessages, flying];
-			setTimeout(() => {
-				flyingMessages = flyingMessages.filter(({ id }) => id !== message.id);
-			}, flying.duration * 1_000);
-		}
-	});
 
 	$effect(() => {
 		const track = selectedLyrics;
@@ -307,7 +278,7 @@
 		></media-gesture>
 	{/if}
 
-	<KaraokeVideoControls {timing} {canControl} />
+	<KaraokeVideoControls {timing} {canControl} {onSkip} />
 
 	{#if playbackSync.needsUserGesture}
 		<div
@@ -329,45 +300,15 @@
 		</div>
 	{/if}
 
-	<div
-		class="pointer-events-none absolute inset-x-0 top-0 z-20 aspect-video overflow-hidden"
-		aria-hidden="true"
-	>
-		{#each flyingMessages as message (message.id)}
-			<p
-				class="flying-message"
-				style={`--lane: ${message.lane}; --duration: ${message.duration}s; --member-color: ${message.color}`}
-			>
-				{message.body}
-			</p>
-		{/each}
-	</div>
+	<ChatOverlay messages={overlayMessages} />
 
 	{#if activeCue}
-		<div
-			class="pointer-events-none absolute inset-x-0 top-0 flex aspect-video flex-col justify-end bg-linear-to-t from-black/80 via-black/25 to-transparent px-4 pb-12 text-center sm:px-8 sm:pb-14"
-			aria-hidden="true"
-		>
-			<p class="karaoke-line">
-				{#each activeCue.words as word, index (`${word.time}-${index}`)}
-					<span
-						class="karaoke-word"
-						class:karaoke-word-progress={selectedLyrics?.timing === "word"}
-						class:karaoke-line-active={selectedLyrics?.timing === "line"}
-						style={selectedLyrics?.timing === "word"
-							? `--karaoke-progress: ${karaokeWordProgress(word, adjustedTime) * 100}%`
-							: undefined}>{word.text}</span
-					>
-				{/each}
-			</p>
-			{#if nextCue}
-				<p
-					class="mt-1 text-sm font-semibold text-white/55 drop-shadow-md sm:mt-2 sm:text-xl"
-				>
-					{nextCue.words.map((word) => word.text).join(" ")}
-				</p>
-			{/if}
-		</div>
+		<KaraokeLyricsOverlay
+			{activeCue}
+			{nextCue}
+			{adjustedTime}
+			wordTiming={selectedLyrics?.timing === "word"}
+		/>
 	{/if}
 </media-player>
 
@@ -378,66 +319,4 @@
 		object-fit: contain;
 	}
 
-	.flying-message {
-		position: absolute;
-		top: calc(8% + var(--lane) * 11%);
-		left: 100%;
-		width: max-content;
-		max-width: 80%;
-		animation: fly var(--duration) linear forwards;
-		color: var(--member-color);
-		font-size: clamp(1rem, 2.2vw, 2rem);
-		font-weight: 700;
-		text-shadow:
-			-2px -2px 0 rgb(0 0 0 / 0.9),
-			2px -2px 0 rgb(0 0 0 / 0.9),
-			-2px 2px 0 rgb(0 0 0 / 0.9),
-			2px 2px 0 rgb(0 0 0 / 0.9);
-	}
-
-	@keyframes fly {
-		from {
-			transform: translateX(0);
-		}
-		to {
-			transform: translateX(calc(-100vw - 100%));
-		}
-	}
-
-	.karaoke-line {
-		font-size: clamp(1.125rem, 3.4vw, 2rem);
-		font-weight: 800;
-		line-height: 1.2;
-		letter-spacing: -0.025em;
-		text-wrap: balance;
-	}
-
-	.karaoke-word {
-		display: inline;
-		margin-inline-end: 0.28em;
-		filter: drop-shadow(0 1px 1px rgb(0 0 0 / 95%))
-			drop-shadow(0 2px 4px rgb(0 0 0 / 70%));
-	}
-
-	.karaoke-word-progress {
-		--karaoke-progress: 0%;
-		color: transparent;
-		background: linear-gradient(
-			90deg,
-			oklch(0.83 0.18 85) 0%,
-			oklch(0.83 0.18 85) var(--karaoke-progress),
-			rgb(255 255 255 / 58%) var(--karaoke-progress),
-			rgb(255 255 255 / 58%) 100%
-		);
-		background-clip: text;
-		-webkit-background-clip: text;
-	}
-
-	.karaoke-line-active {
-		color: oklch(0.83 0.18 85);
-	}
-
-	.karaoke-word:last-child {
-		margin-inline-end: 0;
-	}
 </style>

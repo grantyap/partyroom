@@ -2,14 +2,16 @@
 	import { buttonVariants } from "$lib/components/ui/button";
 	import type { OnlineTimingObject } from "$lib/online-timing-object.svelte";
 	import { cn } from "$lib/utils";
-	import { Pause, Play } from "@lucide/svelte";
+	import { Pause, Play, SkipForward } from "@lucide/svelte";
 
 	let {
 		timing,
 		canControl,
+		onSkip,
 	}: {
 		timing?: OnlineTimingObject;
 		canControl: boolean;
+		onSkip?: () => void;
 	} = $props();
 
 	const controlsReady = $derived(!timing || timing.readyState === "open");
@@ -36,6 +38,22 @@
 						class="group-data-[ended]:hidden group-data-[paused]:hidden"
 					/>
 				</media-play-button>
+
+				{#if onSkip}
+					<button
+						type="button"
+						class={cn(
+							buttonVariants({ variant: "ghost", size: "icon" }),
+							"text-white hover:bg-white/15 hover:text-white",
+						)}
+						disabled={!controlsReady}
+						onclick={onSkip}
+						aria-label="Skip to next song"
+						title="Skip to next song"
+					>
+						<SkipForward />
+					</button>
+				{/if}
 
 				<media-time
 					type="current"
