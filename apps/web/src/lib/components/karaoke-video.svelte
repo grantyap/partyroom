@@ -311,7 +311,7 @@
 
 	{#if playbackSync.needsUserGesture}
 		<div
-			class="absolute inset-x-0 top-0 z-30 flex aspect-video items-center justify-center bg-black/65 p-6 text-center"
+			class="absolute inset-x-0 top-0 z-40 flex aspect-video items-center justify-center bg-black/65 p-6 text-center"
 		>
 			<div class="flex max-w-sm flex-col items-center gap-3">
 				<div>
