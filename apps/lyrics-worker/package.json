@@ -6,7 +6,7 @@
     "dev:mac": "bun --env-file=../../.env scripts/dev-macos.ts",
     "dev:mac:host": "bun --env-file=../../.env scripts/dev-macos.ts",
     "lock": "uv lock",
-    "sync": "uv sync --locked",
+    "sync": "uv sync --locked --extra cpu",
     "test": "docker build -t partyroom-lyrics-worker -f Dockerfile ../.. && docker run --rm -v \"$PWD:/src:ro\" -e PYTHONPATH=/src partyroom-lyrics-worker python3 -m unittest discover -s /src/tests"
   }
 }

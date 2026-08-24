@@ -29,7 +29,13 @@ def resolve_pytorch_device(requested_device: str) -> tuple[str, Any]:
     )
     if device == "auto":
         device = "cpu"
-    dtype = torch.bfloat16 if device.startswith("cuda") else torch.float32
+    dtype = torch.float32
+    if device.startswith("cuda"):
+        dtype = (
+            torch.bfloat16
+            if torch.cuda.is_bf16_supported()
+            else torch.float16
+        )
     return device, dtype
 
 

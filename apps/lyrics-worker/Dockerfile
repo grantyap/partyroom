@@ -9,7 +9,9 @@ WORKDIR /workspace/apps/lyrics-worker
 COPY packages/activity-worker-python /workspace/packages/activity-worker-python
 COPY apps/lyrics-worker/pyproject.toml apps/lyrics-worker/uv.lock ./
 ENV UV_LINK_MODE=copy
-RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev --no-install-project
+ARG PYTORCH_ACCELERATOR=cpu
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-install-project --extra "${PYTORCH_ACCELERATOR}"
 
 COPY apps/lyrics-worker/app ./app
 
