@@ -33,11 +33,23 @@
       "cache": false,
       "dependsOn": ["//#dev:require-mode:docker"]
     },
+    "//#dev:infra:build": {
+      "cache": false,
+      "dependsOn": ["//#dev:require-mode:docker"]
+    },
     "//#dev:infra:mac": {
       "cache": false,
       "dependsOn": ["//#dev:require-mode:mac"]
     },
+    "//#dev:infra:mac:build": {
+      "cache": false,
+      "dependsOn": ["//#dev:require-mode:mac"]
+    },
     "//#dev:infra:nvidia": {
+      "cache": false,
+      "dependsOn": ["//#dev:require-mode:nvidia"]
+    },
+    "//#dev:infra:nvidia:build": {
       "cache": false,
       "dependsOn": ["//#dev:require-mode:nvidia"]
     },
@@ -46,9 +58,19 @@
       "dependsOn": ["//#dev:infra"],
       "persistent": true
     },
+    "dev:docker:build": {
+      "cache": false,
+      "dependsOn": ["//#dev:infra:build"],
+      "persistent": true
+    },
     "dev:mac": {
       "cache": false,
       "dependsOn": ["//#dev:infra:mac"],
+      "persistent": true
+    },
+    "dev:mac:build": {
+      "cache": false,
+      "dependsOn": ["//#dev:infra:mac:build"],
       "persistent": true
     },
     "dev:mac:host": {
@@ -56,14 +78,29 @@
       "dependsOn": ["//#dev:infra:mac"],
       "persistent": true
     },
+    "dev:mac:host:build": {
+      "cache": false,
+      "dependsOn": ["//#dev:infra:mac:build"],
+      "persistent": true
+    },
     "dev:nvidia": {
       "cache": false,
       "dependsOn": ["//#dev:infra:nvidia"],
       "persistent": true
     },
+    "dev:nvidia:build": {
+      "cache": false,
+      "dependsOn": ["//#dev:infra:nvidia:build"],
+      "persistent": true
+    },
     "dev:nvidia:host": {
       "cache": false,
       "dependsOn": ["//#dev:infra:nvidia"],
+      "persistent": true
+    },
+    "dev:nvidia:host:build": {
+      "cache": false,
+      "dependsOn": ["//#dev:infra:nvidia:build"],
       "persistent": true
     },
     "dev:setup": {

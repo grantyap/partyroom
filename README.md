@@ -69,10 +69,11 @@ Then, run the development server:
 bun run dev
 ```
 
-This rebuilds the local Docker Compose services using Docker's build cache, waits for them to
-become healthy, and then starts the Turborepo development tasks. The containers, Convex data, and
-downloaded AI models remain available between development sessions. The first separation and
-transcription download their configured models into the `stem_models` and `lyrics_models` volumes.
+This reuses the existing local Docker Compose images, waits for the services to become healthy,
+and then starts the Turborepo development tasks. Use `bun run dev:build` when the images need to be
+rebuilt; Docker's build cache is still used. The containers, Convex data, and downloaded AI models
+remain available between development sessions. The first separation and transcription download
+their configured models into the `stem_models` and `lyrics_models` volumes.
 
 ### NVIDIA development
 
@@ -97,6 +98,8 @@ bun run dev:nvidia
 ```
 
 Use `bun run dev:nvidia:host` instead to expose the Vite development server on the local network.
+Use `bun run dev:nvidia:build` or `bun run dev:nvidia:host:build` to rebuild the Compose images
+before starting the corresponding mode.
 Both NVIDIA workers validate CUDA during startup and stop rather than silently falling back to CPU.
 The lyrics worker defaults to one concurrent activity in this mode to limit GPU memory pressure;
 set `LYRICS_WORKER_CONCURRENCY` explicitly to override it.
@@ -141,9 +144,16 @@ partyroom/
 
 ## Available Scripts
 
-- `bun run dev`: Start all applications in development mode
-- `bun run dev:nvidia`: Start all applications with NVIDIA-accelerated ML workers
+- `bun run dev`: Start all applications using existing Compose images
+- `bun run dev:build`: Rebuild Compose images and start all applications
+- `bun run dev:mac`: Start macOS mode using existing Compose images
+- `bun run dev:mac:build`: Rebuild Compose images and start macOS mode
+- `bun run dev:mac:host`: Start macOS mode and expose Vite on the local network
+- `bun run dev:mac:host:build`: Rebuild Compose images and start exposed macOS mode
+- `bun run dev:nvidia`: Start NVIDIA mode using existing Compose images
+- `bun run dev:nvidia:build`: Rebuild Compose images and start NVIDIA mode
 - `bun run dev:nvidia:host`: Start NVIDIA mode and expose Vite on the local network
+- `bun run dev:nvidia:host:build`: Rebuild Compose images and start exposed NVIDIA mode
 - `bun run build`: Build all applications
 - `bun run dev:web`: Start only the web application
 - `bun run dev:setup`: Setup and configure your Convex project
