@@ -20,6 +20,14 @@ bun install
 
 ## Convex Setup
 
+Make sure `CONVEX_DEPLOYMENT` is not set in your shell. The Convex CLI must use
+the `CONVEX_SELF_HOSTED_URL` and `CONVEX_SELF_HOSTED_ADMIN_KEY` settings below
+instead of selecting a cloud deployment:
+
+```bash
+unset CONVEX_DEPLOYMENT
+```
+
 Create the local environment files:
 
 ```bash
@@ -45,20 +53,22 @@ docker compose -f docker-compose.yaml -f docker-compose.dev.yaml \
 
 Put the generated value in `CONVEX_SELF_HOSTED_ADMIN_KEY` in
 `packages/backend/.env.local`. Then restore the function settings from that
-file and push the backend:
+file and push the backend. On macOS or Linux, all three function settings can
+be applied at once:
 
 ```bash
 cd packages/backend
-bunx convex env set SITE_URL http://localhost:5173
-bunx convex env set BETTER_AUTH_SECRET
-bunx convex env set WORKER_CONVEX_CLOUD_ORIGIN http://backend:3210
+bunx convex env set --force --from-file <(
+  grep -E '^(SITE_URL|BETTER_AUTH_SECRET|WORKER_CONVEX_CLOUD_ORIGIN)=' .env.local
+)
 cd ../..
 bun run dev:setup
 ```
 
-The secret command prompts for the value; paste the `BETTER_AUTH_SECRET` from
-`packages/backend/.env.local`. Compose supplies `ACTIVITY_WORKER_TOKEN` and
-`WORKER_SIGNING_SECRET` directly from the root `.env`.
+If your shell does not support `<(...)`, set the three listed variables
+individually with `bunx convex env set NAME`; omitting the value prompts for it
+without placing it in shell history. Compose supplies `ACTIVITY_WORKER_TOKEN`
+and `WORKER_SIGNING_SECRET` directly from the root `.env`.
 
 Everything else, including local ports, worker addresses, resource limits, and
 model names, has a development default in the Compose files.
