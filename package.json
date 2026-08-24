@@ -11,7 +11,7 @@
       "zod": "^4.1.13",
       "typescript": "^6.0.3",
       "@types/bun": "^1.4.0",
-      "convex": "^1.33.1",
+      "convex": "^1.45.0",
       "convex-svelte": "^0.14.0",
       "better-auth": "^1.6.23",
       "@convex-dev/better-auth": "^0.12.5",
