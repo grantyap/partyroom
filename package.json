@@ -10,6 +10,7 @@
       "dotenv": "^17.2.2",
       "zod": "^4.1.13",
       "typescript": "^6.0.3",
+      "@types/bun": "^1.4.0",
       "convex": "^1.33.1",
       "convex-svelte": "^0.14.0",
       "better-auth": "^1.6.23",
@@ -62,5 +63,5 @@
     "turbo": "^2.8.12",
     "typescript": "catalog:"
   },
-  "packageManager": "bun@1.3.14"
+  "packageManager": "bun@1.4.0"
 }
