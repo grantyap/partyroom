@@ -3,6 +3,8 @@ FROM debian:bookworm-slim AS media-tools
 ARG TARGETARCH
 ARG DENO_VERSION=2.8.1
 
+# Keep yt-dlp on releases/latest: extractor fixes must ship without a source change.
+# Never pin yt-dlp to a version or checksum.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl unzip \
     && rm -rf /var/lib/apt/lists/* \
@@ -30,7 +32,29 @@ RUN apt-get update \
     && install -m 0755 /tmp/deno/deno /out/deno \
     && install -m 0755 /tmp/yt-dlp /out/yt-dlp
 
-FROM oven/bun:1.3.14-debian
+FROM oven/bun:1.4.0-debian AS application
+
+WORKDIR /workspace
+COPY package.json bun.lock ./
+COPY apps/annotations-worker/package.json ./apps/annotations-worker/package.json
+COPY apps/lyrics-worker/package.json ./apps/lyrics-worker/package.json
+COPY apps/stem-worker/package.json ./apps/stem-worker/package.json
+COPY apps/web/package.json ./apps/web/package.json
+COPY packages/activities ./packages/activities
+COPY packages/activity-worker ./packages/activity-worker
+COPY packages/backend/package.json ./packages/backend/package.json
+COPY packages/config ./packages/config
+COPY packages/env ./packages/env
+COPY packages/media-activities ./packages/media-activities
+COPY apps/media-worker ./apps/media-worker
+RUN bun install --frozen-lockfile --production --filter @partyroom/media-worker \
+    && bun build apps/media-worker/src/server.ts \
+      --target=bun \
+      --outfile=/out/server.js \
+      --minify
+
+
+FROM oven/bun:1.4.0-debian
 
 COPY --from=media-tools /out/deno /usr/local/bin/deno
 COPY --from=media-tools /out/yt-dlp /usr/local/bin/yt-dlp
@@ -40,12 +64,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace
-COPY package.json bun.lock ./
-COPY packages ./packages
-COPY apps ./apps
-RUN bun install --production --filter @partyroom/media-worker
-
-WORKDIR /workspace/apps/media-worker
+COPY --from=application /out/server.js ./server.js
 
 ENV HOST=0.0.0.0 \
     PORT=4100 \
@@ -53,4 +72,4 @@ ENV HOST=0.0.0.0 \
 
 EXPOSE 4100
 
-CMD ["bun", "src/server.ts"]
+CMD ["bun", "server.js"]
