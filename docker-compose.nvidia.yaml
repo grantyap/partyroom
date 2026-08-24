@@ -1,0 +1,38 @@
+services:
+  backend:
+    labels:
+      partyroom.dev.mode: nvidia
+
+  stem-worker:
+    build:
+      dockerfile: apps/stem-worker/Dockerfile.nvidia
+    command:
+      - sh
+      - -c
+      - python3 -m app.nvidia_check && exec python3 -m uvicorn app.main:app --host 0.0.0.0 --port 4200
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  lyrics-worker:
+    build:
+      args:
+        PYTORCH_ACCELERATOR: cu128
+    command:
+      - sh
+      - -c
+      - python3 -m app.nvidia_check && exec python3 -m uvicorn app.main:app --host 0.0.0.0 --port 4300
+    environment:
+      - LYRICS_DEVICE=cuda:0
+      - LYRICS_WORKER_CONCURRENCY=${LYRICS_WORKER_CONCURRENCY:-1}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

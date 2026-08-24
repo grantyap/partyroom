@@ -26,6 +26,9 @@
     "//#dev:require-mode:mac": {
       "cache": false
     },
+    "//#dev:require-mode:nvidia": {
+      "cache": false
+    },
     "//#dev:infra": {
       "cache": false,
       "dependsOn": ["//#dev:require-mode:docker"]
@@ -33,6 +36,10 @@
     "//#dev:infra:mac": {
       "cache": false,
       "dependsOn": ["//#dev:require-mode:mac"]
+    },
+    "//#dev:infra:nvidia": {
+      "cache": false,
+      "dependsOn": ["//#dev:require-mode:nvidia"]
     },
     "dev:docker": {
       "cache": false,
@@ -47,6 +54,16 @@
     "dev:mac:host": {
       "cache": false,
       "dependsOn": ["//#dev:infra:mac"],
+      "persistent": true
+    },
+    "dev:nvidia": {
+      "cache": false,
+      "dependsOn": ["//#dev:infra:nvidia"],
+      "persistent": true
+    },
+    "dev:nvidia:host": {
+      "cache": false,
+      "dependsOn": ["//#dev:infra:nvidia"],
       "persistent": true
     },
     "dev:setup": {

@@ -2,8 +2,8 @@ import { spawnSync } from "node:child_process";
 
 const requestedMode = process.argv[2];
 
-if (requestedMode !== "docker" && requestedMode !== "mac") {
-  console.error("Expected development mode to be either `docker` or `mac`.");
+if (requestedMode !== "docker" && requestedMode !== "mac" && requestedMode !== "nvidia") {
+  console.error("Expected development mode to be `docker`, `mac`, or `nvidia`.");
   process.exit(1);
 }
 
@@ -61,13 +61,13 @@ const runningMode = docker([
 ]);
 
 if (runningMode !== requestedMode) {
-  const runningDescription =
-    runningMode === "docker"
-      ? "`dev` mode"
-      : runningMode === "mac"
-        ? "`dev:mac` mode"
-        : "an older, untagged mode";
-  const requestedDescription = requestedMode === "docker" ? "`dev`" : "`dev:mac`";
+  const modeDescriptions: Record<string, string> = {
+    docker: "`dev` mode",
+    mac: "`dev:mac` mode",
+    nvidia: "`dev:nvidia` mode",
+  };
+  const runningDescription = modeDescriptions[runningMode] ?? "an older, untagged mode";
+  const requestedDescription = modeDescriptions[requestedMode].replace(" mode", "");
   console.error(
     `The existing stack uses ${runningDescription}. Run \`bun run dev:down\` before switching to ${requestedDescription}.`,
   );

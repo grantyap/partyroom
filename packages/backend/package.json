@@ -9,6 +9,8 @@
     "dev:docker": "convex dev",
     "dev:mac": "convex dev",
     "dev:mac:host": "convex dev",
+    "dev:nvidia": "convex dev",
+    "dev:nvidia:host": "convex dev",
     "dev:setup": "convex dev --once --env-file .env.local",
     "format": "oxfmt --config ../../.oxfmtrc.json .",
     "check-types": "tsc --noEmit -p convex/tsconfig.json",

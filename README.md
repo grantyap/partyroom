@@ -74,6 +74,37 @@ become healthy, and then starts the Turborepo development tasks. The containers,
 downloaded AI models remain available between development sessions. The first separation and
 transcription download their configured models into the `stem_models` and `lyrics_models` volumes.
 
+### NVIDIA development
+
+The stem-separation and lyrics workers can use an NVIDIA GPU through Linux CUDA containers. This
+mode works on Linux with the NVIDIA Container Toolkit and on Windows with Docker Desktop's WSL 2
+backend. On Windows, update the NVIDIA driver and WSL before starting Docker Desktop:
+
+```powershell
+wsl --update
+```
+
+Verify that Docker can access the GPU before starting Partyroom:
+
+```bash
+docker run --rm --gpus all nvidia/cuda:12.8.1-base-ubuntu24.04 nvidia-smi
+```
+
+Then start the NVIDIA development mode:
+
+```bash
+bun run dev:nvidia
+```
+
+Use `bun run dev:nvidia:host` instead to expose the Vite development server on the local network.
+Both NVIDIA workers validate CUDA during startup and stop rather than silently falling back to CPU.
+The lyrics worker defaults to one concurrent activity in this mode to limit GPU memory pressure;
+set `LYRICS_WORKER_CONCURRENCY` explicitly to override it.
+
+The NVIDIA images use CUDA 12.8 PyTorch packages. The host does not need the CUDA toolkit installed,
+but its NVIDIA driver must support the container's CUDA runtime. Docker Desktop GPU support on
+Windows requires the WSL 2 backend; native Windows containers are not supported by this setup.
+
 To stop the local containers without deleting their data:
 
 ```bash
@@ -111,6 +142,8 @@ partyroom/
 ## Available Scripts
 
 - `bun run dev`: Start all applications in development mode
+- `bun run dev:nvidia`: Start all applications with NVIDIA-accelerated ML workers
+- `bun run dev:nvidia:host`: Start NVIDIA mode and expose Vite on the local network
 - `bun run build`: Build all applications
 - `bun run dev:web`: Start only the web application
 - `bun run dev:setup`: Setup and configure your Convex project
