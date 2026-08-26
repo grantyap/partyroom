@@ -4,6 +4,7 @@
 		RoomPermissions,
 		type ChatMessage,
 	} from "$lib/components/room";
+	import RoomMembersPopover from "$lib/components/room/chat/room-members-popover.svelte";
 	import * as Playback from "$lib/components/room/playback";
 	import * as RoomTabs from "$lib/components/room/tabs";
 	import { Button } from "$lib/components/ui/button";
@@ -107,10 +108,13 @@
 			>
 			<div>
 				<h1 class="font-heading text-xl font-semibold">{room.data?.name}</h1>
-				<p class="text-xs text-muted-foreground">
-					{onlineUsers.length}
-					{onlineUsers.length === 1 ? "person" : "people"} here
-				</p>
+				<div>
+					<RoomMembersPopover members={onlineUsers} />
+					<span class="text-xs text-muted-foreground ms-1">
+						{onlineUsers.length}
+						{onlineUsers.length === 1 ? "person" : "people"} here
+					</span>
+				</div>
 			</div>
 		</div>
 	</header>

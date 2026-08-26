@@ -78,7 +78,7 @@
 			onscroll={updateScrollPosition}
 			class="h-full"
 		>
-			<ul class="space-y-3 p-4 pb-0">
+			<ul class="space-y-3 p-4 pb-0 h-full flex flex-col">
 				{#each messages as message (message._id)}
 					{@const memberColors = getMemberColors(message.user._id)}
 					<li class="flex gap-3">
@@ -102,7 +102,7 @@
 					</li>
 				{/each}
 				{#if messages.length === 0}
-					<li class="py-8 text-center text-sm text-muted-foreground">
+					<li class="py-8 flex-1 text-center text-sm text-muted-foreground">
 						No messages yet.
 					</li>
 				{/if}

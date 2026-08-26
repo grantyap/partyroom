@@ -30,7 +30,7 @@
 		openOnHover
 		openDelay={350}
 		closeDelay={200}
-		class="inline-flex min-h-11 items-center rounded-full px-1 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
+		class="inline-flex min-h-11 items-center rounded-full focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
 		aria-label={peopleLabel}
 	>
 		<AvatarGroup>
