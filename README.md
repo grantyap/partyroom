@@ -85,6 +85,23 @@ rebuilt; Docker's build cache is still used. The containers, Convex data, and do
 remain available between development sessions. The first separation and transcription download
 their configured models into the `stem_models` and `lyrics_models` volumes.
 
+### Apple Silicon development
+
+`bun run dev:mac` runs the stem and lyrics workers natively on Apple Silicon. Stem separation uses
+MLX on the Metal GPU; startup evaluates a small MLX operation and stops if the GPU is unavailable.
+The separation model stays loaded in a persistent child process between jobs, and the worker health
+response reports the effective backend and device.
+
+The default stem settings favor local iteration speed while retaining FLAC outputs:
+
+- `STEM_MDX_OVERLAP=0.1` controls the overlap between MDX inference windows. Increase it toward
+  `0.25` if a quality comparison reveals boundary artifacts.
+- `STEM_MDX_BATCH_SIZE=2` batches MLX inference windows. Reduce it to `1` if memory pressure is high.
+- `STEM_WRITE_WORKERS=2` writes the instrumental and vocal FLAC files concurrently.
+
+Docker and NVIDIA modes continue to use `audio-separator`. They reuse one loaded model across jobs
+and skip the upstream MDX match-mix transform when its result would otherwise be discarded.
+
 ### NVIDIA development
 
 The stem-separation and lyrics workers can use an NVIDIA GPU through Linux CUDA containers. This

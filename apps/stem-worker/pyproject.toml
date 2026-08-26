@@ -18,6 +18,7 @@ nvidia = [
 [dependency-groups]
 mac = [
   "audio-separator[cpu]==0.44.5; sys_platform == 'darwin' and platform_machine == 'arm64'",
+  "mlx-audio-separator[convert]==0.1.7; sys_platform == 'darwin' and platform_machine == 'arm64'",
 ]
 
 [tool.uv]
