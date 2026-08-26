@@ -24,7 +24,7 @@ describe("ffmpegProgress", () => {
 });
 
 describe("muxFfmpegCommand", () => {
-  test("produces a broadly supported H.264/AAC MP4", () => {
+  test("copies the web-safe video while encoding the replacement audio as AAC", () => {
     const command = muxFfmpegCommand("video", "instrumental", "karaoke.mp4");
 
     expect(command.slice(command.indexOf("-threads"), command.indexOf("-i"))).toEqual([
@@ -33,19 +33,14 @@ describe("muxFfmpegCommand", () => {
     ]);
     expect(command.slice(command.indexOf("-c:v"), command.indexOf("-c:a"))).toEqual([
       "-c:v",
-      "libx264",
-      "-threads:v",
-      "1",
-      "-filter_threads",
-      "1",
-      "-preset",
-      "veryfast",
-      "-crf",
-      "23",
-      "-vf",
-      "scale=w=min(1920\\,iw):h=min(1080\\,ih):force_original_aspect_ratio=decrease:force_divisible_by=2,format=yuv420p",
+      "copy",
     ]);
-    expect(command).toContain("aac");
+    expect(command.slice(command.indexOf("-c:a"), command.indexOf("-shortest"))).toEqual([
+      "-c:a",
+      "aac",
+      "-b:a",
+      "256k",
+    ]);
     expect(command).toContain("+faststart");
   });
 });
@@ -167,6 +162,18 @@ describe("reportFinalUpload", () => {
 });
 
 describe("ytDlpDownloadCommand", () => {
+  test("downloads web-safe 720p video with the best audio without re-encoding video", () => {
+    const command = ytDlpDownloadCommand("https://example.com/video", "/work/activity");
+
+    expect(command[command.indexOf("--format") + 1]).toBe(
+      "bv[height<=720][ext=mp4][vcodec^=avc1]+ba/b[height<=720][ext=mp4][vcodec^=avc1][acodec^=mp4a]",
+    );
+    expect(command[command.indexOf("--merge-output-format") + 1]).toBe("mp4");
+    expect(command[command.indexOf("--postprocessor-args") + 1]).toBe(
+      "Merger+ffmpeg_o:-c:v copy -c:a aac -b:a 256k",
+    );
+  });
+
   test("explicitly enables progress suppressed by --print's quiet mode", () => {
     const command = ytDlpDownloadCommand("https://example.com/video", "/work/activity");
 
