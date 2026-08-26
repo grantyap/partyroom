@@ -115,6 +115,10 @@ services:
       - ACTIVITY_WORKER_API_URL=${ACTIVITY_WORKER_API_URL:-http://backend:3211/activities/workers/}
       - ACTIVITY_WORKER_TOKEN
       - STEM_MODEL=${STEM_MODEL:-Kim_Vocal_2.onnx}
+      - STEM_BACKEND=audio-separator
+      - STEM_MDX_BATCH_SIZE=${STEM_MDX_BATCH_SIZE:-1}
+      - STEM_MDX_OVERLAP=${STEM_MDX_OVERLAP:-0.1}
+      - STEM_WRITE_WORKERS=${STEM_WRITE_WORKERS:-2}
       - STEM_WORKER_CONCURRENCY=${STEM_WORKER_CONCURRENCY:-1}
     volumes:
       - stem_models:/models

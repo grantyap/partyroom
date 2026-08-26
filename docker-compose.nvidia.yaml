@@ -17,6 +17,8 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
+    environment:
+      - STEM_BACKEND=audio-separator
 
   lyrics-worker:
     build:
