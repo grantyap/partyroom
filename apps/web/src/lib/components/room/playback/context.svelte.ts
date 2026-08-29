@@ -14,6 +14,9 @@ type PlaybackContextProps = {
 };
 
 class PlaybackContext {
+  playerShell = $state<HTMLElement>();
+  tvMode = $state(false);
+
   constructor(private readonly props: PlaybackContextProps) {}
 
   get roomId() {
@@ -43,6 +46,24 @@ class PlaybackContext {
   get timing() {
     return this.props.timing;
   }
+
+  setPlayerShell = (playerShell: HTMLElement | undefined) => {
+    this.playerShell = playerShell;
+    this.updateTvMode();
+  };
+
+  updateTvMode = () => {
+    this.tvMode = document.fullscreenElement === this.playerShell;
+  };
+
+  toggleTvMode = async () => {
+    if (!this.playerShell) return;
+    if (document.fullscreenElement === this.playerShell) {
+      await document.exitFullscreen();
+    } else {
+      await this.playerShell.requestFullscreen();
+    }
+  };
 }
 
 const PLAYBACK_CONTEXT = Symbol("room-playback");

@@ -101,50 +101,61 @@
 </script>
 
 <div class="mx-auto w-full max-w-384 space-y-5 p-4 sm:p-6">
-	<header class="flex flex-wrap items-center justify-between gap-3">
-		<div
-			class="space-y-3 w-full"
-		>
-			<Button href="/app" variant="outline" size="sm"
-				><ArrowLeftIcon /> All rooms</Button
-			>
-			<div>
-				<h1 class="font-heading text-xl font-semibold">{room.data?.name}</h1>
-				<div>
-					<RoomMembersPopover members={onlineUsers} />
-					<span class="text-xs text-muted-foreground ms-1">
-						{onlineUsers.length}
-						{onlineUsers.length === 1 ? "person" : "people"} here
-					</span>
-				</div>
-			</div>
-		</div>
-	</header>
-
 	<Playback.Root {roomId} {overlayMessages}>
-		<Playback.Stage />
-		<RoomTabs.Root bind:value={panelTab}>
-			<RoomTabs.List>
-				<RoomTabs.Trigger value="queue">
-					Queue
-					<Playback.QueueCount />
-				</RoomTabs.Trigger>
-				<RoomTabs.Trigger value="chat">Chat</RoomTabs.Trigger>
-			</RoomTabs.List>
+		<div class="grid min-h-0 gap-5 xl:grid-cols-[minmax(0,1fr)_20rem]">
+			<header class="flex flex-wrap items-center justify-between gap-3 xl:col-span-2">
+				<div class="space-y-3 w-full">
+					<Button href="/app" variant="outline" size="sm"
+						><ArrowLeftIcon /> All rooms</Button
+					>
+					<div>
+						<h1 class="font-heading text-xl font-semibold">{room.data?.name}</h1>
+						<Playback.NowPlaying />
+						<div>
+							<RoomMembersPopover members={onlineUsers} />
+							<span class="text-xs text-muted-foreground ms-1">
+								{onlineUsers.length}
+								{onlineUsers.length === 1 ? "person" : "people"} here
+							</span>
+						</div>
+					</div>
+				</div>
+			</header>
 
-			<RoomTabs.Content value="queue">
-				<Playback.Queue />
-			</RoomTabs.Content>
-			<RoomTabs.Content value="chat">
-				<RoomChat
-					messages={messages.data ?? []}
-					canSend={playback.data?.permissions.sendChat ?? false}
-					members={onlineUsers}
-					active={panelTab === "chat"}
-					{onMessage}
-				/>
-			</RoomTabs.Content>
-		</RoomTabs.Root>
+			<section class="min-w-0 space-y-3" data-slot="playback-main">
+				<div class="flex items-center justify-between gap-3 xl:justify-end">
+					<div class="flex items-center gap-2">
+						<Playback.Share />
+						<Playback.Lyrics />
+						<Playback.TvMode />
+					</div>
+				</div>
+				<Playback.Player />
+				<Playback.Error />
+			</section>
+			<RoomTabs.Root bind:value={panelTab}>
+				<RoomTabs.List>
+					<RoomTabs.Trigger value="queue">
+						Queue
+						<Playback.QueueCount />
+					</RoomTabs.Trigger>
+					<RoomTabs.Trigger value="chat">Chat</RoomTabs.Trigger>
+				</RoomTabs.List>
+
+				<RoomTabs.Content value="queue">
+					<Playback.Queue />
+				</RoomTabs.Content>
+				<RoomTabs.Content value="chat">
+					<RoomChat
+						messages={messages.data ?? []}
+						canSend={playback.data?.permissions.sendChat ?? false}
+						members={onlineUsers}
+						active={panelTab === "chat"}
+						{onMessage}
+					/>
+				</RoomTabs.Content>
+			</RoomTabs.Root>
+		</div>
 	</Playback.Root>
 
 	<div class="grid gap-5 md:grid-cols-2">

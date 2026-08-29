@@ -1,3 +1,9 @@
+<!--
+@component
+Internal sortable shell used by `Playback.QueueItem`.
+
+@see `Playback.QueueItem` for the public queue item component.
+-->
 <script lang="ts">
 	import { useSortable } from "@dnd-kit-svelte/svelte/sortable";
 	import { GripVertical } from "@lucide/svelte";

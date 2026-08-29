@@ -1,10 +1,35 @@
+<!--
+@component
+Displays a control for sharing the current room.
+
+Use `<Playback.Share />` for the default button and popover. Add a `trigger`
+snippet to supply your own trigger element. Apply the provided `props` to that
+element so it can open the popover and remain accessible.
+
+@example
+```svelte
+<Playback.Share>
+  {#snippet trigger({ props })}
+    <button {...props}>Invite people</button>
+  {/snippet}
+</Playback.Share>
+```
+-->
+<script lang="ts" module>
+	export type ShareTriggerRenderProps = {
+		props: Record<string, unknown>;
+	};
+</script>
+
 <script lang="ts">
 	import { Button, buttonVariants } from "$lib/components/ui/button";
 	import { Input } from "$lib/components/ui/input";
 	import * as Popover from "$lib/components/ui/popover";
 	import { Check, Copy, Share2 } from "@lucide/svelte";
 	import QRCode from "qrcode";
-	import { onMount } from "svelte";
+	import { onMount, type Snippet } from "svelte";
+
+	let { trigger }: { trigger?: Snippet<[ShareTriggerRenderProps]> } = $props();
 
 	let shareUrl = $state("");
 	let qrCodeUrl = $state("");
@@ -62,13 +87,17 @@
 </script>
 
 <Popover.Root>
-	<Popover.Trigger
-		class={buttonVariants({ variant: "outline", size: "sm" })}
-		aria-label="Share this room"
-	>
-		<Share2 aria-hidden="true" />
-		Share
-	</Popover.Trigger>
+	{#if trigger}
+		<Popover.Trigger child={trigger} aria-label="Share this room" />
+	{:else}
+		<Popover.Trigger
+			class={buttonVariants({ variant: "outline", size: "sm" })}
+			aria-label="Share this room"
+		>
+			<Share2 aria-hidden="true" />
+			Share
+		</Popover.Trigger>
+	{/if}
 	<Popover.Content align="end" class="w-80 gap-3 rounded-xl p-4">
 		<Popover.Header class="gap-1 text-center">
 			<Popover.Title>Share this room</Popover.Title>

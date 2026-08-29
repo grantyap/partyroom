@@ -1,11 +1,30 @@
+<!--
+@component
+Provides shared playback data and actions to child `Playback.*` components.
+
+This component does not render an element or apply layout styles. Put any
+playback components inside it, and add your own wrapper when you need a grid,
+spacing, or other layout.
+
+@see `Playback.Player` for the video player.
+@see `Playback.NowPlaying` for the current song.
+
+@example
+```svelte
+<Playback.Root {roomId}>
+  <div class="grid gap-5 lg:grid-cols-2">
+    <Playback.Player />
+    <Playback.Queue />
+  </div>
+</Playback.Root>
+```
+-->
 <script lang="ts">
 	import { OnlineTimingObject } from "$lib/online-timing-object.svelte";
-	import { cn } from "$lib/utils";
 	import { api } from "@partyroom/backend/convex/_generated/api";
 	import type { Id } from "@partyroom/backend/convex/_generated/dataModel";
 	import { useAction, useMutation, useQuery } from "convex-svelte";
 	import { onMount, type Snippet } from "svelte";
-	import type { HTMLAttributes } from "svelte/elements";
 	import type { OverlayMessage } from "../types";
 	import { setPlaybackContext } from "./context.svelte";
 
@@ -13,9 +32,7 @@
 		roomId,
 		overlayMessages = [],
 		children,
-		class: className,
-		...restProps
-	}: HTMLAttributes<HTMLDivElement> & {
+	}: {
 		roomId: Id<"rooms">;
 		overlayMessages?: OverlayMessage[];
 		children?: Snippet;
@@ -92,13 +109,4 @@
 	onMount(() => timing.start());
 </script>
 
-<div
-	data-slot="playback-root"
-	class={cn(
-		"grid min-h-0 gap-5 xl:grid-cols-[minmax(0,1fr)_20rem]",
-		className,
-	)}
-	{...restProps}
->
-	{@render children?.()}
-</div>
+{@render children?.()}
