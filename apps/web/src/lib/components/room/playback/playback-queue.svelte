@@ -2,12 +2,15 @@
 	import * as RoomTabs from "$lib/components/room/tabs";
 	import { Button } from "$lib/components/ui/button";
 	import { Input } from "$lib/components/ui/input";
-	import { GripVertical, Plus, Trash2 } from "@lucide/svelte";
+	import { DragDropProvider, type DragDropEvents } from "@dnd-kit-svelte/svelte";
+	import { isSortable } from "@dnd-kit-svelte/svelte/sortable";
+	import { Plus, Trash2 } from "@lucide/svelte";
 	import { api } from "@partyroom/backend/convex/_generated/api";
 	import { useAction, useMutation } from "convex-svelte";
 	import MediaProgressPopover from "../media/media-progress-popover.svelte";
 	import { formatDuration } from "../media-format";
 	import { usePlayback } from "./context.svelte";
+	import SortableQueueItem from "./sortable-queue-item.svelte";
 
 	const playbackContext = usePlayback();
 	const roomId = $derived(playbackContext.roomId);
@@ -22,7 +25,6 @@
 	let sourceUrl = $state("");
 	let submitting = $state(false);
 	let error = $state<string | null>(null);
-	let draggedItem = $state<string | null>(null);
 
 	async function addSong(event: SubmitEvent) {
 		event.preventDefault();
@@ -39,17 +41,21 @@
 		}
 	}
 
-	async function dropBefore(targetId: string | null) {
+	async function handleDragEnd(
+		event: Parameters<DragDropEvents["dragend"]>[0],
+	) {
+		if (event.canceled || !isSortable(event.operation.source)) return;
+
 		const queue = playback?.queue ?? [];
-		const moving = draggedItem;
-		draggedItem = null;
-		if (!moving || moving === targetId) return;
+		const moving = String(event.operation.source.id);
+		const targetIndex = event.operation.source.sortable.index;
+		const initialIndex = event.operation.source.sortable.initialIndex;
+		if (targetIndex === initialIndex) return;
+
 		const withoutMoving = queue.filter(({ _id }) => _id !== moving);
-		const index =
-			targetId === null
-				? withoutMoving.length
-				: withoutMoving.findIndex(({ _id }) => _id === targetId);
-		if (index < 0) return;
+		if (withoutMoving.length === queue.length) return;
+		const index = Math.min(targetIndex, withoutMoving.length);
+		error = null;
 		try {
 			await reorder({
 				roomId,
@@ -79,48 +85,39 @@
 	{/if}
 
 	<RoomTabs.ScrollArea>
-		<ul class="min-h-24 space-y-2 p-3">
-			{#each playback?.queue ?? [] as item (item._id)}
-				{@const media = mediaById.get(item.roomMedia)}
-				{@const title = item.kind === "ready" ? item.title : media?.title ?? (item.kind === "failed" ? "Unavailable media" : "Processing media…")}
-				{@const duration = item.kind === "ready" ? item.durationSeconds ?? undefined : media?.duration}
-				<li
-					draggable={playback?.permissions.reorderQueue ?? false}
-					ondragstart={() => (draggedItem = item._id)}
-					ondragend={() => (draggedItem = null)}
-					ondragover={(event) => { if (draggedItem) event.preventDefault(); }}
-					ondrop={(event) => { event.preventDefault(); void dropBefore(item._id); }}
-					class="group flex items-center gap-2 rounded-lg border bg-background p-2"
-					class:opacity-50={draggedItem === item._id}
-				>
-					{#if playback?.permissions.reorderQueue}
-						<GripVertical class="size-4 shrink-0 cursor-grab text-muted-foreground" aria-hidden="true" />
-					{/if}
-					<div class="min-w-0 flex-1">
-						<p class="text-sm font-medium">{title}</p>
-						<p class="text-xs text-muted-foreground">
-							{item.availability === "ready" ? "Ready" : item.availability === "processing" ? "Processing…" : "Unavailable"}
-							{#if formatDuration(duration)} · {formatDuration(duration)}{/if}
-						</p>
-					</div>
-					{#if item.availability === "processing" && media}
-						<MediaProgressPopover title={media.title ?? "Resolving media…"} steps={media.steps} />
-					{/if}
-					{#if playback?.permissions.removeFromQueue}
-					<Button variant="ghost" size="icon-sm" aria-label={`Remove ${title} from queue`} onclick={() => void remove({ roomId, queueItemKey: item._id })}>
-							<Trash2 />
-						</Button>
-					{/if}
-				</li>
-			{/each}
-			{#if (playback?.queue.length ?? 0) === 0}
-				<li class="p-5 text-center text-sm text-muted-foreground">Nothing queued yet.</li>
-			{/if}
-			{#if draggedItem}
-				<li class="rounded-lg border border-dashed p-3 text-center text-xs text-muted-foreground" ondragover={(event) => event.preventDefault()} ondrop={(event) => { event.preventDefault(); void dropBefore(null); }}>
-					Drop at end
-				</li>
-			{/if}
-		</ul>
+		<DragDropProvider onDragEnd={(event) => void handleDragEnd(event)}>
+			<ul class="min-h-24 space-y-2 p-3">
+				{#each playback?.queue ?? [] as item, index (item._id)}
+					{@const media = mediaById.get(item.roomMedia)}
+					{@const title = item.kind === "ready" ? item.title : media?.title ?? (item.kind === "failed" ? "Unavailable media" : "Processing media…")}
+					{@const duration = item.kind === "ready" ? item.durationSeconds ?? undefined : media?.duration}
+					<SortableQueueItem
+						id={item._id}
+						{index}
+						label={title}
+						disabled={!playback?.permissions.reorderQueue}
+					>
+						<div class="min-w-0 flex-1">
+							<p class="text-sm font-medium">{title}</p>
+							<p class="text-xs text-muted-foreground">
+								{item.availability === "ready" ? "Ready" : item.availability === "processing" ? "Processing…" : "Unavailable"}
+								{#if formatDuration(duration)} · {formatDuration(duration)}{/if}
+							</p>
+						</div>
+						{#if item.availability === "processing" && media}
+							<MediaProgressPopover title={media.title ?? "Resolving media…"} steps={media.steps} />
+						{/if}
+						{#if playback?.permissions.removeFromQueue}
+							<Button variant="ghost" size="icon-sm" aria-label={`Remove ${title} from queue`} onclick={() => void remove({ roomId, queueItemKey: item._id })}>
+								<Trash2 />
+							</Button>
+						{/if}
+					</SortableQueueItem>
+				{/each}
+				{#if (playback?.queue.length ?? 0) === 0}
+					<li class="p-5 text-center text-sm text-muted-foreground">Nothing queued yet.</li>
+				{/if}
+			</ul>
+		</DragDropProvider>
 	</RoomTabs.ScrollArea>
 </div>
