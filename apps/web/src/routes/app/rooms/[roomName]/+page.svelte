@@ -102,7 +102,9 @@
 
 <div class="mx-auto w-full max-w-384 space-y-5 p-4 sm:p-6">
 	<header class="flex flex-wrap items-center justify-between gap-3">
-		<div class="flex items-center gap-3">
+		<div
+			class="space-y-3 w-full"
+		>
 			<Button href="/app" variant="outline" size="sm"
 				><ArrowLeftIcon /> All rooms</Button
 			>

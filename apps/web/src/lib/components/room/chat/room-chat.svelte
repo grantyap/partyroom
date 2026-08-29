@@ -82,7 +82,7 @@
 				{#each messages as message (message._id)}
 					{@const memberColors = getMemberColors(message.user._id)}
 					<li class="flex gap-3">
-						<div class="min-w-0 flex-1 rounded-lg bg-muted px-3 py-2">
+						<div class="min-w-0 flex-1 rounded-4xl bg-muted px-4 py-3">
 							<div class="flex items-baseline justify-between gap-3">
 								<p
 									class="truncate text-xs font-semibold"

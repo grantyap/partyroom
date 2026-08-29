@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { GripVertical } from "@lucide/svelte";
 	import { useSortable } from "@dnd-kit-svelte/svelte/sortable";
+	import { GripVertical } from "@lucide/svelte";
 	import type { Snippet } from "svelte";
 
 	let {
@@ -26,7 +26,7 @@
 
 <li
 	{@attach ref}
-	class="group flex items-center gap-2 rounded-lg border bg-background p-2"
+	class="group flex items-center gap-2 rounded-4xl border bg-background px-3 py-2"
 	class:opacity-50={isDragging.current}
 >
 	{#if !disabled}
