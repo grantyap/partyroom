@@ -41,12 +41,12 @@
 				: undefined,
 		readProviderClock: () => serverClock({}),
 		updateProvider: async (vector, { playStartDelaySeconds }) => {
-			const currentQueueItem = playback.data?.current?._id;
-			if (!currentQueueItem) throw new Error("Nothing is playing");
+			const currentKey = playback.data?.current?._id;
+			if (!currentKey) throw new Error("Nothing is playing");
 			try {
 				await updateTiming({
 					roomId,
-					currentQueueItem,
+					currentKey,
 					vector,
 					playStartDelaySeconds,
 				});
@@ -63,11 +63,21 @@
 	const mediaById = $derived(
 		new Map((roomMedia.data ?? []).map((media) => [media._id, media])),
 	);
-	const currentMedia = $derived(
-		playback.data?.current
-			? mediaById.get(playback.data.current.roomMedia)
-			: undefined,
-	);
+	const currentMedia = $derived.by(() => {
+		const current = playback.data?.current;
+		if (!current) return undefined;
+
+		const detail = mediaById.get(current.roomMedia);
+		return {
+			_id: current.roomMedia,
+			title: current.title,
+			duration: current.durationSeconds ?? undefined,
+			finalUrl: current.finalUrl,
+			lyrics: detail?.lyrics ?? [],
+			selectedLyricsId: detail?.selectedLyricsId,
+			lyricsOffsetMs: detail?.lyricsOffsetMs ?? 0,
+		};
+	});
 
 	setPlaybackContext({
 		roomId: () => roomId,

@@ -156,13 +156,23 @@ export const removeFromRoom = mutation({
   returns: v.null(),
   handler: async (ctx, args) => {
     await requireRoomAccess(ctx, args.roomId);
-    const queued = await ctx.db
-      .query("roomQueueItems")
-      .withIndex("by_room_media", (q) =>
-        q.eq("room", args.roomId).eq("roomMedia", args.roomMediaId),
-      )
-      .first();
-    if (queued) throw new Error("Remove this media from the queue first");
+    const playback = await ctx.db
+      .query("roomPlayback")
+      .withIndex("by_room", (q) => q.eq("room", args.roomId))
+      .unique();
+    if (!playback) throw new Error("Room playback state not found");
+    const current =
+      playback.state.kind === "occupiedPlaying" || playback.state.kind === "occupiedPaused"
+        ? playback.state.current
+        : playback.state.kind === "empty" && playback.state.transport.kind !== "idle"
+          ? playback.state.transport.current
+          : null;
+    if (
+      current?.roomMedia === args.roomMediaId ||
+      playback.state.queue.some((item) => item.roomMedia === args.roomMediaId)
+    ) {
+      throw new Error("Remove this media from playback first");
+    }
     await removeRoomMedia(ctx, args);
     return null;
   },
@@ -314,7 +324,23 @@ export const failJob = internalMutation({
     errorCode: v.string(),
     errorMessage: v.string(),
   },
-  handler: failMediaJob,
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await failMediaJob(ctx, args);
+    const associations = await ctx.db
+      .query("roomMedia")
+      .withIndex("by_job", (q) => q.eq("job", args.jobId))
+      .take(100);
+    await Promise.all(
+      associations.map((association) =>
+        ctx.scheduler.runAfter(0, internal.playback.onRoomMediaFailed, {
+          roomMediaId: association._id,
+          message: args.errorMessage,
+        }),
+      ),
+    );
+    return null;
+  },
 });
 
 export const getJob = query({
@@ -408,12 +434,24 @@ export const listRoomMedia = query({
           await Promise.all(
             [
               ...new Set(
-                (
-                  await ctx.db
-                    .query("roomQueueItems")
-                    .withIndex("by_room_and_rank", (q) => q.eq("room", roomId))
-                    .take(200)
-                ).map(({ roomMedia }) => roomMedia),
+                await (async () => {
+                  const playback = await ctx.db
+                    .query("roomPlayback")
+                    .withIndex("by_room", (q) => q.eq("room", roomId))
+                    .unique();
+                  if (!playback) return [] as Id<"roomMedia">[];
+                  const current =
+                    playback.state.kind === "occupiedPlaying" ||
+                    playback.state.kind === "occupiedPaused"
+                      ? playback.state.current
+                      : playback.state.kind === "empty" && playback.state.transport.kind !== "idle"
+                        ? playback.state.transport.current
+                        : null;
+                  return [
+                    ...(current ? [current.roomMedia] : []),
+                    ...playback.state.queue.map((item) => item.roomMedia),
+                  ];
+                })(),
               ),
             ].map(async (roomMediaId) => await ctx.db.get(roomMediaId)),
           )

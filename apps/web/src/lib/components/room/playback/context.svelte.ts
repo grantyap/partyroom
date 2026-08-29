@@ -1,13 +1,13 @@
 import type { OnlineTimingObject } from "$lib/online-timing-object.svelte";
 import type { Id } from "@partyroom/backend/convex/_generated/dataModel";
 import { getContext, setContext } from "svelte";
-import type { OverlayMessage, Playback, RoomMediaItem } from "../types";
+import type { CurrentMedia, OverlayMessage, Playback, RoomMediaItem } from "../types";
 
 type PlaybackContextProps = {
   roomId: () => Id<"rooms">;
   playback: () => Playback | undefined;
   mediaById: () => Map<Id<"roomMedia">, RoomMediaItem>;
-  currentMedia: () => RoomMediaItem | undefined;
+  currentMedia: () => CurrentMedia | undefined;
   overlayMessages: () => OverlayMessage[];
   error: () => string | null;
   timing: OnlineTimingObject;

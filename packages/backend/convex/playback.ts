@@ -1,4 +1,4 @@
-import { generateKeyBetween } from "fractional-indexing";
+import { type ArtifactId } from "@partyroom/activities";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -10,6 +10,7 @@ import {
   type MutationCtx,
   type QueryCtx,
 } from "./_generated/server";
+import { activities } from "./activities/workflowManager";
 import { removeRoomMedia } from "./media/domain/jobs";
 import { presence } from "./presenceComponent";
 import { requireRoomAction, userHasRoomPermission, type RoomPermission } from "./rooms";
@@ -20,35 +21,74 @@ const EMPTY_ROOM_LIFETIME_MS = 10 * 60_000;
 const MAX_QUEUE_ITEMS = 200;
 const DEFAULT_PLAY_START_DELAY_MS = 1_000;
 
-const playbackStatus = v.union(v.literal("idle"), v.literal("playing"), v.literal("paused"));
-const queueAvailability = v.union(v.literal("ready"), v.literal("processing"), v.literal("failed"));
-const queueItemResult = v.object({
-  _id: v.id("roomQueueItems"),
+const queueItemResultBase = {
+  _id: v.string(),
   roomMedia: v.id("roomMedia"),
-  rank: v.string(),
   addedBy: v.string(),
   createdAt: v.number(),
-  availability: queueAvailability,
+};
+const processingQueueItemResult = v.object({
+  ...queueItemResultBase,
+  kind: v.literal("processing"),
+  availability: v.literal("processing"),
+  finalUrl: v.null(),
+});
+const failedQueueItemResult = v.object({
+  ...queueItemResultBase,
+  kind: v.literal("failed"),
+  availability: v.literal("failed"),
+  message: v.string(),
+  finalUrl: v.null(),
+});
+const readyQueueItemResult = v.object({
+  ...queueItemResultBase,
+  kind: v.literal("ready"),
+  availability: v.literal("ready"),
+  asset: v.id("mediaAssets"),
+  title: v.string(),
+  durationSeconds: v.union(v.number(), v.null()),
+  finalUrl: v.union(v.string(), v.null()),
 });
 const playbackResult = v.object({
-  currentQueueItem: v.optional(v.id("roomQueueItems")),
-  vector: v.object({
-    position: v.number(),
-    velocity: v.number(),
-    acceleration: v.number(),
-    timestamp: v.number(),
+  playback: v.object({
+    vector: v.object({
+      position: v.number(),
+      velocity: v.number(),
+      acceleration: v.number(),
+      timestamp: v.number(),
+    }),
+    revision: v.number(),
+    queueRevision: v.number(),
+    stateKind: v.union(
+      v.literal("empty"),
+      v.literal("occupiedWaiting"),
+      v.literal("occupiedPlaying"),
+      v.literal("occupiedPaused"),
+    ),
   }),
-  revision: v.number(),
-  queueRevision: v.number(),
+  current: v.union(readyQueueItemResult, v.null()),
+  queue: v.array(
+    v.union(processingQueueItemResult, failedQueueItemResult, readyQueueItemResult),
+  ),
+  permissions: v.object({
+    controlPlayback: v.boolean(),
+    addToQueue: v.boolean(),
+    reorderQueue: v.boolean(),
+    removeFromQueue: v.boolean(),
+    sendChat: v.boolean(),
+    updateRoom: v.boolean(),
+  }),
 });
-const permissionsResult = v.object({
-  controlPlayback: v.boolean(),
-  addToQueue: v.boolean(),
-  reorderQueue: v.boolean(),
-  removeFromQueue: v.boolean(),
-  sendChat: v.boolean(),
-  updateRoom: v.boolean(),
-});
+
+type PlaybackState = Doc<"roomPlayback">["state"];
+type QueueItem = Extract<
+  PlaybackState,
+  { kind: "empty" | "occupiedPlaying" | "occupiedPaused" }
+>["queue"][number];
+type ReadyItem = Extract<QueueItem, { kind: "ready" }>;
+type NonReadyItem = Exclude<QueueItem, ReadyItem>;
+type TimingUpdate = { position?: number; velocity?: number; acceleration?: number };
+export type TimingStateVectorUpdate = TimingUpdate;
 
 async function playbackForRoom(ctx: QueryCtx | MutationCtx, roomId: Id<"rooms">) {
   const playback = await ctx.db
@@ -59,139 +99,216 @@ async function playbackForRoom(ctx: QueryCtx | MutationCtx, roomId: Id<"rooms">)
   return playback;
 }
 
-async function queueItemsForRoom(ctx: QueryCtx | MutationCtx, roomId: Id<"rooms">) {
-  return await ctx.db
-    .query("roomQueueItems")
-    .withIndex("by_room_and_rank", (q) => q.eq("room", roomId))
-    .take(MAX_QUEUE_ITEMS);
-}
-
-async function mediaAvailability(ctx: QueryCtx | MutationCtx, roomMedia: Doc<"roomMedia">) {
-  const job = await ctx.db.get("mediaJobs", roomMedia.job);
-  if (job?.state === "ready") {
-    const assetId = roomMedia.asset ?? job.asset;
-    const asset = assetId ? await ctx.db.get("mediaAssets", assetId) : null;
-    if (asset?.finalArtifactId) return "ready" as const;
-  }
-  if (job?.state === "queued" || job?.state === "processing") return "processing" as const;
-  return "failed" as const;
-}
-
-async function queueItemAvailability(ctx: QueryCtx | MutationCtx, item: Doc<"roomQueueItems">) {
-  const roomMedia = await ctx.db.get("roomMedia", item.roomMedia);
-  if (!roomMedia || roomMedia.room !== item.room) return "failed" as const;
-  return await mediaAvailability(ctx, roomMedia);
-}
-
-async function firstReadyQueueItem(ctx: QueryCtx | MutationCtx, roomId: Id<"rooms">) {
-  for (const item of await queueItemsForRoom(ctx, roomId)) {
-    if ((await queueItemAvailability(ctx, item)) === "ready") return item;
-  }
+function currentItem(state: PlaybackState): ReadyItem | null {
+  if (state.kind === "occupiedPlaying" || state.kind === "occupiedPaused") return state.current;
+  if (state.kind === "empty" && state.transport.kind !== "idle") return state.transport.current;
   return null;
 }
 
-async function queueItemDurationMs(ctx: QueryCtx | MutationCtx, item: Doc<"roomQueueItems">) {
-  const roomMedia = await ctx.db.get("roomMedia", item.roomMedia);
+function queueItems(state: PlaybackState): QueueItem[] {
+  return state.queue;
+}
+
+function activeTiming(state: PlaybackState) {
+  if (state.kind === "occupiedPlaying" || state.kind === "occupiedPaused") return state;
+  if (state.kind === "empty" && state.transport.kind !== "idle") return state.transport;
+  return null;
+}
+
+function isPlaying(state: PlaybackState) {
+  return (
+    state.kind === "occupiedPlaying" ||
+    (state.kind === "empty" && state.transport.kind === "playing")
+  );
+}
+
+function projectedPositionMs(state: PlaybackState, now: number) {
+  const timing = activeTiming(state);
+  if (!timing) return 0;
+  if (!isPlaying(state)) return timing.anchorPositionMs;
+  return Math.max(0, timing.anchorPositionMs + Math.max(0, now - timing.anchorUpdatedAt));
+}
+
+async function readyItemForRoomMedia(
+  ctx: QueryCtx | MutationCtx,
+  roomMediaId: Id<"roomMedia">,
+  base: Pick<QueueItem, "key" | "roomMedia" | "addedBy" | "createdAt">,
+): Promise<ReadyItem | null> {
+  const roomMedia = await ctx.db.get("roomMedia", roomMediaId);
   if (!roomMedia) return null;
   const job = await ctx.db.get("mediaJobs", roomMedia.job);
-  const assetId = roomMedia.asset ?? job?.asset;
+  if (job?.state !== "ready") return null;
+  const assetId = roomMedia.asset ?? job.asset;
   const asset = assetId ? await ctx.db.get("mediaAssets", assetId) : null;
-  return asset?.duration ? asset.duration * 1_000 : null;
+  if (!asset || asset.state !== "ready" || !asset.finalArtifactId) return null;
+  return {
+    ...base,
+    kind: "ready",
+    asset: asset._id,
+    title: asset.title?.trim() || "Untitled media",
+    durationSeconds: asset.duration ?? null,
+    finalArtifactId: asset.finalArtifactId,
+  };
+}
+
+async function initialQueueItem(
+  ctx: MutationCtx,
+  roomMedia: Doc<"roomMedia">,
+  addedBy: string,
+): Promise<QueueItem> {
+  const base = {
+    key: crypto.randomUUID(),
+    roomMedia: roomMedia._id,
+    addedBy,
+    createdAt: Date.now(),
+  };
+  const ready = await readyItemForRoomMedia(ctx, roomMedia._id, base);
+  if (ready) return ready;
+  const job = await ctx.db.get("mediaJobs", roomMedia.job);
+  return job?.state === "failed"
+    ? { ...base, kind: "failed", message: job.errorMessage ?? "Media processing failed" }
+    : { ...base, kind: "processing" };
+}
+
+function promoteReadyFromOccupiedQueue(
+  state: Extract<PlaybackState, { kind: "occupiedWaiting" }>,
+  queue: QueueItem[],
+  now: number,
+): PlaybackState {
+  const index = queue.findIndex((item) => item.kind === "ready");
+  if (index < 0) return { ...state, queue: queue as NonReadyItem[] };
+  const current = queue[index] as ReadyItem;
+  return {
+    kind: "occupiedPlaying",
+    occupancyGeneration: state.occupancyGeneration,
+    presenceCheckAt: state.presenceCheckAt,
+    current,
+    anchorPositionMs: 0,
+    anchorUpdatedAt: now,
+    queue: [...queue.slice(0, index), ...queue.slice(index + 1)],
+  };
+}
+
+function appendQueueItem(state: PlaybackState, item: QueueItem, now: number): PlaybackState {
+  if (state.kind === "occupiedWaiting") {
+    return promoteReadyFromOccupiedQueue(state, [...state.queue, item], now);
+  }
+  return { ...state, queue: [...state.queue, item] };
+}
+
+function replaceQueuedMedia(
+  state: PlaybackState,
+  roomMediaId: Id<"roomMedia">,
+  replace: (item: QueueItem) => QueueItem,
+  now: number,
+): PlaybackState {
+  const queue = state.queue.map((item) =>
+    item.roomMedia === roomMediaId ? replace(item as QueueItem) : item,
+  );
+  if (state.kind === "occupiedWaiting") return promoteReadyFromOccupiedQueue(state, queue, now);
+  return { ...state, queue } as PlaybackState;
 }
 
 async function scheduleAutomaticAdvance(
   ctx: MutationCtx,
-  item: Doc<"roomQueueItems">,
+  item: ReadyItem,
+  roomId: Id<"rooms">,
   revision: number,
   positionMs: number,
   startDelayMs = 0,
 ) {
-  const durationMs = await queueItemDurationMs(ctx, item);
-  if (durationMs === null) return;
+  if (item.durationSeconds === null) return;
   await ctx.scheduler.runAfter(
-    startDelayMs + Math.max(0, durationMs - positionMs),
+    startDelayMs + Math.max(0, item.durationSeconds * 1_000 - positionMs),
     internal.playback.finishIfCurrent,
-    {
-      roomId: item.room,
-      currentQueueItem: item._id,
-      expectedRevision: revision,
-    },
+    { roomId, currentKey: item.key, expectedRevision: revision },
   );
 }
 
-async function startFirstReadyIfIdle(
+async function scheduleIfNewCurrent(
   ctx: MutationCtx,
-  playback: Doc<"roomPlayback">,
-  now = Date.now(),
+  roomId: Id<"rooms">,
+  previous: PlaybackState,
+  next: PlaybackState,
+  revision: number,
 ) {
-  if (playback.currentQueueItem || playback.emptySince !== undefined) return false;
-  const next = await firstReadyQueueItem(ctx, playback.room);
-  if (!next) return false;
-  await ctx.db.patch("roomPlayback", playback._id, {
-    currentQueueItem: next._id,
-    status: "playing",
-    anchorPositionMs: 0,
-    anchorUpdatedAt: now,
-    revision: playback.revision + 1,
-  });
-  await scheduleAutomaticAdvance(ctx, next, playback.revision + 1, 0);
-  return true;
-}
-
-/**
- * Queries the persisted timing resource at `now` using its state vector.
- * Partyroom only supports velocity 0 or 1 and acceleration 0, but exposes the
- * complete W3C four-tuple so clients consume a genuine timing source rather
- * than treating a browser playhead as shared state.
- *
- * @see https://www.w3.org/community/reports/webtiming/CG-FINAL-timingobject-20241203/#media-elements-and-the-timing-object
- */
-function projectedPositionMs(playback: Doc<"roomPlayback">, now: number) {
-  if (playback.status !== "playing") return playback.anchorPositionMs;
-  return Math.max(0, playback.anchorPositionMs + Math.max(0, now - playback.anchorUpdatedAt));
+  const before = currentItem(previous);
+  const after = currentItem(next);
+  if (after && after.key !== before?.key && isPlaying(next)) {
+    await scheduleAutomaticAdvance(ctx, after, roomId, revision, 0);
+  }
 }
 
 function userCan(room: Doc<"rooms">, userId: string, permission: RoomPermission) {
   return userHasRoomPermission({ user: userId, room, permission });
 }
 
+async function artifactUrl(ctx: QueryCtx, artifactId: string) {
+  return await activities.getArtifactUrl(ctx, artifactId as ArtifactId);
+}
+
+async function readyQueueItemForClient(ctx: QueryCtx, item: ReadyItem) {
+  return {
+    _id: item.key,
+    roomMedia: item.roomMedia,
+    addedBy: item.addedBy,
+    createdAt: item.createdAt,
+    kind: item.kind,
+    availability: item.kind,
+    asset: item.asset,
+    title: item.title,
+    durationSeconds: item.durationSeconds,
+    finalUrl: await artifactUrl(ctx, item.finalArtifactId),
+  };
+}
+
+async function queueItemForClient(ctx: QueryCtx, item: QueueItem) {
+  const base = {
+    _id: item.key,
+    roomMedia: item.roomMedia,
+    addedBy: item.addedBy,
+    createdAt: item.createdAt,
+  };
+  if (item.kind === "processing") {
+    return { ...base, kind: item.kind, availability: item.kind, finalUrl: null };
+  }
+  if (item.kind === "failed") {
+    return {
+      ...base,
+      kind: item.kind,
+      availability: item.kind,
+      message: item.message,
+      finalUrl: null,
+    };
+  }
+  return await readyQueueItemForClient(ctx, item);
+}
+
 export const get = query({
   args: { roomId: v.id("rooms") },
-  returns: v.object({
-    playback: playbackResult,
-    current: v.union(queueItemResult, v.null()),
-    queue: v.array(queueItemResult),
-    permissions: permissionsResult,
-  }),
+  returns: playbackResult,
   handler: async (ctx, { roomId }) => {
     const { room, user } = await requireRoomAction(ctx, roomId, "rooms:read");
     const playback = await playbackForRoom(ctx, roomId);
-    const items = await queueItemsForRoom(ctx, roomId);
-    const results = await Promise.all(
-      items.map(async (item) => ({
-        _id: item._id,
-        roomMedia: item.roomMedia,
-        rank: item.rank,
-        addedBy: item.addedBy,
-        createdAt: item.createdAt,
-        availability: await queueItemAvailability(ctx, item),
-      })),
+    const current = currentItem(playback.state);
+    const timing = activeTiming(playback.state);
+    const queue = await Promise.all(
+      queueItems(playback.state).map((item) => queueItemForClient(ctx, item)),
     );
-    const current = results.find((item) => item._id === playback.currentQueueItem) ?? null;
     return {
       playback: {
-        currentQueueItem: playback.currentQueueItem,
         vector: {
-          position: playback.anchorPositionMs / 1_000,
-          velocity: playback.status === "playing" ? 1 : 0,
+          position: (timing?.anchorPositionMs ?? 0) / 1_000,
+          velocity: isPlaying(playback.state) ? 1 : 0,
           acceleration: 0,
-          timestamp: playback.anchorUpdatedAt / 1_000,
+          timestamp: (timing?.anchorUpdatedAt ?? Date.now()) / 1_000,
         },
         revision: playback.revision,
         queueRevision: playback.queueRevision,
+        stateKind: playback.state.kind,
       },
-      current,
-      queue: results.filter((item) => item._id !== playback.currentQueueItem),
+      current: current ? await readyQueueItemForClient(ctx, current) : null,
+      queue,
       permissions: {
         controlPlayback: userCan(room, user._id, "rooms:controlPlayback"),
         addToQueue: userCan(room, user._id, "rooms:addToQueue"),
@@ -217,64 +334,40 @@ export async function enqueueRoomMedia(
   const roomMedia = await ctx.db.get("roomMedia", args.roomMediaId);
   if (!roomMedia || roomMedia.room !== args.roomId) throw new Error("Room media item not found");
   const playback = await playbackForRoom(ctx, args.roomId);
-  const last = await ctx.db
-    .query("roomQueueItems")
-    .withIndex("by_room_and_rank", (q) => q.eq("room", args.roomId))
-    .order("desc")
-    .first();
-  const itemId = await ctx.db.insert("roomQueueItems", {
-    room: args.roomId,
-    roomMedia: args.roomMediaId,
-    rank: generateKeyBetween(last?.rank ?? null, null),
-    addedBy: args.addedBy,
-    createdAt: Date.now(),
-  });
+  if (queueItems(playback.state).length >= MAX_QUEUE_ITEMS) throw new Error("The queue is full");
+  const item = await initialQueueItem(ctx, roomMedia, args.addedBy);
+  const state = appendQueueItem(playback.state, item, Date.now());
+  const revision =
+    playback.revision + (currentItem(state)?.key !== currentItem(playback.state)?.key ? 1 : 0);
   await ctx.db.patch("roomPlayback", playback._id, {
+    state,
+    revision,
     queueRevision: playback.queueRevision + 1,
   });
-  const updated = (await ctx.db.get("roomPlayback", playback._id))!;
-  await startFirstReadyIfIdle(ctx, updated);
-  return itemId;
+  await scheduleIfNewCurrent(ctx, args.roomId, playback.state, state, revision);
+  return item.key;
 }
 
 export const add = mutation({
   args: { roomId: v.id("rooms"), roomMediaId: v.id("roomMedia") },
-  returns: v.id("roomQueueItems"),
+  returns: v.string(),
   handler: async (ctx, args) => {
     const { user } = await requireRoomAction(ctx, args.roomId, "rooms:addToQueue");
     return await enqueueRoomMedia(ctx, { ...args, addedBy: user._id });
   },
 });
 
-export type TimingStateVectorUpdate = {
-  position?: number;
-  velocity?: number;
-  acceleration?: number;
-};
-
-/**
- * Applies a partial W3C Timing Object state-vector update. Omitted fields are
- * queried from the current vector, and the resulting vector is multicast
- * through the reactive `get` query. A vector that starts forward playback is
- * timestamped slightly in the future so every client can prepare its decoder
- * and activate against one shared provider-clock instant.
- *
- * Partyroom currently supports media's forward-play and paused states only:
- * velocity must be 0 or 1 and acceleration must be 0.
- *
- * @see https://www.w3.org/community/reports/webtiming/CG-FINAL-timingobject-20241203/#process-an-update-operation-timing-provider
- */
 export async function updateRoomTiming(
   ctx: MutationCtx,
   {
     roomId,
-    currentQueueItem,
+    currentKey,
     update,
     playStartDelayMs = DEFAULT_PLAY_START_DELAY_MS,
   }: {
     roomId: Id<"rooms">;
-    currentQueueItem: Id<"roomQueueItems">;
-    update: TimingStateVectorUpdate;
+    currentKey: string;
+    update: TimingUpdate;
     playStartDelayMs?: number;
   },
   now = Date.now(),
@@ -283,53 +376,67 @@ export async function updateRoomTiming(
     update.position === undefined &&
     update.velocity === undefined &&
     update.acceleration === undefined
-  ) {
+  )
     throw new Error("A timing update must change at least one vector component");
-  }
-  if (update.position !== undefined && (!Number.isFinite(update.position) || update.position < 0)) {
+  if (update.position !== undefined && (!Number.isFinite(update.position) || update.position < 0))
     throw new Error("Timing position must be a finite non-negative number");
-  }
-  if (update.velocity !== undefined && update.velocity !== 0 && update.velocity !== 1) {
+  if (update.velocity !== undefined && update.velocity !== 0 && update.velocity !== 1)
     throw new Error("Partyroom only supports timing velocity 0 or 1");
-  }
-  if (update.acceleration !== undefined && update.acceleration !== 0) {
+  if (update.acceleration !== undefined && update.acceleration !== 0)
     throw new Error("Partyroom only supports timing acceleration 0");
-  }
-  if (!Number.isFinite(playStartDelayMs) || playStartDelayMs < 0) {
+  if (!Number.isFinite(playStartDelayMs) || playStartDelayMs < 0)
     throw new Error("Playback start delay must be a finite non-negative number");
-  }
 
   const playback = await playbackForRoom(ctx, roomId);
-  if (playback.currentQueueItem !== currentQueueItem) return;
+  const current = currentItem(playback.state);
+  const timing = activeTiming(playback.state);
+  if (!current || !timing || current.key !== currentKey) return;
   const positionMs =
-    update.position === undefined ? projectedPositionMs(playback, now) : update.position * 1_000;
-  const velocity = update.velocity ?? (playback.status === "playing" ? 1 : 0);
+    update.position === undefined
+      ? projectedPositionMs(playback.state, now)
+      : update.position * 1_000;
+  const velocity = update.velocity ?? (isPlaying(playback.state) ? 1 : 0);
   const startDelayMs = velocity === 1 ? playStartDelayMs : 0;
-  await ctx.db.patch("roomPlayback", playback._id, {
-    status: velocity === 1 ? "playing" : "paused",
-    anchorPositionMs: positionMs,
-    anchorUpdatedAt: now + startDelayMs,
-    revision: playback.revision + 1,
-  });
-  if (velocity === 1) {
-    const item = await ctx.db.get("roomQueueItems", playback.currentQueueItem);
-    if (item) {
-      await scheduleAutomaticAdvance(ctx, item, playback.revision + 1, positionMs, startDelayMs);
-    }
+  const anchorUpdatedAt = now + startDelayMs;
+  let state: PlaybackState;
+  if (playback.state.kind === "empty") {
+    state = {
+      ...playback.state,
+      transport:
+        velocity === 1
+          ? { kind: "playing", current, anchorPositionMs: positionMs, anchorUpdatedAt }
+          : {
+              kind: "paused",
+              current,
+              anchorPositionMs: positionMs,
+              anchorUpdatedAt,
+              reason: "user",
+            },
+    };
+  } else {
+    const common = {
+      occupancyGeneration: playback.state.occupancyGeneration,
+      presenceCheckAt: playback.state.presenceCheckAt,
+      current,
+      anchorPositionMs: positionMs,
+      anchorUpdatedAt,
+      queue: playback.state.queue,
+    };
+    state =
+      velocity === 1
+        ? { kind: "occupiedPlaying", ...common }
+        : { kind: "occupiedPaused", ...common, reason: "user" };
   }
+  const revision = playback.revision + 1;
+  await ctx.db.patch("roomPlayback", playback._id, { state, revision });
+  if (velocity === 1)
+    await scheduleAutomaticAdvance(ctx, current, roomId, revision, positionMs, startDelayMs);
 }
 
-/**
- * Requests an update to the room's online timing resource. Per the W3C model,
- * this mutation only forwards the request; clients update their local timing
- * object after the resulting vector arrives through `get`.
- *
- * @see https://www.w3.org/community/reports/webtiming/CG-FINAL-timingobject-20241203/#state-vector-synchronization
- */
 export const update = mutation({
   args: {
     roomId: v.id("rooms"),
-    currentQueueItem: v.id("roomQueueItems"),
+    currentKey: v.string(),
     vector: v.object({
       position: v.optional(v.number()),
       velocity: v.optional(v.number()),
@@ -338,11 +445,11 @@ export const update = mutation({
     playStartDelaySeconds: v.optional(v.number()),
   },
   returns: v.null(),
-  handler: async (ctx, { roomId, currentQueueItem, vector, playStartDelaySeconds }) => {
+  handler: async (ctx, { roomId, currentKey, vector, playStartDelaySeconds }) => {
     await requireRoomAction(ctx, roomId, "rooms:controlPlayback");
     await updateRoomTiming(ctx, {
       roomId,
-      currentQueueItem,
+      currentKey,
       update: vector,
       playStartDelayMs:
         playStartDelaySeconds === undefined ? undefined : playStartDelaySeconds * 1_000,
@@ -353,38 +460,53 @@ export const update = mutation({
 
 export async function advanceRoomPlayback(
   ctx: MutationCtx,
-  args: {
-    roomId: Id<"rooms">;
-    currentQueueItem: Id<"roomQueueItems">;
-    expectedRevision?: number;
-  },
+  args: { roomId: Id<"rooms">; currentKey: string; expectedRevision?: number },
 ) {
   const playback = await playbackForRoom(ctx, args.roomId);
+  const current = currentItem(playback.state);
   if (
     (args.expectedRevision !== undefined && playback.revision !== args.expectedRevision) ||
-    playback.currentQueueItem !== args.currentQueueItem
-  ) {
+    current?.key !== args.currentKey
+  )
     return;
+  const queue = queueItems(playback.state);
+  let state: PlaybackState;
+  if (playback.state.kind === "empty") {
+    state = { ...playback.state, transport: { kind: "idle" } };
+  } else {
+    const nextIndex = queue.findIndex((item) => item.kind === "ready");
+    if (nextIndex < 0) {
+      state = {
+        kind: "occupiedWaiting",
+        occupancyGeneration: playback.state.occupancyGeneration,
+        presenceCheckAt: playback.state.presenceCheckAt,
+        queue: queue as NonReadyItem[],
+      };
+    } else {
+      const next = queue[nextIndex] as ReadyItem;
+      state = {
+        kind: "occupiedPlaying",
+        occupancyGeneration: playback.state.occupancyGeneration,
+        presenceCheckAt: playback.state.presenceCheckAt,
+        current: next,
+        anchorPositionMs: 0,
+        anchorUpdatedAt: Date.now(),
+        queue: [...queue.slice(0, nextIndex), ...queue.slice(nextIndex + 1)],
+      };
+    }
   }
-  await ctx.db.delete("roomQueueItems", args.currentQueueItem);
-  const next = await firstReadyQueueItem(ctx, args.roomId);
-  const now = Date.now();
+  const revision = playback.revision + 1;
   await ctx.db.patch("roomPlayback", playback._id, {
-    currentQueueItem: next?._id,
-    status: next ? "playing" : "idle",
-    anchorPositionMs: 0,
-    anchorUpdatedAt: now,
-    revision: playback.revision + 1,
+    state,
+    revision,
     queueRevision: playback.queueRevision + 1,
   });
-  if (next) await scheduleAutomaticAdvance(ctx, next, playback.revision + 1, 0);
+  const next = currentItem(state);
+  if (next && isPlaying(state)) await scheduleAutomaticAdvance(ctx, next, args.roomId, revision, 0);
 }
 
 export const advance = mutation({
-  args: {
-    roomId: v.id("rooms"),
-    currentQueueItem: v.id("roomQueueItems"),
-  },
+  args: { roomId: v.id("rooms"), currentKey: v.string() },
   returns: v.null(),
   handler: async (ctx, args) => {
     await requireRoomAction(ctx, args.roomId, "rooms:controlPlayback");
@@ -394,35 +516,29 @@ export const advance = mutation({
 });
 
 export const finishIfCurrent = internalMutation({
-  args: {
-    roomId: v.id("rooms"),
-    currentQueueItem: v.id("roomQueueItems"),
-    expectedRevision: v.number(),
-  },
+  args: { roomId: v.id("rooms"), currentKey: v.string(), expectedRevision: v.number() },
   returns: v.null(),
   handler: async (ctx, args) => {
-    const playback = await ctx.db
-      .query("roomPlayback")
-      .withIndex("by_room", (q) => q.eq("room", args.roomId))
-      .unique();
-    if (playback?.status === "playing") await advanceRoomPlayback(ctx, args);
+    const playback = await playbackForRoom(ctx, args.roomId);
+    if (isPlaying(playback.state)) await advanceRoomPlayback(ctx, args);
     return null;
   },
 });
 
 export const remove = mutation({
-  args: { roomId: v.id("rooms"), queueItemId: v.id("roomQueueItems") },
+  args: { roomId: v.id("rooms"), queueItemKey: v.string() },
   returns: v.null(),
-  handler: async (ctx, { roomId, queueItemId }) => {
+  handler: async (ctx, { roomId, queueItemKey }) => {
     await requireRoomAction(ctx, roomId, "rooms:removeFromQueue");
     const playback = await playbackForRoom(ctx, roomId);
-    if (playback.currentQueueItem === queueItemId) {
-      throw new Error("The currently playing item cannot be removed; skip it instead");
-    }
-    const item = await ctx.db.get("roomQueueItems", queueItemId);
-    if (!item || item.room !== roomId) throw new Error("Queue item not found");
-    await ctx.db.delete("roomQueueItems", queueItemId);
+    const queue = queueItems(playback.state);
+    if (!queue.some((item) => item.key === queueItemKey)) throw new Error("Queue item not found");
+    const state = {
+      ...playback.state,
+      queue: queue.filter((item) => item.key !== queueItemKey),
+    } as PlaybackState;
     await ctx.db.patch("roomPlayback", playback._id, {
+      state,
       queueRevision: playback.queueRevision + 1,
     });
     return null;
@@ -432,37 +548,34 @@ export const remove = mutation({
 export const reorder = mutation({
   args: {
     roomId: v.id("rooms"),
-    queueItemId: v.id("roomQueueItems"),
-    afterItemId: v.union(v.id("roomQueueItems"), v.null()),
-    beforeItemId: v.union(v.id("roomQueueItems"), v.null()),
+    queueItemKey: v.string(),
+    afterItemKey: v.union(v.string(), v.null()),
+    beforeItemKey: v.union(v.string(), v.null()),
   },
   returns: v.null(),
-  handler: async (ctx, { roomId, queueItemId, afterItemId, beforeItemId }) => {
+  handler: async (ctx, { roomId, queueItemKey, afterItemKey, beforeItemKey }) => {
     await requireRoomAction(ctx, roomId, "rooms:reorderQueue");
     const playback = await playbackForRoom(ctx, roomId);
-    if (playback.currentQueueItem === queueItemId) throw new Error("Current item cannot be moved");
-    const items = (await queueItemsForRoom(ctx, roomId)).filter(
-      (item) => item._id !== playback.currentQueueItem && item._id !== queueItemId,
-    );
-    const item = await ctx.db.get("roomQueueItems", queueItemId);
-    if (!item || item.room !== roomId) throw new Error("Queue item not found");
+    const queue = queueItems(playback.state);
+    const moving = queue.find((item) => item.key === queueItemKey);
+    if (!moving) throw new Error("Queue item not found");
+    const remaining = queue.filter((item) => item.key !== queueItemKey);
     const afterIndex =
-      afterItemId === null ? -1 : items.findIndex((row) => row._id === afterItemId);
+      afterItemKey === null ? -1 : remaining.findIndex((item) => item.key === afterItemKey);
     const beforeIndex =
-      beforeItemId === null ? items.length : items.findIndex((row) => row._id === beforeItemId);
+      beforeItemKey === null
+        ? remaining.length
+        : remaining.findIndex((item) => item.key === beforeItemKey);
     if (
-      (afterItemId !== null && afterIndex < 0) ||
-      (beforeItemId !== null && beforeIndex < 0) ||
+      (afterItemKey !== null && afterIndex < 0) ||
+      (beforeItemKey !== null && beforeIndex < 0) ||
       beforeIndex !== afterIndex + 1
-    ) {
+    )
       throw new Error("Queue changed while reordering; try again");
-    }
-    const rank = generateKeyBetween(
-      afterIndex >= 0 ? items[afterIndex].rank : null,
-      beforeIndex < items.length ? items[beforeIndex].rank : null,
-    );
-    await ctx.db.patch("roomQueueItems", queueItemId, { rank });
+    const reordered = [...remaining.slice(0, beforeIndex), moving, ...remaining.slice(beforeIndex)];
+    const state = { ...playback.state, queue: reordered } as PlaybackState;
     await ctx.db.patch("roomPlayback", playback._id, {
+      state,
       queueRevision: playback.queueRevision + 1,
     });
     return null;
@@ -479,23 +592,17 @@ export const setLyrics = mutation({
   handler: async (ctx, { roomId, lyricsId, offsetMs }) => {
     await requireRoomAction(ctx, roomId, "rooms:controlPlayback");
     const playback = await playbackForRoom(ctx, roomId);
-    if (!playback.currentQueueItem) throw new Error("Nothing is playing");
-    const item = await ctx.db.get("roomQueueItems", playback.currentQueueItem);
-    if (!item || item.room !== roomId) throw new Error("Current queue item not found");
-    const roomMedia = await ctx.db.get("roomMedia", item.roomMedia);
+    const current = currentItem(playback.state);
+    if (!current) throw new Error("Nothing is playing");
+    const roomMedia = await ctx.db.get("roomMedia", current.roomMedia);
     if (!roomMedia || roomMedia.room !== roomId) throw new Error("Room media item not found");
     if (lyricsId !== null) {
-      const job = await ctx.db.get("mediaJobs", roomMedia.job);
-      const assetId = roomMedia.asset ?? job?.asset;
-      const tracks = assetId
-        ? await ctx.db
-            .query("mediaLyricTracks")
-            .withIndex("by_asset", (q) => q.eq("asset", assetId))
-            .take(20)
-        : [];
-      if (!tracks.some((track) => track.source === lyricsId && track.state === "ready")) {
+      const tracks = await ctx.db
+        .query("mediaLyricTracks")
+        .withIndex("by_asset", (q) => q.eq("asset", current.asset))
+        .take(20);
+      if (!tracks.some((track) => track.source === lyricsId && track.state === "ready"))
         throw new Error("Lyrics track not found");
-      }
     }
     await ctx.db.patch("roomMedia", roomMedia._id, {
       selectedLyricsId: lyricsId ?? undefined,
@@ -505,49 +612,104 @@ export const setLyrics = mutation({
   },
 });
 
-async function schedulePresenceCheck(
-  ctx: MutationCtx,
-  playback: Doc<"roomPlayback">,
-  delay = PRESENCE_CHECK_INTERVAL_MS,
-) {
-  const checkAt = Date.now() + delay;
-  await ctx.db.patch("roomPlayback", playback._id, { presenceCheckAt: checkAt });
-  await ctx.scheduler.runAfter(delay, internal.playback.checkPresence, {
+async function schedulePresenceCheck(ctx: MutationCtx, playback: Doc<"roomPlayback">) {
+  const checkAt = Date.now() + PRESENCE_CHECK_INTERVAL_MS;
+  if (playback.state.kind === "empty") return;
+  await ctx.db.patch("roomPlayback", playback._id, {
+    state: { ...playback.state, presenceCheckAt: checkAt },
+  });
+  await ctx.scheduler.runAfter(PRESENCE_CHECK_INTERVAL_MS, internal.playback.checkPresence, {
     roomId: playback.room,
     checkAt,
   });
 }
 
 export async function markRoomOccupied(ctx: MutationCtx, roomId: Id<"rooms">) {
-  let playback = await playbackForRoom(ctx, roomId);
-  if (playback.emptySince !== undefined) {
-    await ctx.db.patch("roomPlayback", playback._id, {
-      emptySince: undefined,
-      occupancyGeneration: playback.occupancyGeneration + 1,
-    });
-    playback = (await ctx.db.get("roomPlayback", playback._id))!;
-    await startFirstReadyIfIdle(ctx, playback);
+  const playback = await playbackForRoom(ctx, roomId);
+  if (playback.state.kind !== "empty") return;
+  const checkAt = Date.now() + PRESENCE_CHECK_INTERVAL_MS;
+  const generation = playback.state.occupancyGeneration + 1;
+  const { transport, queue } = playback.state;
+  let state: PlaybackState;
+  if (transport.kind === "playing") {
+    state = {
+      kind: "occupiedPlaying",
+      occupancyGeneration: generation,
+      presenceCheckAt: checkAt,
+      current: transport.current,
+      anchorPositionMs: transport.anchorPositionMs,
+      anchorUpdatedAt: transport.anchorUpdatedAt,
+      queue,
+    };
+  } else if (transport.kind === "paused") {
+    state = {
+      kind: "occupiedPaused",
+      occupancyGeneration: generation,
+      presenceCheckAt: checkAt,
+      current: transport.current,
+      anchorPositionMs: transport.anchorPositionMs,
+      anchorUpdatedAt: transport.anchorUpdatedAt,
+      reason: transport.reason,
+      queue,
+    };
+  } else {
+    const waiting = {
+      kind: "occupiedWaiting",
+      occupancyGeneration: generation,
+      presenceCheckAt: checkAt,
+      queue: [],
+    } as Extract<PlaybackState, { kind: "occupiedWaiting" }>;
+    state = promoteReadyFromOccupiedQueue(waiting, queue, Date.now());
   }
-  if (playback.presenceCheckAt === undefined) await schedulePresenceCheck(ctx, playback);
+  const revision =
+    playback.revision + (currentItem(state)?.key !== currentItem(playback.state)?.key ? 1 : 0);
+  await ctx.db.patch("roomPlayback", playback._id, { state, revision });
+  await ctx.scheduler.runAfter(PRESENCE_CHECK_INTERVAL_MS, internal.playback.checkPresence, {
+    roomId,
+    checkAt,
+  });
+  await scheduleIfNewCurrent(ctx, roomId, playback.state, state, revision);
 }
 
 async function markRoomEmpty(ctx: MutationCtx, playback: Doc<"roomPlayback">) {
-  if (playback.emptySince !== undefined) return;
+  if (playback.state.kind === "empty") return;
   const now = Date.now();
-  const occupancyGeneration = playback.occupancyGeneration + 1;
-  await ctx.db.patch("roomPlayback", playback._id, {
+  const generation = playback.state.occupancyGeneration + 1;
+  const current = currentItem(playback.state);
+  const timing = activeTiming(playback.state);
+  const transport =
+    current && timing
+      ? isPlaying(playback.state)
+        ? {
+            kind: "playing" as const,
+            current,
+            anchorPositionMs: timing.anchorPositionMs,
+            anchorUpdatedAt: timing.anchorUpdatedAt,
+          }
+        : {
+            kind: "paused" as const,
+            current,
+            anchorPositionMs: timing.anchorPositionMs,
+            anchorUpdatedAt: timing.anchorUpdatedAt,
+            reason: "user" as const,
+          }
+      : { kind: "idle" as const };
+  const state: PlaybackState = {
+    kind: "empty",
     emptySince: now,
-    occupancyGeneration,
-    presenceCheckAt: undefined,
-  });
+    occupancyGeneration: generation,
+    transport,
+    queue: queueItems(playback.state),
+  };
+  await ctx.db.patch("roomPlayback", playback._id, { state });
   await Promise.all([
     ctx.scheduler.runAfter(EMPTY_PAUSE_GRACE_MS, internal.playback.pauseIfEmpty, {
       roomId: playback.room,
-      occupancyGeneration,
+      occupancyGeneration: generation,
     }),
     ctx.scheduler.runAfter(EMPTY_ROOM_LIFETIME_MS, internal.playback.deleteIfEmpty, {
       roomId: playback.room,
-      occupancyGeneration,
+      occupancyGeneration: generation,
     }),
   ]);
 }
@@ -555,11 +717,8 @@ async function markRoomEmpty(ctx: MutationCtx, playback: Doc<"roomPlayback">) {
 export async function observeRoomPresence(ctx: MutationCtx, roomId: Id<"rooms">) {
   const playback = await playbackForRoom(ctx, roomId);
   const online = await presence.listRoom(ctx, roomId, true, 1);
-  if (online.length > 0) {
-    await markRoomOccupied(ctx, roomId);
-  } else {
-    await markRoomEmpty(ctx, playback);
-  }
+  if (online.length > 0) await markRoomOccupied(ctx, roomId);
+  else await markRoomEmpty(ctx, playback);
 }
 
 export const recordOccupied = internalMutation({
@@ -584,11 +743,8 @@ export const checkPresence = internalMutation({
   args: { roomId: v.id("rooms"), checkAt: v.number() },
   returns: v.null(),
   handler: async (ctx, { roomId, checkAt }) => {
-    const playback = await ctx.db
-      .query("roomPlayback")
-      .withIndex("by_room", (q) => q.eq("room", roomId))
-      .unique();
-    if (!playback || playback.presenceCheckAt !== checkAt) return null;
+    const playback = await playbackForRoom(ctx, roomId);
+    if (playback.state.kind === "empty" || playback.state.presenceCheckAt !== checkAt) return null;
     const online = await presence.listRoom(ctx, roomId, true, 1);
     if (online.length === 0) await markRoomEmpty(ctx, playback);
     else await schedulePresenceCheck(ctx, playback);
@@ -600,23 +756,26 @@ export const pauseIfEmpty = internalMutation({
   args: { roomId: v.id("rooms"), occupancyGeneration: v.number() },
   returns: v.null(),
   handler: async (ctx, { roomId, occupancyGeneration }) => {
-    const playback = await ctx.db
-      .query("roomPlayback")
-      .withIndex("by_room", (q) => q.eq("room", roomId))
-      .unique();
+    const playback = await playbackForRoom(ctx, roomId);
+    const state = playback.state;
     if (
-      !playback ||
-      playback.emptySince === undefined ||
-      playback.occupancyGeneration !== occupancyGeneration ||
-      playback.status !== "playing"
-    ) {
+      state.kind !== "empty" ||
+      state.occupancyGeneration !== occupancyGeneration ||
+      state.transport.kind !== "playing"
+    )
       return null;
-    }
     const now = Date.now();
     await ctx.db.patch("roomPlayback", playback._id, {
-      status: "paused",
-      anchorPositionMs: projectedPositionMs(playback, now),
-      anchorUpdatedAt: now,
+      state: {
+        ...state,
+        transport: {
+          kind: "paused",
+          current: state.transport.current,
+          anchorPositionMs: projectedPositionMs(state, now),
+          anchorUpdatedAt: now,
+          reason: "room_empty",
+        },
+      },
       revision: playback.revision + 1,
     });
     return null;
@@ -627,28 +786,18 @@ export const deleteIfEmpty = internalMutation({
   args: { roomId: v.id("rooms"), occupancyGeneration: v.number() },
   returns: v.null(),
   handler: async (ctx, { roomId, occupancyGeneration }) => {
-    const playback = await ctx.db
-      .query("roomPlayback")
-      .withIndex("by_room", (q) => q.eq("room", roomId))
-      .unique();
+    const playback = await playbackForRoom(ctx, roomId);
     if (
-      !playback ||
-      playback.emptySince === undefined ||
-      playback.occupancyGeneration !== occupancyGeneration
-    ) {
+      playback.state.kind !== "empty" ||
+      playback.state.occupancyGeneration !== occupancyGeneration
+    )
       return null;
-    }
     const online = await presence.listRoom(ctx, roomId, true, 1);
     if (online.length > 0) {
       await markRoomOccupied(ctx, roomId);
       return null;
     }
-
-    const [queue, messages, visits, media] = await Promise.all([
-      ctx.db
-        .query("roomQueueItems")
-        .withIndex("by_room_and_rank", (q) => q.eq("room", roomId))
-        .take(101),
+    const [messages, visits, media] = await Promise.all([
       ctx.db
         .query("messages")
         .withIndex("by_room", (q) => q.eq("room", roomId))
@@ -663,14 +812,12 @@ export const deleteIfEmpty = internalMutation({
         .take(11),
     ]);
     await Promise.all([
-      ...queue.slice(0, 100).map((row) => ctx.db.delete("roomQueueItems", row._id)),
       ...messages.slice(0, 100).map((row) => ctx.db.delete("messages", row._id)),
       ...visits.slice(0, 100).map((row) => ctx.db.delete("roomVisits", row._id)),
     ]);
-    for (const association of media.slice(0, 10)) {
+    for (const association of media.slice(0, 10))
       await removeRoomMedia(ctx, { roomId, roomMediaId: association._id });
-    }
-    if (queue.length > 100 || messages.length > 100 || visits.length > 100 || media.length > 10) {
+    if (messages.length > 100 || visits.length > 100 || media.length > 10) {
       await ctx.scheduler.runAfter(0, internal.playback.deleteIfEmpty, {
         roomId,
         occupancyGeneration,
@@ -691,7 +838,57 @@ export const onRoomMediaReady = internalMutation({
     const roomMedia = await ctx.db.get("roomMedia", roomMediaId);
     if (!roomMedia) return null;
     const playback = await playbackForRoom(ctx, roomMedia.room);
-    await startFirstReadyIfIdle(ctx, playback);
+    const matching = queueItems(playback.state).find((item) => item.roomMedia === roomMediaId);
+    if (!matching) return null;
+    const replacement = await readyItemForRoomMedia(ctx, roomMediaId, matching);
+    if (!replacement) return null;
+    const state = replaceQueuedMedia(
+      playback.state,
+      roomMediaId,
+      (item) => ({
+        ...replacement,
+        key: item.key,
+        addedBy: item.addedBy,
+        createdAt: item.createdAt,
+      }),
+      Date.now(),
+    );
+    const revision =
+      playback.revision + (currentItem(state)?.key !== currentItem(playback.state)?.key ? 1 : 0);
+    await ctx.db.patch("roomPlayback", playback._id, {
+      state,
+      revision,
+      queueRevision: playback.queueRevision + 1,
+    });
+    await scheduleIfNewCurrent(ctx, roomMedia.room, playback.state, state, revision);
+    return null;
+  },
+});
+
+export const onRoomMediaFailed = internalMutation({
+  args: { roomMediaId: v.id("roomMedia"), message: v.string() },
+  returns: v.null(),
+  handler: async (ctx, { roomMediaId, message }) => {
+    const roomMedia = await ctx.db.get("roomMedia", roomMediaId);
+    if (!roomMedia) return null;
+    const playback = await playbackForRoom(ctx, roomMedia.room);
+    const state = replaceQueuedMedia(
+      playback.state,
+      roomMediaId,
+      (item) => ({
+        key: item.key,
+        roomMedia: item.roomMedia,
+        addedBy: item.addedBy,
+        createdAt: item.createdAt,
+        kind: "failed",
+        message,
+      }),
+      Date.now(),
+    );
+    await ctx.db.patch("roomPlayback", playback._id, {
+      state,
+      queueRevision: playback.queueRevision + 1,
+    });
     return null;
   },
 });

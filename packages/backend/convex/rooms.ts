@@ -175,13 +175,15 @@ export const createRoom = mutation({
     const now = Date.now();
     await ctx.db.insert("roomPlayback", {
       room,
-      status: "idle",
-      anchorPositionMs: 0,
-      anchorUpdatedAt: now,
+      state: {
+        kind: "empty",
+        emptySince: now,
+        occupancyGeneration: 0,
+        transport: { kind: "idle" },
+        queue: [],
+      },
       revision: 0,
       queueRevision: 0,
-      occupancyGeneration: 0,
-      emptySince: now,
     });
     await ctx.scheduler.runAfter(10 * 60_000, internal.playback.deleteIfEmpty, {
       roomId: room,

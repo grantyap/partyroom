@@ -37,7 +37,7 @@
 		if (!playback?.permissions.controlPlayback || !playback.current) return;
 		await advance({
 			roomId,
-			currentQueueItem: playback.current._id,
+			currentKey: playback.current._id,
 		});
 	}
 </script>

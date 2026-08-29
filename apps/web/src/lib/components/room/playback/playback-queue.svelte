@@ -4,7 +4,6 @@
 	import { Input } from "$lib/components/ui/input";
 	import { GripVertical, Plus, Trash2 } from "@lucide/svelte";
 	import { api } from "@partyroom/backend/convex/_generated/api";
-	import type { Id } from "@partyroom/backend/convex/_generated/dataModel";
 	import { useAction, useMutation } from "convex-svelte";
 	import MediaProgressPopover from "../media/media-progress-popover.svelte";
 	import { formatDuration } from "../media-format";
@@ -23,7 +22,7 @@
 	let sourceUrl = $state("");
 	let submitting = $state(false);
 	let error = $state<string | null>(null);
-	let draggedItem = $state<Id<"roomQueueItems"> | null>(null);
+	let draggedItem = $state<string | null>(null);
 
 	async function addSong(event: SubmitEvent) {
 		event.preventDefault();
@@ -40,7 +39,7 @@
 		}
 	}
 
-	async function dropBefore(targetId: Id<"roomQueueItems"> | null) {
+	async function dropBefore(targetId: string | null) {
 		const queue = playback?.queue ?? [];
 		const moving = draggedItem;
 		draggedItem = null;
@@ -54,9 +53,9 @@
 		try {
 			await reorder({
 				roomId,
-				queueItemId: moving,
-				afterItemId: index > 0 ? withoutMoving[index - 1]._id : null,
-				beforeItemId:
+				queueItemKey: moving,
+				afterItemKey: index > 0 ? withoutMoving[index - 1]._id : null,
+				beforeItemKey:
 					index < withoutMoving.length ? withoutMoving[index]._id : null,
 			});
 		} catch (cause) {
@@ -83,6 +82,8 @@
 		<ul class="min-h-24 space-y-2 p-3">
 			{#each playback?.queue ?? [] as item (item._id)}
 				{@const media = mediaById.get(item.roomMedia)}
+				{@const title = item.kind === "ready" ? item.title : media?.title ?? (item.kind === "failed" ? "Unavailable media" : "Processing media…")}
+				{@const duration = item.kind === "ready" ? item.durationSeconds ?? undefined : media?.duration}
 				<li
 					draggable={playback?.permissions.reorderQueue ?? false}
 					ondragstart={() => (draggedItem = item._id)}
@@ -96,17 +97,17 @@
 						<GripVertical class="size-4 shrink-0 cursor-grab text-muted-foreground" aria-hidden="true" />
 					{/if}
 					<div class="min-w-0 flex-1">
-						<p class="text-sm font-medium">{media?.title ?? "Resolving media…"}</p>
+						<p class="text-sm font-medium">{title}</p>
 						<p class="text-xs text-muted-foreground">
 							{item.availability === "ready" ? "Ready" : item.availability === "processing" ? "Processing…" : "Unavailable"}
-							{#if formatDuration(media?.duration)} · {formatDuration(media?.duration)}{/if}
+							{#if formatDuration(duration)} · {formatDuration(duration)}{/if}
 						</p>
 					</div>
 					{#if item.availability === "processing" && media}
 						<MediaProgressPopover title={media.title ?? "Resolving media…"} steps={media.steps} />
 					{/if}
 					{#if playback?.permissions.removeFromQueue}
-						<Button variant="ghost" size="icon-sm" aria-label={`Remove ${media?.title ?? "song"} from queue`} onclick={() => void remove({ roomId, queueItemId: item._id })}>
+					<Button variant="ghost" size="icon-sm" aria-label={`Remove ${title} from queue`} onclick={() => void remove({ roomId, queueItemKey: item._id })}>
 							<Trash2 />
 						</Button>
 					{/if}
