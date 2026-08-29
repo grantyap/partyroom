@@ -1,11 +1,12 @@
-import { Presence } from "@convex-dev/presence";
-import { components, internal } from "./_generated/api";
+import { internal } from "./_generated/api";
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { requireRoomAction } from "./rooms";
 import { authComponent } from "./auth";
+import { markRoomOccupied } from "./playback";
+import { presence } from "./presenceComponent";
 
-export const presence = new Presence(components.presence);
+export { presence } from "./presenceComponent";
 
 export const heartbeat = mutation({
   args: {
@@ -17,7 +18,7 @@ export const heartbeat = mutation({
   handler: async (ctx, { room: roomId, session, interval }) => {
     const { user } = await requireRoomAction(ctx, roomId, "rooms:read");
     const result = await presence.heartbeat(ctx, roomId, user._id, session, interval);
-    await ctx.scheduler.runAfter(0, internal.playback.recordOccupied, { roomId });
+    await markRoomOccupied(ctx, roomId);
     return result;
   },
 });

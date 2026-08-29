@@ -35,6 +35,7 @@ import type * as media_urls from "../media/urls.js";
 import type * as media_validators from "../media/validators.js";
 import type * as playback from "../playback.js";
 import type * as presence from "../presence.js";
+import type * as presenceComponent from "../presenceComponent.js";
 import type * as rooms from "../rooms.js";
 
 import type {
@@ -71,6 +72,7 @@ declare const fullApi: ApiFromModules<{
   "media/validators": typeof media_validators;
   playback: typeof playback;
   presence: typeof presence;
+  presenceComponent: typeof presenceComponent;
   rooms: typeof rooms;
 }>;
 

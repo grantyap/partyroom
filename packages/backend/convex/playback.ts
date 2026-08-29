@@ -11,7 +11,7 @@ import {
   type QueryCtx,
 } from "./_generated/server";
 import { removeRoomMedia } from "./media/domain/jobs";
-import { presence } from "./presence";
+import { presence } from "./presenceComponent";
 import { requireRoomAction, userHasRoomPermission, type RoomPermission } from "./rooms";
 
 const PRESENCE_CHECK_INTERVAL_MS = 30_000;
