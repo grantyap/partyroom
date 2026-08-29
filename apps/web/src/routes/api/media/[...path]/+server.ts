@@ -35,12 +35,23 @@ const proxyStorage: RequestHandler = async ({ params, request, url, fetch }) => 
     if (value) requestHeaders.set(name, value);
   }
 
-  const upstream = await fetch(upstreamUrl, {
-    method: request.method,
-    headers: requestHeaders,
-    redirect: "manual",
-    signal: request.signal,
-  });
+  let upstream: Response;
+  try {
+    upstream = await fetch(upstreamUrl, {
+      method: request.method,
+      headers: requestHeaders,
+      redirect: "manual",
+      signal: request.signal,
+    });
+  } catch (err) {
+    // Seeking or changing media sources can make the browser abort a byte-range
+    // request it no longer needs. Keep that abort connected to the upstream
+    // fetch, but treat the expected client cancellation as a 499 instead of a 500.
+    if (request.signal.aborted && err instanceof Error && err.name === "AbortError") {
+      return new Response(null, { status: 499 });
+    }
+    throw err;
+  }
 
   const responseHeaders = new Headers();
   for (const name of forwardedResponseHeaders) {
