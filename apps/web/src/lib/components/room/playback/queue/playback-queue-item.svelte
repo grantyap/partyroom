@@ -24,7 +24,7 @@ replace that content while keeping the sortable item shell.
 ```
 -->
 <script lang="ts" module>
-	import type { RoomMediaItem, Playback } from "../../types";
+	import type { Playback, RoomMediaItem } from "../../types";
 
 	export type QueueItemData = Playback["queue"][number];
 	export type QueueItemRenderProps = {
@@ -38,6 +38,7 @@ replace that content while keeping the sortable item shell.
 </script>
 
 <script lang="ts">
+	import TextScroller from "$lib/components/text-scroller/text-scroller.svelte";
 	import {
 		Avatar,
 		AvatarFallback,
@@ -50,8 +51,8 @@ replace that content while keeping the sortable item shell.
 	import { api } from "@partyroom/backend/convex/_generated/api";
 	import { useMutation } from "convex-svelte";
 	import type { Snippet } from "svelte";
-	import MediaProgressPopover from "../../media/media-progress-popover.svelte";
 	import { formatDuration } from "../../media-format";
+	import MediaProgressPopover from "../../media/media-progress-popover.svelte";
 	import { usePlayback } from "../context.svelte";
 	import SortableQueueItem from "./sortable-queue-item.svelte";
 
@@ -76,7 +77,9 @@ replace that content while keeping the sortable item shell.
 					(item.kind === "failed" ? "Unavailable media" : "Processing media…")),
 	);
 	const duration = $derived(
-		item.kind === "ready" ? (item.durationSeconds ?? undefined) : media?.duration,
+		item.kind === "ready"
+			? (item.durationSeconds ?? undefined)
+			: media?.duration,
 	);
 	const canRemove = $derived(
 		playbackContext.playback?.permissions.removeFromQueue ?? false,
@@ -132,14 +135,17 @@ replace that content while keeping the sortable item shell.
 			</Tooltip.Root>
 		</Tooltip.Provider>
 		<div class="min-w-0 flex-1">
-			<p class="text-sm font-medium">{title}</p>
+			<TextScroller {title} class="text-sm font-medium">
+				{title}
+			</TextScroller>
 			<p class="text-xs text-muted-foreground">
 				{item.availability === "ready"
 					? "Ready"
 					: item.availability === "processing"
 						? "Processing…"
 						: "Unavailable"}
-				{#if formatDuration(duration)} · {formatDuration(duration)}{/if}
+				{#if formatDuration(duration)}
+					· {formatDuration(duration)}{/if}
 			</p>
 		</div>
 		{#if item.availability === "processing" && media}
