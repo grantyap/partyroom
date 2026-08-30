@@ -16,7 +16,7 @@
 	}: RootProps = $props();
 </script>
 
-<div class="xl:relative xl:min-h-0" data-slot="room-tabs-root">
+<div class="min-w-0 xl:relative xl:min-h-0" data-slot="room-tabs-root">
 	<Card.Root
 		class={cn(
 			"h-[min(--spacing(96),70dvh)] gap-0 py-0 xl:absolute xl:inset-0 xl:h-auto",
