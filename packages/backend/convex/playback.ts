@@ -11,6 +11,7 @@ import {
   type QueryCtx,
 } from "./_generated/server";
 import { activities } from "./activities/workflowManager";
+import { authComponent } from "./auth";
 import { removeRoomMedia } from "./media/domain/jobs";
 import { presence } from "./presenceComponent";
 import { requireRoomAction, userHasRoomPermission, type RoomPermission } from "./rooms";
@@ -24,7 +25,11 @@ const DEFAULT_PLAY_START_DELAY_MS = 1_000;
 const queueItemResultBase = {
   _id: v.string(),
   roomMedia: v.id("roomMedia"),
-  addedBy: v.string(),
+  addedBy: v.object({
+    _id: v.string(),
+    name: v.string(),
+    image: v.union(v.string(), v.null()),
+  }),
   createdAt: v.number(),
 };
 const processingQueueItemResult = v.object({
@@ -67,9 +72,7 @@ const playbackResult = v.object({
     ),
   }),
   current: v.union(readyQueueItemResult, v.null()),
-  queue: v.array(
-    v.union(processingQueueItemResult, failedQueueItemResult, readyQueueItemResult),
-  ),
+  queue: v.array(v.union(processingQueueItemResult, failedQueueItemResult, readyQueueItemResult)),
   permissions: v.object({
     controlPlayback: v.boolean(),
     addToQueue: v.boolean(),
@@ -88,6 +91,7 @@ type QueueItem = Extract<
 type ReadyItem = Extract<QueueItem, { kind: "ready" }>;
 type NonReadyItem = Exclude<QueueItem, ReadyItem>;
 type TimingUpdate = { position?: number; velocity?: number; acceleration?: number };
+type AddedBy = { _id: string; name: string; image: string | null };
 export type TimingStateVectorUpdate = TimingUpdate;
 
 async function playbackForRoom(ctx: QueryCtx | MutationCtx, roomId: Id<"rooms">) {
@@ -247,11 +251,28 @@ async function artifactUrl(ctx: QueryCtx, artifactId: string) {
   return await activities.getArtifactUrl(ctx, artifactId as ArtifactId);
 }
 
-async function readyQueueItemForClient(ctx: QueryCtx, item: ReadyItem) {
+async function addedByUsersForClient(ctx: QueryCtx, items: QueueItem[]) {
+  const userIds = [...new Set(items.map((item) => item.addedBy))];
+  return new Map(
+    await Promise.all(
+      userIds.map(async (userId) => {
+        const user = await authComponent.getAnyUserById(ctx, userId);
+        const addedBy: AddedBy = {
+          _id: userId,
+          name: user?.name?.trim() || user?.username?.trim() || "Guest",
+          image: user?.image ?? null,
+        };
+        return [userId, addedBy] as const;
+      }),
+    ),
+  );
+}
+
+async function readyQueueItemForClient(ctx: QueryCtx, item: ReadyItem, addedBy: AddedBy) {
   return {
     _id: item.key,
     roomMedia: item.roomMedia,
-    addedBy: item.addedBy,
+    addedBy,
     createdAt: item.createdAt,
     kind: item.kind,
     availability: item.kind,
@@ -262,11 +283,11 @@ async function readyQueueItemForClient(ctx: QueryCtx, item: ReadyItem) {
   };
 }
 
-async function queueItemForClient(ctx: QueryCtx, item: QueueItem) {
+async function queueItemForClient(ctx: QueryCtx, item: QueueItem, addedBy: AddedBy) {
   const base = {
     _id: item.key,
     roomMedia: item.roomMedia,
-    addedBy: item.addedBy,
+    addedBy,
     createdAt: item.createdAt,
   };
   if (item.kind === "processing") {
@@ -281,7 +302,7 @@ async function queueItemForClient(ctx: QueryCtx, item: QueueItem) {
       finalUrl: null,
     };
   }
-  return await readyQueueItemForClient(ctx, item);
+  return await readyQueueItemForClient(ctx, item, addedBy);
 }
 
 export const get = query({
@@ -292,8 +313,12 @@ export const get = query({
     const playback = await playbackForRoom(ctx, roomId);
     const current = currentItem(playback.state);
     const timing = activeTiming(playback.state);
+    const items = [...queueItems(playback.state), ...(current ? [current] : [])];
+    const addedByUsers = await addedByUsersForClient(ctx, items);
     const queue = await Promise.all(
-      queueItems(playback.state).map((item) => queueItemForClient(ctx, item)),
+      queueItems(playback.state).map((item) =>
+        queueItemForClient(ctx, item, addedByUsers.get(item.addedBy)!),
+      ),
     );
     return {
       playback: {
@@ -307,7 +332,9 @@ export const get = query({
         queueRevision: playback.queueRevision,
         stateKind: playback.state.kind,
       },
-      current: current ? await readyQueueItemForClient(ctx, current) : null,
+      current: current
+        ? await readyQueueItemForClient(ctx, current, addedByUsers.get(current.addedBy)!)
+        : null,
       queue,
       permissions: {
         controlPlayback: userCan(room, user._id, "rooms:controlPlayback"),

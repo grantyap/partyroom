@@ -38,7 +38,14 @@ replace that content while keeping the sortable item shell.
 </script>
 
 <script lang="ts">
+	import {
+		Avatar,
+		AvatarFallback,
+		AvatarImage,
+	} from "$lib/components/ui/avatar";
 	import { Button } from "$lib/components/ui/button";
+	import * as Tooltip from "$lib/components/ui/tooltip";
+	import { getMemberColors } from "$lib/member-colors";
 	import { Trash2 } from "@lucide/svelte";
 	import { api } from "@partyroom/backend/convex/_generated/api";
 	import { useMutation } from "convex-svelte";
@@ -74,6 +81,7 @@ replace that content while keeping the sortable item shell.
 	const canRemove = $derived(
 		playbackContext.playback?.permissions.removeFromQueue ?? false,
 	);
+	const addedByColors = $derived(getMemberColors(item.addedBy._id));
 
 	function remove() {
 		void removeItem({
@@ -101,6 +109,28 @@ replace that content while keeping the sortable item shell.
 	{#if children}
 		{@render children(renderProps)}
 	{:else}
+		<Tooltip.Provider>
+			<Tooltip.Root>
+				<Tooltip.Trigger>
+					<Avatar
+						size="sm"
+						class="border-2"
+						style={`border-color: ${addedByColors.accent}`}
+					>
+						{#if item.addedBy.image}
+							<AvatarImage src={item.addedBy.image} alt="" />
+						{/if}
+						<AvatarFallback
+							style={`background-color: ${addedByColors.fill}; color: ${addedByColors.foreground}`}
+							class="font-semibold"
+						>
+							{item.addedBy.name.slice(0, 1).toUpperCase()}
+						</AvatarFallback>
+					</Avatar>
+				</Tooltip.Trigger>
+				<Tooltip.Content>{item.addedBy.name}</Tooltip.Content>
+			</Tooltip.Root>
+		</Tooltip.Provider>
 		<div class="min-w-0 flex-1">
 			<p class="text-sm font-medium">{title}</p>
 			<p class="text-xs text-muted-foreground">
