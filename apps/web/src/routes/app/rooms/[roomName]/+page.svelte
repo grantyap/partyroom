@@ -4,12 +4,12 @@
 		RoomPermissions,
 		type ChatMessage,
 	} from "$lib/components/room";
+	import { toChatOverlayMessages } from "$lib/chat-overlay-messages";
 	import RoomMembersPopover from "$lib/components/room/chat/room-members-popover.svelte";
 	import * as Playback from "$lib/components/room/playback";
 	import * as RoomTabs from "$lib/components/room/tabs";
 	import { Button } from "$lib/components/ui/button";
 	import { createUuidInAnyContext } from "$lib/context-uuid";
-	import { getMemberColor } from "$lib/member-colors";
 	import { Presence } from "$lib/presence.svelte";
 	import ArrowLeftIcon from "@lucide/svelte/icons/arrow-left";
 	import { api } from "@partyroom/backend/convex/_generated/api";
@@ -46,13 +46,7 @@
 	const onlineUsers = $derived(
 		(presence.current ?? []).filter(({ online }) => online),
 	);
-	const overlayMessages = $derived(
-		(messages.data ?? []).map((message) => ({
-			id: message.clientMessageId,
-			body: message.body,
-			color: getMemberColor(message.user._id),
-		})),
-	);
+	const overlayMessages = $derived(toChatOverlayMessages(messages.data));
 
 	async function onMessage(body: string) {
 		const clientMessageId = createUuidInAnyContext();

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { OverlayMessage } from "../types";
 
-	let { messages }: { messages: OverlayMessage[] } = $props();
+	let { messages }: { messages: OverlayMessage[] | undefined } = $props();
 
 	let initialized = false;
 	let seenMessages = new Set<string>();
@@ -11,6 +11,7 @@
 
 	$effect(() => {
 		const incoming = messages;
+		if (incoming === undefined) return;
 		if (!initialized) {
 			seenMessages = new Set(incoming.map(({ id }) => id));
 			initialized = true;

@@ -30,7 +30,7 @@ spacing, or other layout.
 
 	let {
 		roomId,
-		overlayMessages = [],
+		overlayMessages,
 		children,
 	}: {
 		roomId: Id<"rooms">;

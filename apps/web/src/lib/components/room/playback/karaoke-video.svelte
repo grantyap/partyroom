@@ -49,7 +49,7 @@
 		canControl = true,
 		onEnded,
 		onSkip,
-		overlayMessages = [],
+		overlayMessages,
 	}: Props = $props();
 
 	let video = $state<HTMLVideoElement>();

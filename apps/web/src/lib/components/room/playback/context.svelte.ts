@@ -8,7 +8,7 @@ type PlaybackContextProps = {
   playback: () => Playback | undefined;
   mediaById: () => Map<Id<"roomMedia">, RoomMediaItem>;
   currentMedia: () => CurrentMedia | undefined;
-  overlayMessages: () => OverlayMessage[];
+  overlayMessages: () => OverlayMessage[] | undefined;
   error: () => string | null;
   timing: OnlineTimingObject;
 };
