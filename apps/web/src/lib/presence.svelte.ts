@@ -74,7 +74,7 @@ export class Presence {
       this.#roomToken = null;
     });
 
-    $effect.root(() => {
+    $effect(() => {
       // Restart whenever room/user/interval changes.
       $effect(() => {
         // oxlint-disable-next-line no-unused-expressions -- Used to trigger effect.

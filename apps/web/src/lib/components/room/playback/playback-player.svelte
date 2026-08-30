@@ -30,7 +30,7 @@ layout. It handles playback, the empty state, skipping, and TV mode. Add an
 	import { cn } from "$lib/utils";
 	import { api } from "@partyroom/backend/convex/_generated/api";
 	import { useMutation } from "convex-svelte";
-	import { onMount, type Snippet } from "svelte";
+	import type { Snippet } from "svelte";
 	import type { HTMLAttributes } from "svelte/elements";
 	import { usePlayback } from "./context.svelte";
 	import KaraokeVideo from "./karaoke-video.svelte";
@@ -46,26 +46,6 @@ layout. It handles playback, the empty state, skipping, and TV mode. Add an
 	const playbackContext = usePlayback();
 	const advance = useMutation(api.playback.advance);
 
-	let playerShell = $state<HTMLElement>();
-
-	$effect(() => {
-		playbackContext.setPlayerShell(playerShell);
-		return () => {
-			if (playbackContext.playerShell === playerShell) {
-				playbackContext.setPlayerShell(undefined);
-			}
-		};
-	});
-
-	onMount(() => {
-		document.addEventListener("fullscreenchange", playbackContext.updateTvMode);
-		return () =>
-			document.removeEventListener(
-				"fullscreenchange",
-				playbackContext.updateTvMode,
-			);
-	});
-
 	async function advancePlayback() {
 		const playback = playbackContext.playback;
 		if (!playback?.permissions.controlPlayback || !playback.current) return;
@@ -76,8 +56,10 @@ layout. It handles playback, the empty state, skipping, and TV mode. Add an
 	}
 </script>
 
+<svelte:document onfullscreenchange={playbackContext.handleFullscreenChange} />
+
 <div
-	bind:this={playerShell}
+	bind:this={playbackContext.playerShell}
 	data-slot="playback-player"
 	class={cn(
 		"overflow-hidden rounded-xl border bg-black shadow-sm",

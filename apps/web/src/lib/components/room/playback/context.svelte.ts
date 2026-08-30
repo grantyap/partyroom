@@ -1,6 +1,6 @@
 import type { OnlineTimingObject } from "$lib/online-timing-object.svelte";
 import type { Id } from "@partyroom/backend/convex/_generated/dataModel";
-import { getContext, setContext } from "svelte";
+import { createContext } from "svelte";
 import type { CurrentMedia, OverlayMessage, Playback, RoomMediaItem } from "../types";
 
 type PlaybackContextProps = {
@@ -15,7 +15,7 @@ type PlaybackContextProps = {
 
 class PlaybackContext {
   playerShell = $state<HTMLElement>();
-  tvMode = $state(false);
+  #tvMode = $state(false);
 
   constructor(private readonly props: PlaybackContextProps) {}
 
@@ -47,13 +47,12 @@ class PlaybackContext {
     return this.props.timing;
   }
 
-  setPlayerShell = (playerShell: HTMLElement | undefined) => {
-    this.playerShell = playerShell;
-    this.updateTvMode();
-  };
+  get tvMode() {
+    return this.#tvMode;
+  }
 
-  updateTvMode = () => {
-    this.tvMode = document.fullscreenElement === this.playerShell;
+  handleFullscreenChange = () => {
+    this.#tvMode = document.fullscreenElement === this.playerShell;
   };
 
   toggleTvMode = async () => {
@@ -66,16 +65,12 @@ class PlaybackContext {
   };
 }
 
-const PLAYBACK_CONTEXT = Symbol("room-playback");
+const [getPlaybackContext, providePlaybackContext] = createContext<PlaybackContext>();
 
 export function setPlaybackContext(props: PlaybackContextProps) {
-  return setContext(PLAYBACK_CONTEXT, new PlaybackContext(props));
+  return providePlaybackContext(new PlaybackContext(props));
 }
 
 export function usePlayback() {
-  const context = getContext<PlaybackContext>(PLAYBACK_CONTEXT);
-  if (!context) {
-    throw new Error("Playback components must be rendered inside Playback.Root");
-  }
-  return context;
+  return getPlaybackContext();
 }
