@@ -1,10 +1,10 @@
 <script lang="ts">
 	import * as RoomTabs from "$lib/components/room/tabs";
+	import { ScrollFollow } from "$lib/components/scroll-follow.svelte";
 	import { Button } from "$lib/components/ui/button";
 	import { Input } from "$lib/components/ui/input";
 	import { getMemberColors } from "$lib/member-colors";
 	import ChevronDownIcon from "@lucide/svelte/icons/chevron-down";
-	import { tick } from "svelte";
 	import type { ChatMessage } from "../types";
 	import RoomMembersPopover from "./room-members-popover.svelte";
 
@@ -32,27 +32,22 @@
 	let messageBody = $state("");
 	let chatError = $state<string | null>(null);
 	let messageList = $state<HTMLDivElement | null>(null);
-	let isAtBottom = $state(true);
-
-	function updateScrollPosition() {
-		if (!messageList) return;
-		isAtBottom =
-			messageList.scrollHeight -
-				messageList.scrollTop -
-				messageList.clientHeight <=
-			bottomThreshold;
-	}
-
-	function scrollToBottom(behavior: ScrollBehavior = "smooth") {
-		if (!messageList) return;
-		messageList.scrollTo({ top: messageList.scrollHeight, behavior });
-	}
+	const scrollFollow = new ScrollFollow({
+		getViewport: () => messageList,
+		getTargetScrollTop: () =>
+			messageList
+				? Math.max(0, messageList.scrollHeight - messageList.clientHeight)
+				: null,
+		isAtFollowPosition: (viewport) =>
+			viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <=
+			bottomThreshold,
+	});
 
 	$effect(() => {
 		const latestMessageId = messages.at(-1)?._id;
-		if (!active || !latestMessageId || !isAtBottom) return;
+		if (!active || !latestMessageId || !scrollFollow.isFollowing) return;
 
-		void tick().then(() => scrollToBottom("instant"));
+		void scrollFollow.follow("instant");
 	});
 
 	async function submitMessage(event: SubmitEvent) {
@@ -75,7 +70,7 @@
 	<div class="relative min-h-0 flex-1">
 		<RoomTabs.ScrollArea
 			bind:ref={messageList}
-			onscroll={updateScrollPosition}
+			onscroll={scrollFollow.onScroll}
 			class="h-full"
 		>
 			<ul class="space-y-3 p-4 pb-0 h-full flex flex-col">
@@ -112,12 +107,12 @@
 			</ul>
 		</RoomTabs.ScrollArea>
 
-		{#if !isAtBottom}
+		{#if !scrollFollow.isFollowing}
 			<Button
 				variant="secondary"
 				size="xs"
 				class="absolute bottom-3 left-1/2 -translate-x-1/2 shadow-md"
-				onclick={() => scrollToBottom()}
+				onclick={() => void scrollFollow.sync()}
 			>
 				<ChevronDownIcon />
 				Scroll to bottom
