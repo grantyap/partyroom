@@ -1,10 +1,11 @@
 <script lang="ts">
+	import { toChatOverlayMessages } from "$lib/chat-overlay-messages";
 	import {
 		RoomChat,
+		RoomLyrics,
 		RoomPermissions,
 		type ChatMessage,
 	} from "$lib/components/room";
-	import { toChatOverlayMessages } from "$lib/chat-overlay-messages";
 	import RoomMembersPopover from "$lib/components/room/chat/room-members-popover.svelte";
 	import * as Playback from "$lib/components/room/playback";
 	import * as RoomTabs from "$lib/components/room/tabs";
@@ -97,13 +98,17 @@
 <div class="mx-auto w-full max-w-384 space-y-5 p-4 sm:p-6">
 	<Playback.Root {roomId} {overlayMessages}>
 		<div class="grid min-h-0 gap-5 xl:grid-cols-[minmax(0,1fr)_20rem]">
-			<header class="flex flex-wrap items-center justify-between gap-3 xl:col-span-2">
+			<header
+				class="flex flex-wrap items-center justify-between gap-3 xl:col-span-2"
+			>
 				<div class="space-y-3 w-full">
 					<Button href="/app" variant="outline" size="sm"
 						><ArrowLeftIcon /> All rooms</Button
 					>
 					<div>
-						<h1 class="font-heading text-xl font-semibold">{room.data?.name}</h1>
+						<h1 class="font-heading text-xl font-semibold">
+							{room.data?.name}
+						</h1>
 						<Playback.NowPlaying />
 						<div>
 							<RoomMembersPopover members={onlineUsers} />
@@ -133,11 +138,15 @@
 						Queue
 						<Playback.QueueCount />
 					</RoomTabs.Trigger>
+					<RoomTabs.Trigger value="lyrics">Lyrics</RoomTabs.Trigger>
 					<RoomTabs.Trigger value="chat">Chat</RoomTabs.Trigger>
 				</RoomTabs.List>
 
 				<RoomTabs.Content value="queue">
 					<Playback.Queue />
+				</RoomTabs.Content>
+				<RoomTabs.Content value="lyrics">
+					<RoomLyrics active={panelTab === "lyrics"} />
 				</RoomTabs.Content>
 				<RoomTabs.Content value="chat">
 					<RoomChat
