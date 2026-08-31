@@ -77,6 +77,7 @@ layout. It handles playback, the empty state, skipping, and TV mode. Add an
 			title={playbackContext.currentMedia.title}
 			selectedLyricsId={playbackContext.currentMedia.selectedLyricsId}
 			lyricsOffsetMs={playbackContext.currentMedia.lyricsOffsetMs}
+			lyricsState={playbackContext.lyrics}
 			overlayMessages={playbackContext.overlayMessages}
 			timing={playbackContext.timing}
 			canControl={playbackContext.playback.permissions.controlPlayback}

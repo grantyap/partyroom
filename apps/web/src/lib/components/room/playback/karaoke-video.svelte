@@ -1,13 +1,7 @@
 <script lang="ts">
 	import { PUBLIC_CONVEX_URL } from "$env/static/public";
 	import { Button } from "$lib/components/ui/button";
-	import {
-		findKaraokeCue,
-		lyricsIntoCues,
-		parseLyricObservations,
-		type KaraokeCue,
-		type LyricsTrack,
-	} from "$lib/karaoke";
+	import type { LyricsTrack } from "$lib/karaoke";
 	import { MediaPlaybackSync } from "$lib/media-playback-sync.svelte";
 	import type { OnlineTimingObject } from "$lib/online-timing-object.svelte";
 	import { browserReachableServiceUrl } from "$lib/service-url";
@@ -20,9 +14,10 @@
 	import "vidstack/player";
 	import "vidstack/player/ui";
 	import ChatOverlay from "../chat/chat-overlay.svelte";
+	import type { OverlayMessage } from "../types";
+	import { KaraokeLyricsState } from "./karaoke-lyrics-state.svelte";
 	import KaraokeLyricsOverlay from "./karaoke-lyrics-overlay.svelte";
 	import KaraokeVideoControls from "./karaoke-video-controls.svelte";
-	import type { OverlayMessage } from "../types";
 
 	type Props = {
 		src: string;
@@ -31,6 +26,7 @@
 		class?: string;
 		selectedLyricsId?: string | null;
 		lyricsOffsetMs?: number;
+		lyricsState?: KaraokeLyricsState;
 		timing?: OnlineTimingObject;
 		canControl?: boolean;
 		onEnded?: () => void;
@@ -45,6 +41,7 @@
 		class: className = "",
 		selectedLyricsId: sharedSelectedLyricsId,
 		lyricsOffsetMs: sharedLyricsOffsetMs,
+		lyricsState: sharedLyricsState,
 		timing,
 		canControl = true,
 		onEnded,
@@ -53,9 +50,19 @@
 	}: Props = $props();
 
 	let video = $state<HTMLVideoElement>();
-	let currentTime = $state(0);
-	let cues = $state<KaraokeCue[]>([]);
+	let standaloneCurrentTime = $state(0);
 	let animationFrame: number | undefined;
+	// The shared state is supplied by Playback.Player and remains stable for this player.
+	// svelte-ignore state_referenced_locally
+	const localLyricsState = sharedLyricsState
+		? undefined
+		: new KaraokeLyricsState({
+				getLyrics: () => lyrics,
+				getSelectedLyricsId: () => sharedSelectedLyricsId,
+				getLyricsOffsetMs: () => sharedLyricsOffsetMs,
+				getCurrentTime: () => standaloneCurrentTime,
+			});
+	const lyricsState = $derived(sharedLyricsState ?? localLyricsState);
 	const playbackSync = new MediaPlaybackSync({
 		getElement: () => video,
 		getTimingObject: () => timing,
@@ -64,19 +71,9 @@
 		alignmentToleranceSeconds: 0.01,
 	});
 
-	const availableLyrics = $derived(
-		lyrics.filter(({ content }) =>
-			content.kind === "url"
-				? content.url.length > 0
-				: content.observations.length > 0,
-		),
-	);
-	const selectedLyrics = $derived(
-		availableLyrics.find(({ id }) => id === sharedSelectedLyricsId) ??
-			availableLyrics[0],
-	);
+	const availableLyrics = $derived(lyricsState?.availableLyrics ?? []);
 	const captionsUrl = $derived(
-		selectedLyrics?.captionsUrl ??
+		lyricsState?.captionsUrl ??
 			availableLyrics.find(({ captionsUrl }) => captionsUrl)?.captionsUrl,
 	);
 	const videoUrl = $derived(browserReachableServiceUrl(src, PUBLIC_CONVEX_URL));
@@ -85,63 +82,17 @@
 			? browserReachableServiceUrl(captionsUrl, PUBLIC_CONVEX_URL)
 			: undefined,
 	);
-	const lyricsOffsetMs = $derived(
-		sharedLyricsOffsetMs !== undefined
-			? sharedLyricsOffsetMs
-			: selectedLyrics
-				? (selectedLyrics.suggestedOffsetMs ?? 0)
-				: 0,
-	);
-	const adjustedTime = $derived(
-		currentTime -
-			(Number.isFinite(lyricsOffsetMs) ? lyricsOffsetMs : 0) / 1_000,
-	);
-	const activeCueIndex = $derived(findKaraokeCue(cues, adjustedTime));
-	const activeCue = $derived(
-		activeCueIndex >= 0 ? cues[activeCueIndex] : undefined,
-	);
-	const nextCue = $derived(
-		activeCueIndex >= 0 ? cues[activeCueIndex + 1] : undefined,
-	);
-
-	$effect(() => {
-		const track = selectedLyrics;
-		cues = [];
-		if (!track) return;
-		if (track.content.kind === "inline") {
-			cues = lyricsIntoCues(track.content.observations, track.timing);
-			return;
-		}
-
-		const controller = new AbortController();
-		void fetch(
-			browserReachableServiceUrl(track.content.url, PUBLIC_CONVEX_URL),
-			{
-				signal: controller.signal,
-			},
-		)
-			.then((response) => {
-				if (!response.ok)
-					throw new Error(`Unable to load lyrics: HTTP ${response.status}`);
-				return response.json();
-			})
-			.then((document: unknown) => {
-				cues = lyricsIntoCues(parseLyricObservations(document), track.timing);
-			})
-			.catch((error: unknown) => {
-				if (!(error instanceof DOMException && error.name === "AbortError")) {
-					console.error("Unable to load karaoke lyrics", error);
-				}
-			});
-
-		return () => controller.abort();
-	});
+	const adjustedTime = $derived(lyricsState?.adjustedTime ?? 0);
+	const activeCue = $derived(lyricsState?.activeCue);
+	const nextCue = $derived(lyricsState?.nextCue);
 
 	function updateTime() {
-		currentTime = timing?.query()?.position ?? video?.currentTime ?? 0;
+		if (sharedLyricsState) return;
+		standaloneCurrentTime = timing?.query()?.position ?? video?.currentTime ?? 0;
 	}
 
 	function trackPlayback() {
+		if (sharedLyricsState) return;
 		updateTime();
 		if (
 			timing
@@ -153,11 +104,13 @@
 	}
 
 	function startTracking() {
+		if (sharedLyricsState) return;
 		if (animationFrame !== undefined) cancelAnimationFrame(animationFrame);
 		trackPlayback();
 	}
 
 	function stopTracking() {
+		if (sharedLyricsState) return;
 		if (animationFrame !== undefined) cancelAnimationFrame(animationFrame);
 		animationFrame = undefined;
 		updateTime();
@@ -218,7 +171,7 @@
 	}
 
 	$effect(() => {
-		if (!timing) return;
+		if (!timing || sharedLyricsState) return;
 		timing.changeRevision;
 		updateTime();
 		if (timing.query()?.velocity === 1) startTracking();
@@ -298,7 +251,7 @@
 			{activeCue}
 			{nextCue}
 			{adjustedTime}
-			wordTiming={selectedLyrics?.timing === "word"}
+			wordTiming={lyricsState?.wordTiming ?? false}
 		/>
 	{/if}
 </media-player>
