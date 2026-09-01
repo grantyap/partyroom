@@ -83,6 +83,7 @@ export const mediaTables = {
     updatedAt: v.number(),
   })
     .index("by_request_key", ["requestKey"])
+    .index("by_requested_by", ["requestedBy"])
     .index("by_asset", ["asset"]),
 
   mediaEnrichments: defineTable({
@@ -118,5 +119,6 @@ export const mediaTables = {
     .index("by_room", ["room"])
     .index("by_job", ["job"])
     .index("by_asset", ["asset"])
-    .index("by_room_job", ["room", "job"]),
+    .index("by_room_job", ["room", "job"])
+    .index("by_requested_by", ["requestedBy"]),
 };

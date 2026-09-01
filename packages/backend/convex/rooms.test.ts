@@ -1,6 +1,10 @@
 import { convexTest } from "convex-test";
 import { describe, expect, test } from "vitest";
-import { recordRoomVisitByNameForUser, userHasRoomPermission } from "./rooms";
+import {
+  recordRoomVisitByNameForUser,
+  requireRegisteredUser,
+  userHasRoomPermission,
+} from "./rooms";
 import { defaultRoomMemberPermissions } from "./rooms.schema";
 import schema from "./schema";
 import { modules } from "./test.setup";
@@ -11,6 +15,16 @@ const room = {
 };
 
 describe("room permissions without persistent membership", () => {
+  test("does not allow anonymous users to create rooms", () => {
+    expect(() => requireRegisteredUser({ _id: "guest", isAnonymous: true })).toThrow(
+      "Only registered users can create rooms",
+    );
+  });
+
+  test("allows registered users to create rooms", () => {
+    expect(() => requireRegisteredUser({ _id: "user", isAnonymous: false })).not.toThrow();
+  });
+
   test("allows any authenticated visitor to read a room", () => {
     expect(userHasRoomPermission({ user: "visitor", room, permission: "rooms:read" })).toBe(true);
   });

@@ -5,7 +5,7 @@
 	import { signUpSchema } from "$lib/components/auth/form-schema";
 	import SignupForm from "$lib/components/auth/signup-form.svelte";
 	import GalleryVerticalEndIcon from "@lucide/svelte/icons/gallery-vertical-end";
-	import { superForm } from "sveltekit-superforms";
+	import { setMessage, superForm } from "sveltekit-superforms";
 	import { zod4 } from "sveltekit-superforms/adapters";
 	import type { PageProps } from "./$types";
 
@@ -22,11 +22,18 @@
 
 			const { fullName, email, password } = form.data;
 
-			const result = await authClient.signUp.email({
-				name: fullName,
-				email,
-				password,
-			});
+			const result = await authClient.signUp.email(
+				{
+					name: fullName,
+					email,
+					password,
+				},
+				{
+					onError: ({ error }) => {
+						setMessage(form, error.message);
+					},
+				},
+			);
 
 			if (result.data) {
 				const target = page.url.searchParams.get("to") || "/app";

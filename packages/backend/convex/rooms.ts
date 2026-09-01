@@ -163,7 +163,7 @@ export const createRoom = mutation({
       throw new Error("Unauthenticated");
     }
 
-    requireRoomPermission({ user: user._id, permission: "rooms:create" });
+    requireRegisteredUser(user);
 
     const roomName = name || generateSlug();
     const room = await ctx.db.insert("rooms", {
@@ -264,6 +264,12 @@ export const requireRoomPermission = (...args: Parameters<typeof userHasRoomPerm
     throw new Error("Unauthorized");
   }
 };
+
+export function requireRegisteredUser(user: { _id: string; isAnonymous?: boolean | null }) {
+  if ("isAnonymous" in user && user.isAnonymous === true) {
+    throw new Error("Only registered users can create rooms");
+  }
+}
 
 export type RoomPermission = Exclude<RoomPermissionName, "rooms:create">;
 

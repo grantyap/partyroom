@@ -29,6 +29,7 @@ export default defineSchema({
   })
     .index("by_room", ["room"])
     .index("by_room_user", ["room", "user"])
+    .index("by_user", ["user"])
     .index("by_room_and_client_message_id", ["room", "clientMessageId"]),
   roomPlayback: defineTable({
     room: v.id("rooms"),

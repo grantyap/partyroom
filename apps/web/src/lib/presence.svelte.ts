@@ -19,8 +19,8 @@ export type PresenceState = FunctionReturnType<(typeof api.presence)["list"]>[nu
 export class Presence {
   readonly #client = getConvexClient();
 
-  readonly #roomId;
-  readonly #userId;
+  readonly #roomId: () => string | null;
+  readonly #userId: () => string | null;
   readonly #intervalMs;
   readonly #convexUrl?: string;
 
@@ -30,6 +30,7 @@ export class Presence {
   #sessionId = $state(createUuidInAnyContext());
   #sessionToken = $state<string | null>(null);
   #roomToken = $state<string | null>(null);
+  #activeRoomId: string | null = null;
 
   #interval: ReturnType<typeof setInterval> | null = null;
 
@@ -41,37 +42,44 @@ export class Presence {
     interval = 10_000,
     convexUrl,
   }: {
-    roomId: string;
-    userId: string;
+    roomId: string | null | (() => string | null);
+    userId: string | null | (() => string | null);
     interval?: number;
     convexUrl?: string;
   }) {
-    this.#roomId = roomId;
-    this.#userId = userId;
+    this.#roomId = typeof roomId === "function" ? roomId : () => roomId;
+    this.#userId = typeof userId === "function" ? userId : () => userId;
     this.#intervalMs = interval;
     this.#convexUrl = convexUrl;
 
     this.#heartbeat = singleFlight(async () => {
+      const currentRoomId = this.roomId;
+      if (!currentRoomId || !this.userId) return;
+
       const result = await this.#client.mutation(api.presence.heartbeat, {
-        room: roomId as Id<"rooms">,
+        room: currentRoomId as Id<"rooms">,
         session: this.#sessionId,
         interval: interval,
       });
 
       this.#roomToken = result.roomToken;
       this.#sessionToken = result.sessionToken;
+      this.#activeRoomId = currentRoomId;
     });
 
     this.#disconnect = singleFlight(async () => {
       if (!this.#sessionToken) return;
+      const activeRoomId = this.#activeRoomId ?? this.roomId;
+      if (!activeRoomId) return;
 
       await this.#client.mutation(api.presence.disconnect, {
         sessionToken: this.#sessionToken,
-        room: this.roomId as Id<"rooms">,
+        room: activeRoomId as Id<"rooms">,
       });
 
       this.#sessionToken = null;
       this.#roomToken = null;
+      this.#activeRoomId = null;
     });
 
     $effect(() => {
@@ -83,6 +91,13 @@ export class Presence {
         this.userId;
         // oxlint-disable-next-line no-unused-expressions -- Used to trigger effect.
         this.interval;
+
+        if (!this.roomId || !this.userId) {
+          this.#state = undefined;
+          this.#stopHeartbeat();
+          void this.#disconnect();
+          return;
+        }
 
         this.#reset();
 
@@ -124,6 +139,8 @@ export class Presence {
       // Unload.
       const onUnload = () => {
         if (!this.#sessionToken) return;
+        const activeRoomId = this.#activeRoomId ?? this.roomId;
+        if (!activeRoomId) return;
 
         navigator.sendBeacon(
           `${this.convexUrl}/api/mutation`,
@@ -133,7 +150,7 @@ export class Presence {
                 path: "presence:disconnect",
                 args: {
                   sessionToken: this.#sessionToken,
-                  room: this.roomId,
+                  room: activeRoomId,
                 },
               }),
             ],
@@ -156,11 +173,11 @@ export class Presence {
   }
 
   get roomId() {
-    return this.#roomId;
+    return this.#roomId();
   }
 
   get userId() {
-    return this.#userId;
+    return this.#userId();
   }
 
   get interval() {

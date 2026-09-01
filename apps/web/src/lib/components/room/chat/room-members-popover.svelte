@@ -38,16 +38,12 @@
 				<AvatarGroupCount class="size-7 text-xs">0</AvatarGroupCount>
 			{/if}
 			{#each visibleMembers as member (member.userId)}
-				{@const memberColors = getMemberColors(member.userId)}
 				<Avatar
-					class="size-7 border-2"
-					style={`border-color: ${memberColors.accent}`}
+					userId={member.userId}
+					class="size-7"
 				>
 					{#if member.image}<AvatarImage src={member.image} alt="" />{/if}
-					<AvatarFallback
-						style={`background-color: ${memberColors.fill}; color: ${memberColors.foreground}`}
-						class="text-xs font-semibold"
-					>
+					<AvatarFallback class="text-xs font-semibold">
 						{(member.name ?? member.username ?? "?").slice(0, 1).toUpperCase()}
 					</AvatarFallback>
 				</Avatar>
@@ -69,14 +65,11 @@
 				{@const memberColors = getMemberColors(member.userId)}
 				<li class="flex items-center gap-2 rounded-lg px-1 py-1">
 					<Avatar
-						class="size-8 border-2"
-						style={`border-color: ${memberColors.accent}`}
+						userId={member.userId}
+						class="size-8"
 					>
 						{#if member.image}<AvatarImage src={member.image} alt="" />{/if}
-						<AvatarFallback
-							style={`background-color: ${memberColors.fill}; color: ${memberColors.foreground}`}
-							class="font-semibold"
-						>
+						<AvatarFallback class="font-semibold">
 							{(member.name ?? member.username ?? "?").slice(0, 1).toUpperCase()}
 						</AvatarFallback>
 					</Avatar>

@@ -37,6 +37,7 @@ import type * as playback from "../playback.js";
 import type * as presence from "../presence.js";
 import type * as presenceComponent from "../presenceComponent.js";
 import type * as rooms from "../rooms.js";
+import type * as userData from "../userData.js";
 
 import type {
   ApiFromModules,
@@ -74,6 +75,7 @@ declare const fullApi: ApiFromModules<{
   presence: typeof presence;
   presenceComponent: typeof presenceComponent;
   rooms: typeof rooms;
+  userData: typeof userData;
 }>;
 
 /**

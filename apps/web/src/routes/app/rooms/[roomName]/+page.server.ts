@@ -5,34 +5,30 @@ import type { PageServerLoad } from "./$types";
 
 export const load: PageServerLoad = async ({ params, parent }) => {
   const { roomName } = params;
+  const { user } = await parent();
+
+  if (!user) {
+    return { room: null, user: null };
+  }
 
   const client = createConvexHttpClient();
 
-  const [room, user] = await Promise.all([
-    (async () => {
-      try {
-        return await client.mutation(api.rooms.recordRoomVisitByName, { name: roomName });
-      } catch (err) {
-        if (!(err instanceof Error)) {
-          throw err;
-        }
-
-        // TODO: Maybe create a custom AppError so we can statically check this.
-        if (err.message.toLowerCase().includes("room not found")) {
-          error(404, "Not Found");
-        }
-
+  const room = await (async () => {
+    try {
+      return await client.mutation(api.rooms.recordRoomVisitByName, { name: roomName });
+    } catch (err) {
+      if (!(err instanceof Error)) {
         throw err;
       }
-    })(),
-    parent().then(({ user }) => {
-      if (!user) {
-        error(401);
+
+      // TODO: Maybe create a custom AppError so we can statically check this.
+      if (err.message.toLowerCase().includes("room not found")) {
+        error(404, "Not Found");
       }
 
-      return user;
-    }),
-  ]);
+      throw err;
+    }
+  })();
 
   return {
     room,

@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { invalidateAll } from "$app/navigation";
+	import { authClient } from "$lib/auth-client";
 	import * as RoomTabs from "$lib/components/room/tabs";
 	import { ScrollFollow } from "$lib/components/scroll-follow.svelte";
 	import { Button } from "$lib/components/ui/button";
@@ -14,6 +16,9 @@
 		members,
 		onMessage,
 		active = true,
+		guest = false,
+		guestName = "",
+		onGuestName = () => {},
 	}: {
 		messages: ChatMessage[];
 		canSend: boolean;
@@ -25,12 +30,19 @@
 		}>;
 		onMessage: (body: string) => void;
 		active?: boolean;
+		guest?: boolean;
+		guestName?: string;
+		onGuestName?: (name: string) => void;
 	} = $props();
 
 	const bottomThreshold = 8;
 
 	let messageBody = $state("");
 	let chatError = $state<string | null>(null);
+	let guestNameInput = $state("");
+	let guestNameError = $state<string | null>(null);
+	let savingGuestName = $state(false);
+	let hasSubmittedGuestName = $state(false);
 	let messageList = $state<HTMLDivElement | null>(null);
 	const scrollFollow = new ScrollFollow({
 		getViewport: () => messageList,
@@ -50,6 +62,62 @@
 		void scrollFollow.follow("instant");
 	});
 
+	const showGuestNamePrompt = $derived(
+		active &&
+		guest &&
+		!hasSubmittedGuestName &&
+		(!guestName.trim() ||
+			guestName.trim().toLowerCase() === "anonymous" ||
+			guestName.trim().toLowerCase() === "guest"),
+	);
+
+	$effect(() => {
+		if (!guest) {
+			hasSubmittedGuestName = false;
+			guestNameInput = "";
+			return;
+		}
+
+		if (
+			guestName.trim() &&
+			guestName.trim().toLowerCase() !== "anonymous" &&
+			guestName.trim().toLowerCase() !== "guest"
+		) {
+			hasSubmittedGuestName = true;
+		}
+	});
+
+	async function saveGuestName(event: SubmitEvent) {
+		event.preventDefault();
+		const name = guestNameInput.trim();
+		if (!name) {
+			guestNameError = "Enter a name to continue.";
+			return;
+		}
+		if (name.length > 50) {
+			guestNameError = "Names must be 50 characters or fewer.";
+			return;
+		}
+
+		savingGuestName = true;
+		guestNameError = null;
+		try {
+			const result = await authClient.updateUser({ name });
+			if (result.error) {
+				throw new Error(result.error.message);
+			}
+
+			hasSubmittedGuestName = true;
+			onGuestName(name);
+			await invalidateAll();
+		} catch (cause) {
+			guestNameError =
+				cause instanceof Error ? cause.message : "Unable to save your chat name";
+		} finally {
+			savingGuestName = false;
+		}
+	}
+
 	async function submitMessage(event: SubmitEvent) {
 		event.preventDefault();
 		const body = messageBody.trim();
@@ -66,78 +134,125 @@
 	}
 </script>
 
-<section class="flex h-full min-h-0 flex-col" data-slot="room-chat">
-	<div class="relative min-h-0 flex-1">
-		<RoomTabs.ScrollArea
-			bind:ref={messageList}
-			onscroll={scrollFollow.onScroll}
-			class="h-full"
-		>
-			<ul class="space-y-3 p-4 pb-0 h-full flex flex-col">
-				{#each messages as message (message._id)}
-					{@const memberColors = getMemberColors(message.user._id)}
-					<li class="flex gap-3">
-						<div class="min-w-0 flex-1 rounded-4xl bg-muted px-4 py-3">
-							<div class="flex items-baseline justify-between gap-3">
-								<p
-									class="truncate text-xs font-semibold"
-									style:color={memberColors.accent}
-								>
-									{message.user.name ?? "Guest"}
-								</p>
-								<time class="shrink-0 text-[0.7rem] text-muted-foreground">
-									{new Date(message._creationTime).toLocaleTimeString([], {
-										hour: "numeric",
-										minute: "2-digit",
-									})}
-								</time>
-							</div>
-							<p class="mt-0.5 wrap-break-word text-sm">{message.body}</p>
-						</div>
-					</li>
-				{/each}
-				{#if messages.length === 0}
-					<li class="py-8 flex-1 text-center text-sm text-muted-foreground">
-						No messages yet.
-					</li>
-				{/if}
-				<li class="-mt-3 flex items-center">
-					<RoomMembersPopover {members} />
-				</li>
-			</ul>
-		</RoomTabs.ScrollArea>
-
-		{#if !scrollFollow.isFollowing}
-			<Button
-				variant="secondary"
-				size="xs"
-				class="absolute bottom-3 left-1/2 -translate-x-1/2 shadow-md"
-				onclick={() => void scrollFollow.sync()}
+<section class="relative flex h-full min-h-0 flex-col" data-slot="room-chat">
+	<div
+		class="flex min-h-0 flex-1 flex-col transition-[filter] duration-200"
+		class:blur-sm={showGuestNamePrompt}
+		class:pointer-events-none={showGuestNamePrompt}
+		aria-hidden={showGuestNamePrompt}
+	>
+		<div class="relative min-h-0 flex-1">
+			<RoomTabs.ScrollArea
+				bind:ref={messageList}
+				onscroll={scrollFollow.onScroll}
+				class="h-full"
 			>
-				<ChevronDownIcon />
-				Scroll to bottom
-			</Button>
+				<ul class="flex h-full flex-col space-y-3 p-4 pb-0">
+					{#each messages as message (message._id)}
+						{@const memberColors = getMemberColors(message.user._id)}
+						<li class="flex gap-3">
+							<div class="min-w-0 flex-1 rounded-4xl bg-muted px-4 py-3">
+								<div class="flex items-baseline justify-between gap-3">
+									<p
+										class="truncate text-xs font-semibold"
+										style:color={memberColors.accent}
+									>
+										{message.user.name ?? "Guest"}
+									</p>
+									<time class="shrink-0 text-[0.7rem] text-muted-foreground">
+										{new Date(message._creationTime).toLocaleTimeString([], {
+											hour: "numeric",
+											minute: "2-digit",
+										})}
+									</time>
+								</div>
+								<p class="mt-0.5 wrap-break-word text-sm">{message.body}</p>
+							</div>
+						</li>
+					{/each}
+					{#if messages.length === 0}
+						<li class="flex-1 py-8 text-center text-sm text-muted-foreground">
+							No messages yet.
+						</li>
+					{/if}
+					<li class="-mt-3 flex items-center">
+						<RoomMembersPopover {members} />
+					</li>
+				</ul>
+			</RoomTabs.ScrollArea>
+
+			{#if !scrollFollow.isFollowing}
+				<Button
+					variant="secondary"
+					size="xs"
+					class="absolute bottom-3 left-1/2 -translate-x-1/2 shadow-md"
+					onclick={() => void scrollFollow.sync()}
+				>
+					<ChevronDownIcon />
+					Scroll to bottom
+				</Button>
+			{/if}
+		</div>
+
+		{#if canSend || chatError}
+			<RoomTabs.Footer>
+				{#if canSend}
+					<form class="flex gap-2 border-t p-3" onsubmit={submitMessage}>
+						<Input
+							maxlength={500}
+							bind:value={messageBody}
+							placeholder="Say something…"
+							aria-label="Chat message"
+						/>
+						<Button type="submit" disabled={!messageBody.trim()}>Send</Button>
+					</form>
+				{/if}
+				{#if chatError}
+					<p class="px-4 pb-3 text-xs text-destructive" role="alert">
+						{chatError}
+					</p>
+				{/if}
+			</RoomTabs.Footer>
 		{/if}
 	</div>
 
-	{#if canSend || chatError}
-		<RoomTabs.Footer>
-			{#if canSend}
-				<form class="flex gap-2 border-t p-3" onsubmit={submitMessage}>
+	{#if showGuestNamePrompt}
+		<div
+			class="absolute inset-0 z-10 flex items-center justify-center bg-background/65 p-4 backdrop-blur-[2px]"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="guest-chat-name-title"
+		>
+			<div class="w-full max-w-sm rounded-3xl border border-border bg-card p-5 text-card-foreground shadow-xl">
+				<div class="space-y-1.5">
+					<h2 id="guest-chat-name-title" class="font-heading text-lg font-semibold">
+						Choose your chat name
+					</h2>
+					<p class="text-sm text-muted-foreground">
+						This is the name other people in the room will see.
+					</p>
+				</div>
+				<form class="mt-5 space-y-3" onsubmit={saveGuestName}>
 					<Input
-						maxlength={500}
-						bind:value={messageBody}
-						placeholder="Say something…"
-						aria-label="Chat message"
+						bind:value={guestNameInput}
+						maxlength={50}
+						placeholder="Your name"
+						aria-label="Chat name"
+						autocomplete="nickname"
+						autofocus
 					/>
-					<Button type="submit" disabled={!messageBody.trim()}>Send</Button>
+					{#if guestNameError}
+						<p class="text-xs text-destructive" role="alert">{guestNameError}</p>
+					{/if}
+					<Button
+						class="w-full"
+						type="submit"
+						disabled={savingGuestName || !guestNameInput.trim()}
+					>
+						{savingGuestName ? "Saving…" : "Continue to chat"}
+					</Button>
 				</form>
-			{/if}
-			{#if chatError}
-				<p class="px-4 pb-3 text-xs text-destructive" role="alert">
-					{chatError}
-				</p>
-			{/if}
-		</RoomTabs.Footer>
+			</div>
+		</div>
 	{/if}
 </section>

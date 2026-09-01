@@ -7,7 +7,7 @@ export const handle: Handle = async ({ event, resolve }) => {
   event.locals.token = token;
 
   return withServerConvexToken(token, () => {
-    if (isAuthenticatedRoute(event.url.pathname) && !token) {
+    if (isAuthenticatedRoute(event.url.pathname) && !token && !isRoomRoute(event.url.pathname)) {
       redirect(302, `/login?to=${encodeURIComponent(event.url.pathname)}`);
     }
 
@@ -17,4 +17,8 @@ export const handle: Handle = async ({ event, resolve }) => {
 
 function isAuthenticatedRoute(pathname: string) {
   return pathname === "/app" || pathname.startsWith("/app/");
+}
+
+function isRoomRoute(pathname: string) {
+  return /^\/app\/rooms\/[^/]+\/?$/.test(pathname);
 }

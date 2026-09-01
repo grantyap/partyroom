@@ -1,11 +1,12 @@
-import { getAuthState } from "@mmailaender/convex-better-auth-svelte/sveltekit";
+import { getCurrentUser } from "$lib/auth.remote";
 import { redirect } from "@sveltejs/kit";
 import type { PageServerLoad } from "./$types";
 
 export const load: PageServerLoad = async ({ url }) => {
-  // If the user's already logged in, then redirect to the app home page.
-  const { isAuthenticated } = getAuthState();
-  if (isAuthenticated) {
+  // Registered users should not see the login form. Anonymous users may use it
+  // to link a permanent authentication method to their current session.
+  const user = await getCurrentUser();
+  if (user && (!("isAnonymous" in user) || user.isAnonymous !== true)) {
     const target = url.searchParams.get("to") || "/";
     redirect(303, target);
   }
