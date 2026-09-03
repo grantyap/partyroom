@@ -257,6 +257,7 @@
 							members={onlineUsers}
 							active={panelTab === "chat"}
 							guest={isGuest}
+							guestUserId={data.user?._id}
 							guestName={displayName}
 							onGuestName={handleGuestName}
 							onMessage={onMessage}

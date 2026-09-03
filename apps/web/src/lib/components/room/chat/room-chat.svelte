@@ -1,11 +1,15 @@
 <script lang="ts">
 	import { invalidateAll } from "$app/navigation";
-	import { authClient } from "$lib/auth-client";
 	import * as RoomTabs from "$lib/components/room/tabs";
 	import { ScrollFollow } from "$lib/components/scroll-follow.svelte";
 	import { Button } from "$lib/components/ui/button";
 	import { Input } from "$lib/components/ui/input";
 	import { getMemberColors } from "$lib/member-colors";
+	import {
+		isMeaningfulUserName,
+		setUserName,
+		USER_NAME_MAX_LENGTH,
+	} from "$lib/user-name";
 	import ChevronDownIcon from "@lucide/svelte/icons/chevron-down";
 	import type { ChatMessage } from "../types";
 	import RoomMembersPopover from "./room-members-popover.svelte";
@@ -17,6 +21,7 @@
 		onMessage,
 		active = true,
 		guest = false,
+		guestUserId,
 		guestName = "",
 		onGuestName = () => {},
 	}: {
@@ -31,6 +36,7 @@
 		onMessage: (body: string) => void;
 		active?: boolean;
 		guest?: boolean;
+		guestUserId?: string;
 		guestName?: string;
 		onGuestName?: (name: string) => void;
 	} = $props();
@@ -42,7 +48,6 @@
 	let guestNameInput = $state("");
 	let guestNameError = $state<string | null>(null);
 	let savingGuestName = $state(false);
-	let hasSubmittedGuestName = $state(false);
 	let messageList = $state<HTMLDivElement | null>(null);
 	const scrollFollow = new ScrollFollow({
 		getViewport: () => messageList,
@@ -65,49 +70,23 @@
 	const showGuestNamePrompt = $derived(
 		active &&
 		guest &&
-		!hasSubmittedGuestName &&
-		(!guestName.trim() ||
-			guestName.trim().toLowerCase() === "anonymous" ||
-			guestName.trim().toLowerCase() === "guest"),
+		!isMeaningfulUserName(guestName),
 	);
 
 	$effect(() => {
 		if (!guest) {
-			hasSubmittedGuestName = false;
 			guestNameInput = "";
+			guestNameError = null;
 			return;
-		}
-
-		if (
-			guestName.trim() &&
-			guestName.trim().toLowerCase() !== "anonymous" &&
-			guestName.trim().toLowerCase() !== "guest"
-		) {
-			hasSubmittedGuestName = true;
 		}
 	});
 
 	async function saveGuestName(event: SubmitEvent) {
 		event.preventDefault();
-		const name = guestNameInput.trim();
-		if (!name) {
-			guestNameError = "Enter a name to continue.";
-			return;
-		}
-		if (name.length > 50) {
-			guestNameError = "Names must be 50 characters or fewer.";
-			return;
-		}
-
 		savingGuestName = true;
 		guestNameError = null;
 		try {
-			const result = await authClient.updateUser({ name });
-			if (result.error) {
-				throw new Error(result.error.message);
-			}
-
-			hasSubmittedGuestName = true;
+			const name = await setUserName(guestNameInput, guestUserId);
 			onGuestName(name);
 			await invalidateAll();
 		} catch (cause) {
@@ -229,13 +208,13 @@
 						Choose your chat name
 					</h2>
 					<p class="text-sm text-muted-foreground">
-						This is the name other people in the room will see.
+						This is the name other people in the room will see. You can only set it once.
 					</p>
 				</div>
 				<form class="mt-5 space-y-3" onsubmit={saveGuestName}>
 					<Input
 						bind:value={guestNameInput}
-						maxlength={50}
+						maxlength={USER_NAME_MAX_LENGTH}
 						placeholder="Your name"
 						aria-label="Chat name"
 						autocomplete="nickname"
