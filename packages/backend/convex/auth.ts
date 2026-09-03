@@ -1,10 +1,11 @@
 import { createClient, type GenericCtx } from "@convex-dev/better-auth";
 import { convex } from "@convex-dev/better-auth/plugins";
 import { betterAuth } from "better-auth/minimal";
+import { anonymous } from "better-auth/plugins";
+import { generateSlug } from "random-word-slugs";
 import { components, internal } from "./_generated/api";
 import { type DataModel } from "./_generated/dataModel";
 import { query, env, type QueryCtx } from "./_generated/server";
-import { anonymous } from "better-auth/plugins";
 import authConfig from "./auth.config";
 
 const siteUrl = env.SITE_URL;
@@ -26,6 +27,7 @@ export const createAuth = (convexCtx: GenericCtx<DataModel>) => {
       // The Convex plugin is required for Convex compatibility
       convex({ authConfig }),
       anonymous({
+        generateName: () => generateSlug(2, { format: "title" }),
         onLinkAccount: async ({ anonymousUser, newUser }) => {
           if (anonymousUser.user.id === newUser.user.id) {
             return;
