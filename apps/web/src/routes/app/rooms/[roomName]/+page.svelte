@@ -183,21 +183,6 @@
 {:else}
 	{@const activeRoomId = roomId}
 	<div class="mx-auto w-full max-w-384 space-y-5 p-4 sm:p-6">
-		{#if isGuest}
-			<div class="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-border bg-muted/50 px-4 py-3">
-				<p class="text-sm text-muted-foreground">
-					You're visiting as a guest. Create an account to keep your joined rooms.
-				</p>
-				<Button
-					href={`/sign-up?to=${encodeURIComponent(`/app/rooms/${params.roomName}`)}`}
-					variant="secondary"
-					size="sm"
-				>
-					Create account
-				</Button>
-			</div>
-		{/if}
-
 		<Playback.Root roomId={activeRoomId} {overlayMessages}>
 			<div class="grid min-h-0 gap-5 xl:grid-cols-[minmax(0,1fr)_20rem]">
 				<header

@@ -30,9 +30,7 @@
 					: "Pick up where you left off or start a room."}
 			</p>
 		</div>
-		{#if isGuest}
-			<Button href="/sign-up?to=/app" variant="secondary">Create account</Button>
-		{:else}
+		{#if !isGuest}
 			<Button
 				onclick={async () => {
 					const room = await createRoom({});
