@@ -4,7 +4,7 @@
 	import { cn } from "$lib/utils";
 	import type { ComponentProps } from "svelte";
 
-	type RootProps = ComponentProps<typeof Tabs.Root> & { cardClass?: string };
+	type RootProps = ComponentProps<typeof Tabs.Root> & { cardClass?: string; workspace?: boolean };
 
 	let {
 		ref = $bindable(null),
@@ -12,14 +12,17 @@
 		children,
 		class: className,
 		cardClass,
+		workspace = false,
 		...restProps
 	}: RootProps = $props();
 </script>
 
-<div class="min-w-0 xl:relative xl:min-h-0" data-slot="room-tabs-root">
+<div class={workspace ? "flex min-h-0 min-w-0 flex-col" : "min-w-0 xl:relative xl:min-h-0"} data-slot="room-tabs-root">
 	<Card.Root
 		class={cn(
-			"h-[min(--spacing(96),70dvh)] gap-0 py-0 xl:absolute xl:inset-0 xl:h-auto",
+			workspace
+				? "min-h-0 flex-1 gap-0 rounded-2xl border py-0 shadow-none ring-0"
+				: "h-[min(--spacing(96),70dvh)] gap-0 py-0 xl:absolute xl:inset-0 xl:h-auto",
 			cardClass,
 		)}
 	>

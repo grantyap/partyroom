@@ -44,7 +44,6 @@ replace that content while keeping the sortable item shell.
 		AvatarImage,
 	} from "$lib/components/ui/avatar";
 	import { Button } from "$lib/components/ui/button";
-	import * as Tooltip from "$lib/components/ui/tooltip";
 	import { Trash2 } from "@lucide/svelte";
 	import { api } from "@partyroom/backend/convex/_generated/api";
 	import { useMutation } from "convex-svelte";
@@ -109,37 +108,19 @@ replace that content while keeping the sortable item shell.
 	{#if children}
 		{@render children(renderProps)}
 	{:else}
-		<Tooltip.Provider>
-			<Tooltip.Root>
-				<Tooltip.Trigger>
-					<Avatar
-						size="sm"
-						userId={item.addedBy._id}
-					>
-						{#if item.addedBy.image}
-							<AvatarImage src={item.addedBy.image} alt="" />
-						{/if}
-						<AvatarFallback class="font-semibold">
-							{item.addedBy.name.slice(0, 1).toUpperCase()}
-						</AvatarFallback>
-					</Avatar>
-				</Tooltip.Trigger>
-				<Tooltip.Content>{item.addedBy.name}</Tooltip.Content>
-			</Tooltip.Root>
-		</Tooltip.Provider>
-		<div class="min-w-0 flex-1">
-			<p class="line-clamp-2 text-sm leading-snug font-medium wrap-anywhere" {title}>
-				{title}
-			</p>
-			<p class="text-xs text-muted-foreground">
-				{item.availability === "ready"
-					? "Ready"
-					: item.availability === "processing"
-						? "Processing…"
-						: "Unavailable"}
-				{#if formatDuration(duration)}
-					· {formatDuration(duration)}{/if}
-			</p>
+		<div class="min-w-0 flex-1 space-y-1.5">
+			<p class="line-clamp-2 text-sm leading-snug font-medium wrap-anywhere" {title}>{title}</p>
+			<div class="flex min-w-0 items-center gap-1.5 text-[0.65rem] text-muted-foreground">
+				<Avatar userId={item.addedBy._id} class="size-4 border-0">
+					{#if item.addedBy.image}<AvatarImage src={item.addedBy.image} alt="" />{/if}
+					<AvatarFallback class="text-[0.5rem]">{item.addedBy.name.slice(0, 1).toUpperCase()}</AvatarFallback>
+				</Avatar>
+				<span class="truncate">{item.addedBy.name}</span>
+				{#if formatDuration(duration)}<span aria-hidden="true">·</span><span class="shrink-0 tabular-nums">{formatDuration(duration)}</span>{/if}
+				{#if item.availability !== "ready"}
+					<span class="shrink-0" class:text-destructive={item.availability === "failed"}>· {item.availability === "processing" ? "Processing…" : "Unavailable"}</span>
+				{/if}
+			</div>
 		</div>
 		{#if item.availability === "processing" && media}
 			<MediaProgressPopover
@@ -150,7 +131,8 @@ replace that content while keeping the sortable item shell.
 		{#if canRemove}
 			<Button
 				variant="ghost"
-				size="icon-sm"
+				size="icon"
+				class="size-10 shrink-0 rounded-lg text-muted-foreground hover:text-destructive"
 				aria-label={`Remove ${title} from queue`}
 				onclick={remove}
 			>

@@ -32,18 +32,21 @@ Internal sortable shell used by `Playback.QueueItem`.
 
 <li
 	{@attach ref}
-	class="group flex items-center gap-2 rounded-4xl border bg-background px-3 py-2"
+	class="group flex items-center gap-2 rounded-xl px-2 py-3 transition-colors hover:bg-muted/60"
 	class:opacity-50={isDragging.current}
 >
 	{#if !disabled}
 		<button
 			{@attach handleRef}
 			type="button"
-			class="shrink-0 touch-none cursor-grab rounded-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing"
+			class="relative grid size-8 shrink-0 touch-none cursor-grab place-items-center rounded-md text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing"
 			aria-label={`Reorder ${label}`}
 		>
-			<GripVertical class="size-4" aria-hidden="true" />
+			<span class="text-xs tabular-nums group-hover:opacity-0 group-focus-within:opacity-0" aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
+			<GripVertical class="absolute size-4 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100" aria-hidden="true" />
 		</button>
+	{:else}
+		<span class="grid size-8 shrink-0 place-items-center text-xs text-muted-foreground tabular-nums" aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
 	{/if}
 	{@render children()}
 </li>

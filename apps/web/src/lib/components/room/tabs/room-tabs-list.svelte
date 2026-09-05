@@ -13,8 +13,8 @@
 	}: ListProps = $props();
 </script>
 
-<div class="shrink-0 border-b p-3" data-slot="room-tabs-list">
-	<Tabs.List bind:ref class={cn("w-full", className)} {...restProps}>
+<div class="shrink-0 border-b px-3 pt-1" data-slot="room-tabs-list">
+	<Tabs.List bind:ref variant="line" class={cn("h-12 w-full p-0 [&>button]:text-xs", className)} {...restProps}>
 		{@render children?.()}
 	</Tabs.List>
 </div>

@@ -98,7 +98,7 @@ working.
 		{/if}
 		<ul
 			data-slot="playback-queue-list"
-			class={cn("min-h-24 space-y-2 p-3", className)}
+			class={cn("min-h-24 divide-y divide-border/60 px-2 pb-2", className)}
 			{...restProps}
 		>
 			{#each playbackContext.playback?.queue ?? [] as item, index (item._id)}

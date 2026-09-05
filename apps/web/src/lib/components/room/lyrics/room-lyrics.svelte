@@ -115,11 +115,11 @@
 					No readable lyrics available.
 				</div>
 			{:else}
-				<div class="space-y-5 p-4 pb-8">
+				<div class="space-y-6 px-5 py-6">
 					{#each lyrics.cues as cue, index (`${lyrics.selectedLyrics?.id}:${cue.start}:${index}`)}
 						<div
 							bind:this={lyricLines[index]}
-							class="transition-opacity"
+							class="transition-opacity opacity-45 data-[active=true]:opacity-100"
 							data-active={lyrics.activeCueIndex === index ? "true" : undefined}
 						>
 							<KaraokeLyricLine
@@ -127,7 +127,7 @@
 								currentTime={lyrics.adjustedTime}
 								wordTiming={lyrics.wordTiming}
 								active={lyrics.activeCueIndex === index}
-								class="text-left [&[data-lyric-line=current][data-lyric-timing=line]]:text-[oklch(0.83_0.18_85)] [&_[data-lyric-word=complete]]:text-[oklch(0.83_0.18_85)] [&_[data-lyric-word=current]]:text-[oklch(0.83_0.18_85)] [&>span]:me-[0.28em] [&>span:last-child]:me-0"
+								class="text-left text-lg font-semibold leading-relaxed tracking-tight [&[data-lyric-line=current][data-lyric-timing=line]]:text-primary [&_[data-lyric-word=complete]]:text-primary [&_[data-lyric-word=current]]:text-primary [&>span]:me-[0.28em] [&>span:last-child]:me-0"
 							/>
 						</div>
 					{/each}

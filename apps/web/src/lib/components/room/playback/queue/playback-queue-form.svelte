@@ -59,7 +59,7 @@ custom queue layout. It renders nothing when the current user cannot add songs.
 		<form class="flex gap-2" onsubmit={addSong}>
 			<Input
 				type="url"
-				placeholder="Paste video URL"
+				placeholder="Paste a video link…"
 				aria-label="Video URL"
 				bind:value={sourceUrl}
 				disabled={submitting}

@@ -12,7 +12,7 @@
 	import RoomMembersPopover from "$lib/components/room/chat/room-members-popover.svelte";
 	import * as Playback from "$lib/components/room/playback";
 	import * as RoomTabs from "$lib/components/room/tabs";
-	import { Button } from "$lib/components/ui/button";
+	import { Button, buttonVariants } from "$lib/components/ui/button";
 	import { createUuidInAnyContext } from "$lib/context-uuid";
 	import { Presence } from "$lib/presence.svelte";
 	import { api } from "@partyroom/backend/convex/_generated/api";
@@ -20,7 +20,8 @@
 	import { useAuth } from "@mmailaender/convex-better-auth-svelte/svelte";
 	import { useMutation, useQuery } from "convex-svelte";
 	import ArrowLeftIcon from "@lucide/svelte/icons/arrow-left";
-	import ChevronDownIcon from "@lucide/svelte/icons/chevron-down";
+	import * as Drawer from "$lib/components/ui/drawer";
+	import { Headphones, ListMusic, MessageCircle, Mic2, Music2, Radio, Users } from "@lucide/svelte";
 	import SettingsIcon from "@lucide/svelte/icons/settings";
 	import type { PageProps } from "./$types";
 
@@ -28,7 +29,7 @@
 	const auth = useAuth();
 
 	let panelTab = $state("queue");
-	let playerHeight = $state(0);
+	let settingsOpen = $state(false);
 	let joinAttempted = $state(false);
 	let joinError = $state<string | null>(null);
 	let displayName = $state("");
@@ -171,6 +172,10 @@
 	}
 </script>
 
+<svelte:head>
+	<title>{roomData?.name.replaceAll("-", " ") ?? params.roomName} · Partyroom</title>
+</svelte:head>
+
 {#if joinError}
 	<ErrorState
 		title="Unable to join room"
@@ -192,63 +197,75 @@
 	</div>
 {:else}
 	{@const activeRoomId = roomId}
-	<div style={`--room-player-height: ${playerHeight}px`} class="room-view mx-auto w-full max-w-384 space-y-4 p-3 sm:space-y-5 sm:p-6">
+	<div class="room-workspace">
 		<Playback.Root roomId={activeRoomId} {overlayMessages}>
-			<div class="grid min-h-0 gap-3 sm:gap-5 xl:grid-cols-[minmax(0,1fr)_24rem]">
-				<header class="flex flex-wrap items-center justify-between gap-3 xl:col-span-2">
-					<div class="min-w-0 flex-1 space-y-1 sm:space-y-2">
-						<Button href="/app" variant="ghost" size="sm" class="-ms-3 hidden text-muted-foreground sm:inline-flex">
-							<ArrowLeftIcon /> All rooms
-						</Button>
-						<h1 class="font-heading text-base font-semibold tracking-tight wrap-anywhere sm:text-2xl">
-							{roomData?.name}
-						</h1>
-						<div class="flex items-center gap-2">
-							<RoomMembersPopover members={onlineUsers} />
-							<span class="text-xs text-muted-foreground">
-								{onlineUsers.length} {onlineUsers.length === 1 ? "person" : "people"} here
-							</span>
-						</div>
+			<header class="room-heading">
+				<div class="room-identity">
+					<Button href="/app" variant="ghost" size="icon" aria-label="Back to rooms" class="shrink-0">
+						<ArrowLeftIcon />
+					</Button>
+					<div class="min-w-0">
+						<p class="eyebrow">Listening room <span class="inline font-normal tracking-normal normal-case min-[800px]:hidden">· {onlineUsers.length} here</span></p>
+						<h1 title={roomData?.name}>{roomData?.name.replaceAll("-", " ")}</h1>
 					</div>
-					<Playback.Share />
-				</header>
+				</div>
+				<div class="room-actions">
+					<div class="room-members">
+						<RoomMembersPopover members={onlineUsers} />
+						<span>{onlineUsers.length} here</span>
+					</div>
+					<Playback.Share>
+						{#snippet trigger({ props })}
+							<button {...props} class={buttonVariants({ size: "sm" })}><Users size={16} /> Invite</button>
+						{/snippet}
+					</Playback.Share>
+					{#if playback.data?.permissions.updateRoom}
+						<Button variant="ghost" size="icon" aria-label="Room settings" onclick={() => settingsOpen = true}>
+							<SettingsIcon />
+						</Button>
+					{/if}
+				</div>
+			</header>
 
-				<section bind:clientHeight={playerHeight} class="room-player min-w-0 space-y-2 bg-background sm:space-y-3" data-slot="playback-main" aria-label="Player">
-					<div class="flex flex-wrap items-center justify-between gap-3">
-						<div class="min-w-0 flex-1 basis-48">
+			<div class="room-body">
+				<section class="stage" aria-label="Player">
+					<div class="stage-toolbar">
+						<span class="stage-label"><Radio size={15} /> THE STAGE</span>
+						<div class="stage-tools"><Playback.Lyrics /><Playback.TvMode /></div>
+					</div>
+					<div class="stage-screen">
+						<Playback.Player>
+							{#snippet empty({ hasQueuedMedia })}
+								<div class="stage-empty">
+									<div class="stage-empty-icon"><Headphones size={32} strokeWidth={1.4} /></div>
+									<h2>{hasQueuedMedia ? "Your music is on its way." : "Good company. Great music."}</h2>
+									<p>{hasQueuedMedia ? "The next ready song will start automatically." : "Every room starts with a song. Add one to the queue."}</p>
+								</div>
+							{/snippet}
+						</Playback.Player>
+					</div>
+					<div class="stage-caption">
+						<div class="track-icon"><Music2 size={21} /></div>
+						<div class="min-w-0">
 							<Playback.NowPlaying>
 								{#snippet children({ title, hasQueuedMedia })}
-									<p class="text-xs font-medium text-muted-foreground">Now playing</p>
-									<p class="truncate text-sm font-medium" title={title ?? undefined}>
-										{title ?? (hasQueuedMedia ? "Preparing the next song…" : "Choose the first song")}
-									</p>
+									<p class="eyebrow">{title ? "Now playing" : "Up next"}</p>
+									<h2 title={title ?? undefined}>{title ?? (hasQueuedMedia ? "Preparing the next song…" : "Your first song goes here")}</h2>
 								{/snippet}
 							</Playback.NowPlaying>
 						</div>
-						<div class="flex shrink-0 items-center gap-2">
-							<Playback.Lyrics />
-							<Playback.TvMode />
-						</div>
 					</div>
-					<Playback.Player />
-					<Playback.Error />
+					<Playback.Error class="px-4 pb-3 text-red-300" />
 				</section>
-				<RoomTabs.Root bind:value={panelTab}>
-					<RoomTabs.List>
-						<RoomTabs.Trigger value="queue">
-							Queue
-							<Playback.QueueCount />
-						</RoomTabs.Trigger>
-						<RoomTabs.Trigger value="lyrics">Lyrics</RoomTabs.Trigger>
-						<RoomTabs.Trigger value="chat">Chat</RoomTabs.Trigger>
-					</RoomTabs.List>
 
-					<RoomTabs.Content value="queue" class="room-queue-panel">
-						<Playback.Queue />
-					</RoomTabs.Content>
-					<RoomTabs.Content value="lyrics">
-						<RoomLyrics active={panelTab === "lyrics"} />
-					</RoomTabs.Content>
+				<RoomTabs.Root bind:value={panelTab} workspace>
+					<RoomTabs.List aria-label="Room activity">
+						<RoomTabs.Trigger value="queue"><ListMusic size={17} /> Queue <Playback.QueueCount /></RoomTabs.Trigger>
+						<RoomTabs.Trigger value="lyrics"><Mic2 size={17} /> Lyrics</RoomTabs.Trigger>
+						<RoomTabs.Trigger value="chat"><MessageCircle size={17} /> Chat</RoomTabs.Trigger>
+					</RoomTabs.List>
+					<RoomTabs.Content value="queue"><Playback.Queue /></RoomTabs.Content>
+					<RoomTabs.Content value="lyrics"><RoomLyrics active={panelTab === "lyrics"} /></RoomTabs.Content>
 					<RoomTabs.Content value="chat">
 						<RoomChat
 							messages={messages.data ?? []}
@@ -265,74 +282,333 @@
 				</RoomTabs.Root>
 			</div>
 		</Playback.Root>
-
-		{#if playback.data?.permissions.updateRoom && roomData}
-			<details class="group rounded-2xl border bg-muted/20">
-				<summary class="flex cursor-pointer list-none items-center gap-2 rounded-2xl p-4 text-sm font-medium focus-visible:outline-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
-					<SettingsIcon class="size-4 text-muted-foreground" />
-					Room settings
-					<span class="ms-auto hidden text-xs font-normal text-muted-foreground sm:inline">Visitor permissions</span>
-					<ChevronDownIcon class="ms-auto size-4 text-muted-foreground transition-transform group-open:rotate-180 sm:ms-2" />
-				</summary>
-				<div class="max-w-xl px-4 pb-4">
-					<RoomPermissions
-						permissions={roomData.memberPermissions}
-						onChange={(permission, enabled) =>
-							void setMemberPermission(permission, enabled)}
-					/>
-				</div>
-			</details>
-		{/if}
 	</div>
+	{#if playback.data?.permissions.updateRoom && roomData}
+		<Drawer.Root bind:open={settingsOpen}>
+			<Drawer.Content class="mx-auto max-w-lg">
+				<Drawer.Header>
+					<Drawer.Title>Room settings</Drawer.Title>
+					<Drawer.Description>Choose what visitors can do. Changes save automatically.</Drawer.Description>
+				</Drawer.Header>
+				<div class="overflow-y-auto px-4 pb-4">
+					<RoomPermissions permissions={roomData.memberPermissions} onChange={setMemberPermission} />
+				</div>
+				<Drawer.Footer><Button onclick={() => settingsOpen = false}>Done</Button></Drawer.Footer>
+			</Drawer.Content>
+		</Drawer.Root>
+	{/if}
 {/if}
 
 <style>
-	@media (width < 640px) {
-		.room-view :global([data-slot="room-tabs-root"] [data-slot="tabs"]) {
-			overflow: visible;
+	.room-workspace {
+		height: calc(100dvh - 4rem);
+		min-height: 36rem;
+		display: flex;
+		flex-direction: column;
+		padding: 0 1.5rem 1.5rem;
+		background: color-mix(in oklch, var(--muted) 65%, var(--background));
+	}
+
+	.room-heading {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+		padding: 1.1rem 0;
+	}
+
+	.room-identity, .room-actions, .room-members {
+		display: flex;
+		align-items: center;
+		gap: .75rem;
+		min-width: 0;
+	}
+
+	.room-identity {
+		flex: 1;
+	}
+
+	.room-heading h1 {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		font-size: 1.1rem;
+		font-weight: 650;
+		text-transform: capitalize;
+		letter-spacing: -.025em;
+	}
+
+	.eyebrow {
+		font-size: .625rem;
+		font-weight: 650;
+		letter-spacing: .14em;
+		text-transform: uppercase;
+		color: var(--muted-foreground);
+		margin-bottom: .2rem;
+	}
+
+	.room-members {
+		font-size: .75rem;
+		color: var(--muted-foreground);
+		margin-right: .5rem;
+		white-space: nowrap;
+	}
+
+	.room-body {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) 24rem;
+		gap: 1rem;
+		flex: 1;
+		min-height: 0;
+	}
+
+	.stage {
+		display: flex;
+		flex-direction: column;
+		min-width: 0;
+		min-height: 0;
+		border-radius: 1.25rem;
+		background: #15131c;
+		color: #f7f5fc;
+		overflow: hidden;
+		box-shadow: 0 8px 32px #18102212;
+	}
+
+	.stage-toolbar {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: .75rem;
+		padding: 1rem 1.25rem;
+	}
+
+	.stage-label {
+		display: flex;
+		align-items: center;
+		gap: .5rem;
+		font-size: .625rem;
+		letter-spacing: .16em;
+		color: #bdb5cc;
+	}
+
+	.stage-tools {
+		display: flex;
+		gap: .4rem;
+	}
+
+	.stage-tools :global(button) {
+		border-color: #ffffff20;
+		color: #ded8ea;
+		background: #ffffff08;
+		border-radius: .5rem;
+		box-shadow: none;
+	}
+
+	.stage-tools :global(button:hover) {
+		background: #ffffff18;
+	}
+
+	.stage-screen {
+		flex: 1;
+		min-height: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: #0b0a0f;
+		container-type: size;
+	}
+
+	.stage-screen :global([data-slot="playback-player"]:not(.fixed)) {
+		width: 100%;
+		max-width: calc(100cqh * 16 / 9);
+		border: 0;
+		border-radius: 0;
+		box-shadow: none;
+	}
+
+	.stage-caption {
+		display: flex;
+		align-items: center;
+		gap: .875rem;
+		padding: 1.25rem;
+	}
+
+	.stage-caption .eyebrow {
+		color: #a99bbf;
+	}
+
+	.stage-caption h2 {
+		font-size: 1rem;
+		font-weight: 550;
+		letter-spacing: -.02em;
+		overflow: hidden;
+		white-space: nowrap;
+		text-overflow: ellipsis;
+	}
+
+	.track-icon {
+		display: grid;
+		place-items: center;
+		width: 2.75rem;
+		height: 2.75rem;
+		flex-shrink: 0;
+		border-radius: .8rem;
+		background: #bfa3ff18;
+		color: #cab1ff;
+	}
+
+	.stage-empty {
+		display: flex;
+		aspect-ratio: 16 / 9;
+		align-items: center;
+		justify-content: center;
+		flex-direction: column;
+		padding: 1rem;
+		text-align: center;
+		background: radial-gradient(ellipse at center, #49335d55, transparent 70%);
+	}
+
+	.stage-empty-icon {
+		color: #d1b5ff;
+		margin-bottom: 1.25rem;
+	}
+
+	.stage-empty h2 {
+		font-size: clamp(1rem, 2vw, 1.8rem);
+		letter-spacing: -.04em;
+		font-weight: 550;
+	}
+
+	.stage-empty p {
+		max-width: 20rem;
+		font-size: .8rem;
+		line-height: 1.6;
+		color: #a69eaf;
+		margin-top: .5rem;
+	}
+
+	@media (width < 1100px) {
+		.room-body {
+			grid-template-columns: minmax(0, 1fr) 21rem;
 		}
 
-		/* Let the queue grow with the page; chat and lyrics retain scroll-follow viewports. */
-		.room-view :global([data-slot="room-tabs-root"] > [data-slot="card"]) {
-			height: auto;
-			min-height: 60svh;
-			overflow: visible;
+		.room-workspace {
+			padding-inline: 1rem;
 		}
 
-		.room-view :global([data-slot="tabs-content"]:not(.room-queue-panel)) {
-			height: 65svh;
+	}
+
+	@media (width < 800px) {
+		.room-workspace {
+			padding: 0 .75rem max(.75rem, env(safe-area-inset-bottom));
+			min-height: 34rem;
+		}
+
+		.room-heading {
+			padding: .7rem 0;
+			gap: .5rem;
+		}
+
+		.room-identity {
+			gap: .25rem;
+		}
+
+		.room-heading h1 {
+			font-size: .85rem;
+		}
+
+		.room-heading .eyebrow {
+			font-size: .55rem;
+		}
+
+		.room-actions {
+			gap: .25rem;
+		}
+
+		.room-members {
+			display: none;
+		}
+
+
+		.room-body {
+			grid-template-columns: 1fr;
+			grid-template-rows: auto minmax(0, 1fr);
+			gap: .75rem;
+		}
+
+		.stage {
+			border-radius: .9rem;
+		}
+
+		.stage-toolbar {
+			padding: .5rem .75rem;
+		}
+
+		.stage-label {
+			font-size: .55rem;
+		}
+
+		.stage-tools :global(button) {
+			height: 1.9rem;
+			font-size: .65rem;
+			padding-inline: .5rem;
+		}
+
+		.stage-screen {
 			flex: none;
+			height: min(24dvh, 13rem);
 		}
 
-		.room-view :global(.room-queue-panel [data-slot="room-tabs-scroll-area"]) {
-			overflow-y: visible;
+		.stage-caption {
+			padding: .6rem .75rem;
+			gap: .6rem;
+		}
+
+		.stage-caption h2 {
+			font-size: .8rem;
+		}
+
+		.stage-caption .eyebrow {
+			font-size: .5rem;
+		}
+
+		.track-icon {
+			width: 2rem;
+			height: 2rem;
+			border-radius: .5rem;
+		}
+
+		.stage-empty-icon {
+			margin-bottom: .5rem;
+		}
+
+		.stage-empty-icon :global(svg) {
+			width: 22px;
+			height: 22px;
+		}
+
+		.stage-empty p {
+			font-size: .65rem;
+			max-width: 17rem;
+		}
+
+	}
+
+	@media (640px <= width < 800px) {
+		.stage-screen {
+			height: min(34dvh, 22rem);
 		}
 	}
 
-	@media (width < 640px) and (height >= 600px) {
-		.room-view :global([data-slot="room-tabs-list"]) {
-			position: sticky;
-			top: calc(4rem + var(--room-player-height) + 1px);
-			z-index: 20;
-			background: var(--background);
+	@media (height < 600px) {
+		.room-workspace {
+			height: auto;
+			min-height: calc(100dvh - 4rem);
 		}
 
-		/* Keep one live player mounted, with room for the panel below it. */
-		.room-player {
-			position: sticky;
-			top: 4rem;
-			z-index: 30;
-			padding-block: 0.5rem;
-			border-bottom: 1px solid var(--border);
+		.room-body {
+			min-height: 32rem;
 		}
 
-		.room-player:has(:global([data-slot="playback-player"].fixed)) {
-			z-index: 50;
-		}
-
-		.room-player :global([data-slot="playback-player"]:not(.fixed)) {
-			max-width: min(100%, 52svh);
-			margin-inline: auto;
-		}
 	}
 </style>

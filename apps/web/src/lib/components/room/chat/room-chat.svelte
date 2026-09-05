@@ -10,6 +10,7 @@
 		setUserName,
 		USER_NAME_MAX_LENGTH,
 	} from "$lib/user-name";
+	import { MessageCircle, Send } from "@lucide/svelte";
 	import ChevronDownIcon from "@lucide/svelte/icons/chevron-down";
 	import type { ChatMessage } from "../types";
 	import RoomMembersPopover from "./room-members-popover.svelte";
@@ -126,11 +127,12 @@
 				onscroll={scrollFollow.onScroll}
 				class="h-full"
 			>
-				<ul class="flex h-full flex-col space-y-3 p-4 pb-0">
+				<ul class="flex min-h-full flex-col gap-4 p-4">
 					{#each messages as message (message._id)}
 						{@const memberColors = getMemberColors(message.user._id)}
 						<li class="flex gap-3">
-							<div class="min-w-0 flex-1 rounded-4xl bg-muted px-4 py-3">
+							<div class="min-w-0 flex-1 border-s-2 ps-3"
+								style:border-color={memberColors.fill}>
 								<div class="flex items-baseline justify-between gap-3">
 									<p
 										class="truncate text-xs font-semibold"
@@ -145,17 +147,19 @@
 										})}
 									</time>
 								</div>
-								<p class="mt-0.5 wrap-break-word text-sm">{message.body}</p>
+								<p class="mt-1 wrap-anywhere text-sm leading-relaxed">{message.body}</p>
 							</div>
 						</li>
 					{/each}
 					{#if messages.length === 0}
 						<li class="flex-1 py-8 text-center text-sm text-muted-foreground">
-							No messages yet.
+							<MessageCircle class="mx-auto mb-3 size-7 opacity-50" strokeWidth={1.5} />
+							<p class="font-medium text-foreground">Music is better together</p>
+							<p class="mt-1 text-xs">Say hello to the room.</p>
 						</li>
 					{/if}
-					<li class="-mt-3 flex items-center">
-						<RoomMembersPopover {members} />
+					<li class="mt-auto flex items-center gap-2 pt-2">
+						<RoomMembersPopover {members} /><span class="text-[0.65rem] text-muted-foreground">{members.length} here</span>
 					</li>
 				</ul>
 			</RoomTabs.ScrollArea>
@@ -176,14 +180,14 @@
 		{#if canSend || chatError}
 			<RoomTabs.Footer>
 				{#if canSend}
-					<form class="flex gap-2 border-t p-3" onsubmit={submitMessage}>
+					<form class="flex gap-2 border-t bg-muted/20 p-3 sm:p-4" onsubmit={submitMessage}>
 						<Input
 							maxlength={500}
 							bind:value={messageBody}
-							placeholder="Say something…"
+							placeholder="Message the room…"
 							aria-label="Chat message"
 						/>
-						<Button type="submit" disabled={!messageBody.trim()}>Send</Button>
+						<Button type="submit" size="icon" aria-label="Send message" disabled={!messageBody.trim()}><Send size={16} /></Button>
 					</form>
 				{/if}
 				{#if chatError}

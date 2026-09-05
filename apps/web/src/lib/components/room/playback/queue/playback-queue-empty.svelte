@@ -15,6 +15,7 @@ state. It renders nothing while the queue contains a song.
 ```
 -->
 <script lang="ts">
+	import { ListMusic } from "@lucide/svelte";
 	import { cn } from "$lib/utils";
 	import type { Snippet } from "svelte";
 	import type { HTMLAttributes } from "svelte/elements";
@@ -37,10 +38,12 @@ state. It renders nothing while the queue contains a song.
 	{:else}
 		<li
 			data-slot="playback-queue-empty"
-			class={cn("p-5 text-center text-sm text-muted-foreground", className)}
+			class={cn("flex flex-col items-center px-5 py-8 text-center text-sm text-muted-foreground", className)}
 			{...restProps}
 		>
-			Nothing queued yet.
+			<ListMusic class="mb-3 size-7 opacity-50" strokeWidth={1.5} />
+			<p class="font-medium text-foreground">Room for another song</p>
+			<p class="mt-1 max-w-52 text-xs leading-relaxed">{playbackContext.playback?.permissions.addToQueue ? "Paste a video link below to add your pick." : "The next songs will appear here."}</p>
 		</li>
 	{/if}
 {/if}
