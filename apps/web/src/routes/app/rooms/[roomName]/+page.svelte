@@ -28,6 +28,7 @@
 	const auth = useAuth();
 
 	let panelTab = $state("queue");
+	let playerHeight = $state(0);
 	let joinAttempted = $state(false);
 	let joinError = $state<string | null>(null);
 	let displayName = $state("");
@@ -191,15 +192,15 @@
 	</div>
 {:else}
 	{@const activeRoomId = roomId}
-	<div class="mx-auto w-full max-w-384 space-y-5 p-4 sm:p-6">
+	<div style={`--room-player-height: ${playerHeight}px`} class="room-view mx-auto w-full max-w-384 space-y-4 p-3 sm:space-y-5 sm:p-6">
 		<Playback.Root roomId={activeRoomId} {overlayMessages}>
-			<div class="grid min-h-0 gap-5 xl:grid-cols-[minmax(0,1fr)_24rem]">
-				<header class="flex flex-wrap items-center justify-between gap-4 xl:col-span-2">
-					<div class="min-w-0 flex-1 space-y-2">
-						<Button href="/app" variant="ghost" size="sm" class="-ms-3 text-muted-foreground">
+			<div class="grid min-h-0 gap-3 sm:gap-5 xl:grid-cols-[minmax(0,1fr)_24rem]">
+				<header class="flex flex-wrap items-center justify-between gap-3 xl:col-span-2">
+					<div class="min-w-0 flex-1 space-y-1 sm:space-y-2">
+						<Button href="/app" variant="ghost" size="sm" class="-ms-3 hidden text-muted-foreground sm:inline-flex">
 							<ArrowLeftIcon /> All rooms
 						</Button>
-						<h1 class="font-heading text-xl font-semibold tracking-tight wrap-anywhere sm:text-2xl">
+						<h1 class="font-heading text-base font-semibold tracking-tight wrap-anywhere sm:text-2xl">
 							{roomData?.name}
 						</h1>
 						<div class="flex items-center gap-2">
@@ -212,7 +213,7 @@
 					<Playback.Share />
 				</header>
 
-				<section class="min-w-0 space-y-3" data-slot="playback-main" aria-label="Player">
+				<section bind:clientHeight={playerHeight} class="room-player min-w-0 space-y-2 bg-background sm:space-y-3" data-slot="playback-main" aria-label="Player">
 					<div class="flex flex-wrap items-center justify-between gap-3">
 						<div class="min-w-0 flex-1 basis-48">
 							<Playback.NowPlaying>
@@ -242,7 +243,7 @@
 						<RoomTabs.Trigger value="chat">Chat</RoomTabs.Trigger>
 					</RoomTabs.List>
 
-					<RoomTabs.Content value="queue">
+					<RoomTabs.Content value="queue" class="room-queue-panel">
 						<Playback.Queue />
 					</RoomTabs.Content>
 					<RoomTabs.Content value="lyrics">
@@ -284,3 +285,54 @@
 		{/if}
 	</div>
 {/if}
+
+<style>
+	@media (width < 640px) {
+		.room-view :global([data-slot="room-tabs-root"] [data-slot="tabs"]) {
+			overflow: visible;
+		}
+
+		/* Let the queue grow with the page; chat and lyrics retain scroll-follow viewports. */
+		.room-view :global([data-slot="room-tabs-root"] > [data-slot="card"]) {
+			height: auto;
+			min-height: 60svh;
+			overflow: visible;
+		}
+
+		.room-view :global([data-slot="tabs-content"]:not(.room-queue-panel)) {
+			height: 65svh;
+			flex: none;
+		}
+
+		.room-view :global(.room-queue-panel [data-slot="room-tabs-scroll-area"]) {
+			overflow-y: visible;
+		}
+	}
+
+	@media (width < 640px) and (height >= 600px) {
+		.room-view :global([data-slot="room-tabs-list"]) {
+			position: sticky;
+			top: calc(4rem + var(--room-player-height) + 1px);
+			z-index: 20;
+			background: var(--background);
+		}
+
+		/* Keep one live player mounted, with room for the panel below it. */
+		.room-player {
+			position: sticky;
+			top: 4rem;
+			z-index: 30;
+			padding-block: 0.5rem;
+			border-bottom: 1px solid var(--border);
+		}
+
+		.room-player:has(:global([data-slot="playback-player"].fixed)) {
+			z-index: 50;
+		}
+
+		.room-player :global([data-slot="playback-player"]:not(.fixed)) {
+			max-width: min(100%, 52svh);
+			margin-inline: auto;
+		}
+	}
+</style>

@@ -65,12 +65,13 @@ custom queue layout. It renders nothing when the current user cannot add songs.
 				disabled={submitting}
 			/>
 			<Button
-				size="icon"
+				size="default"
 				type="submit"
 				disabled={submitting || !sourceUrl.trim()}
 				aria-label="Add song"
 			>
-				<Plus />
+				<Plus aria-hidden="true" />
+				<span>{submitting ? "Adding…" : "Add song"}</span>
 			</Button>
 		</form>
 		{#if error}
