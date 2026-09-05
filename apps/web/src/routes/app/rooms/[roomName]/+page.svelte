@@ -77,10 +77,17 @@
 	});
 
 	$effect(() => {
-		if (auth.isLoading || joinAttempted) return;
+		if (auth.isLoading) return;
+
+		if (auth.isAuthenticated) {
+			// Allow a fresh guest session if this page stays mounted after logout.
+			joinAttempted = false;
+			return;
+		}
+
+		if (joinAttempted) return;
 
 		joinAttempted = true;
-		if (auth.isAuthenticated) return;
 
 		void signInAsGuest();
 	});
