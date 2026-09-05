@@ -20,6 +20,8 @@
 	import { useAuth } from "@mmailaender/convex-better-auth-svelte/svelte";
 	import { useMutation, useQuery } from "convex-svelte";
 	import ArrowLeftIcon from "@lucide/svelte/icons/arrow-left";
+	import ChevronDownIcon from "@lucide/svelte/icons/chevron-down";
+	import SettingsIcon from "@lucide/svelte/icons/settings";
 	import type { PageProps } from "./$types";
 
 	const { params, data }: PageProps = $props();
@@ -191,34 +193,38 @@
 	{@const activeRoomId = roomId}
 	<div class="mx-auto w-full max-w-384 space-y-5 p-4 sm:p-6">
 		<Playback.Root roomId={activeRoomId} {overlayMessages}>
-			<div class="grid min-h-0 gap-5 xl:grid-cols-[minmax(0,1fr)_20rem]">
-				<header
-					class="flex flex-wrap items-center justify-between gap-3 xl:col-span-2"
-				>
-					<div class="w-full space-y-3">
-						<Button href="/app" variant="outline" size="sm"
-							><ArrowLeftIcon /> All rooms</Button
-						>
-						<div>
-							<h1 class="font-heading text-xl font-semibold">
-								{roomData?.name}
-							</h1>
-							<Playback.NowPlaying />
-							<div>
-								<RoomMembersPopover members={onlineUsers} />
-								<span class="ms-1 text-xs text-muted-foreground">
-									{onlineUsers.length}
-									{onlineUsers.length === 1 ? "person" : "people"} here
-								</span>
-							</div>
+			<div class="grid min-h-0 gap-5 xl:grid-cols-[minmax(0,1fr)_24rem]">
+				<header class="flex flex-wrap items-center justify-between gap-4 xl:col-span-2">
+					<div class="min-w-0 flex-1 space-y-2">
+						<Button href="/app" variant="ghost" size="sm" class="-ms-3 text-muted-foreground">
+							<ArrowLeftIcon /> All rooms
+						</Button>
+						<h1 class="font-heading text-xl font-semibold tracking-tight wrap-anywhere sm:text-2xl">
+							{roomData?.name}
+						</h1>
+						<div class="flex items-center gap-2">
+							<RoomMembersPopover members={onlineUsers} />
+							<span class="text-xs text-muted-foreground">
+								{onlineUsers.length} {onlineUsers.length === 1 ? "person" : "people"} here
+							</span>
 						</div>
 					</div>
+					<Playback.Share />
 				</header>
 
-				<section class="min-w-0 space-y-3" data-slot="playback-main">
-					<div class="flex items-center justify-between gap-3 xl:justify-end">
-						<div class="flex items-center gap-2">
-							<Playback.Share />
+				<section class="min-w-0 space-y-3" data-slot="playback-main" aria-label="Player">
+					<div class="flex flex-wrap items-center justify-between gap-3">
+						<div class="min-w-0 flex-1 basis-48">
+							<Playback.NowPlaying>
+								{#snippet children({ title, hasQueuedMedia })}
+									<p class="text-xs font-medium text-muted-foreground">Now playing</p>
+									<p class="truncate text-sm font-medium" title={title ?? undefined}>
+										{title ?? (hasQueuedMedia ? "Preparing the next song…" : "Choose the first song")}
+									</p>
+								{/snippet}
+							</Playback.NowPlaying>
+						</div>
+						<div class="flex shrink-0 items-center gap-2">
 							<Playback.Lyrics />
 							<Playback.TvMode />
 						</div>
@@ -259,14 +265,22 @@
 			</div>
 		</Playback.Root>
 
-		<div class="grid gap-5 md:grid-cols-2">
-			{#if playback.data?.permissions.updateRoom && roomData}
-				<RoomPermissions
-					permissions={roomData.memberPermissions}
-					onChange={(permission, enabled) =>
-						void setMemberPermission(permission, enabled)}
-				/>
-			{/if}
-		</div>
+		{#if playback.data?.permissions.updateRoom && roomData}
+			<details class="group rounded-2xl border bg-muted/20">
+				<summary class="flex cursor-pointer list-none items-center gap-2 rounded-2xl p-4 text-sm font-medium focus-visible:outline-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
+					<SettingsIcon class="size-4 text-muted-foreground" />
+					Room settings
+					<span class="ms-auto hidden text-xs font-normal text-muted-foreground sm:inline">Visitor permissions</span>
+					<ChevronDownIcon class="ms-auto size-4 text-muted-foreground transition-transform group-open:rotate-180 sm:ms-2" />
+				</summary>
+				<div class="max-w-xl px-4 pb-4">
+					<RoomPermissions
+						permissions={roomData.memberPermissions}
+						onChange={(permission, enabled) =>
+							void setMemberPermission(permission, enabled)}
+					/>
+				</div>
+			</details>
+		{/if}
 	</div>
 {/if}

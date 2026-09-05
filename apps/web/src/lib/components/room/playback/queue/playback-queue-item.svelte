@@ -38,7 +38,6 @@ replace that content while keeping the sortable item shell.
 </script>
 
 <script lang="ts">
-	import TextScroller from "$lib/components/text-scroller/text-scroller.svelte";
 	import {
 		Avatar,
 		AvatarFallback,
@@ -129,9 +128,9 @@ replace that content while keeping the sortable item shell.
 			</Tooltip.Root>
 		</Tooltip.Provider>
 		<div class="min-w-0 flex-1">
-			<TextScroller {title} class="text-sm font-medium">
+			<p class="line-clamp-2 text-sm leading-snug font-medium wrap-anywhere" {title}>
 				{title}
-			</TextScroller>
+			</p>
 			<p class="text-xs text-muted-foreground">
 				{item.availability === "ready"
 					? "Ready"
