@@ -127,7 +127,7 @@
 								currentTime={lyrics.adjustedTime}
 								wordTiming={lyrics.wordTiming}
 								active={lyrics.activeCueIndex === index}
-								class="text-left text-lg font-semibold leading-relaxed tracking-tight [&[data-lyric-line=current][data-lyric-timing=line]]:text-primary [&_[data-lyric-word=complete]]:text-primary [&_[data-lyric-word=current]]:text-primary [&>span]:me-[0.28em] [&>span:last-child]:me-0"
+								class="wrap-anywhere text-left text-lg font-semibold leading-relaxed tracking-tight [&>span]:inline-block [&>span]:max-w-full [&[data-lyric-line=current][data-lyric-timing=line]]:text-primary [&_[data-lyric-word=complete]]:text-primary [&_[data-lyric-word=current]]:text-primary [&>span]:me-[0.28em] [&>span:last-child]:me-0"
 							/>
 						</div>
 					{/each}
