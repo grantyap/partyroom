@@ -103,7 +103,7 @@ layout. It handles playback, the empty state, skipping, and TV mode. Add an
 		{:else}
 			<div class="flex aspect-video w-full items-center justify-center bg-zinc-950 p-8 text-center text-zinc-300">
 				<div>
-					<p class="text-lg font-medium">
+					<p class="font-heading text-lg font-medium">
 						{hasQueuedMedia
 							? "Preparing your music"
 							: "Add a song to get started"}

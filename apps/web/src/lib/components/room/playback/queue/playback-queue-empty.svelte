@@ -42,7 +42,7 @@ state. It renders nothing while the queue contains a song.
 			{...restProps}
 		>
 			<ListMusic class="mb-3 size-7 opacity-50" strokeWidth={1.5} />
-			<p class="font-medium text-foreground">Room for another song</p>
+			<p class="font-heading font-medium text-foreground">Room for another song</p>
 			<p class="mt-1 max-w-52 text-xs leading-relaxed">{playbackContext.playback?.permissions.addToQueue ? "Paste a video link below to add your pick." : "The next songs will appear here."}</p>
 		</li>
 	{/if}

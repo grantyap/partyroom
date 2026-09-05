@@ -206,7 +206,7 @@
 					</Button>
 					<div class="min-w-0">
 						<p class="eyebrow">Listening room <span class="inline font-normal tracking-normal normal-case min-[800px]:hidden">· {onlineUsers.length} here</span></p>
-						<h1 title={roomData?.name}>{roomData?.name.replaceAll("-", " ")}</h1>
+						<h1 class="font-heading" title={roomData?.name}>{roomData?.name.replaceAll("-", " ")}</h1>
 					</div>
 				</div>
 				<div class="room-actions">
@@ -238,7 +238,7 @@
 							{#snippet empty({ hasQueuedMedia })}
 								<div class="stage-empty">
 									<div class="stage-empty-icon"><Headphones size={32} strokeWidth={1.4} /></div>
-									<h2>{hasQueuedMedia ? "Your music is on its way." : "Good company. Great music."}</h2>
+									<h2 class="font-heading">{hasQueuedMedia ? "Your music is on its way." : "Good company. Great music."}</h2>
 									<p>{hasQueuedMedia ? "The next ready song will start automatically." : "Every room starts with a song. Add one to the queue."}</p>
 								</div>
 							{/snippet}
@@ -250,7 +250,7 @@
 							<Playback.NowPlaying>
 								{#snippet children({ title, hasQueuedMedia })}
 									<p class="eyebrow">{title ? "Now playing" : "Up next"}</p>
-									<h2 title={title ?? undefined}>{title ?? (hasQueuedMedia ? "Preparing the next song…" : "Your first song goes here")}</h2>
+									<h2 class="font-heading" title={title ?? undefined}>{title ?? (hasQueuedMedia ? "Preparing the next song…" : "Your first song goes here")}</h2>
 								{/snippet}
 							</Playback.NowPlaying>
 						</div>

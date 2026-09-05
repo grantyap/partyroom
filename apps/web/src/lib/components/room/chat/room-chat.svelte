@@ -154,7 +154,7 @@
 					{#if messages.length === 0}
 						<li class="flex-1 py-8 text-center text-sm text-muted-foreground">
 							<MessageCircle class="mx-auto mb-3 size-7 opacity-50" strokeWidth={1.5} />
-							<p class="font-medium text-foreground">Music is better together</p>
+							<p class="font-heading font-medium text-foreground">Music is better together</p>
 							<p class="mt-1 text-xs">Say hello to the room.</p>
 						</li>
 					{/if}

@@ -27,7 +27,7 @@ layout, compose `Playback.QueueForm`, `Playback.QueueList`,
 
 <div class="flex h-full min-h-0 flex-col" data-slot="playback-queue">
 	<div class="flex shrink-0 items-center justify-between px-4 pt-4 pb-2">
-		<h2 class="text-[0.65rem] font-semibold tracking-widest text-muted-foreground uppercase">Up next</h2>
+		<h2 class="font-heading text-[0.65rem] font-semibold tracking-widest text-muted-foreground uppercase">Up next</h2>
 		<p class="text-[0.65rem] text-muted-foreground">Played in order</p>
 	</div>
 	<RoomTabs.ScrollArea><QueueList /></RoomTabs.ScrollArea>

@@ -45,7 +45,7 @@ Use `<Playback.NowPlaying />` for the default label and song title. Add a
 	{@render children(renderProps)}
 {:else}
 	<div data-slot="playback-now-playing">
-		<p class="text-sm font-medium">Now playing</p>
+		<p class="font-heading text-sm font-medium">Now playing</p>
 		<p class="text-xs text-muted-foreground">
 			{renderProps.title ??
 				(renderProps.hasQueuedMedia
