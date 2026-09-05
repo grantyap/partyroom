@@ -27,6 +27,8 @@ layout. It handles playback, the empty state, skipping, and TV mode. Add an
 </script>
 
 <script lang="ts">
+	import { Button } from "$lib/components/ui/button";
+	import { Minimize2 } from "@lucide/svelte";
 	import { cn } from "$lib/utils";
 	import { api } from "@partyroom/backend/convex/_generated/api";
 	import { useMutation } from "convex-svelte";
@@ -69,6 +71,16 @@ layout. It handles playback, the empty state, skipping, and TV mode. Add an
 	)}
 	{...restProps}
 >
+	{#if playbackContext.tvMode}
+		<Button
+			class="absolute top-4 right-4 z-50 rounded-lg bg-zinc-900/80 text-white hover:bg-zinc-800 hover:text-white"
+			variant="ghost"
+			size="sm"
+			onclick={() => void playbackContext.toggleTvMode()}
+		>
+			<Minimize2 /> Exit TV mode
+		</Button>
+	{/if}
 	{#if playbackContext.currentMedia?.finalUrl && playbackContext.playback?.current}
 		<KaraokeVideo
 			class={playbackContext.tvMode ? "max-h-screen w-full" : "w-full"}
