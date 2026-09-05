@@ -38,6 +38,7 @@ replace that content while keeping the sortable item shell.
 </script>
 
 <script lang="ts">
+	import TextScroller from "$lib/components/text-scroller/text-scroller.svelte";
 	import {
 		Avatar,
 		AvatarFallback,
@@ -109,7 +110,9 @@ replace that content while keeping the sortable item shell.
 		{@render children(renderProps)}
 	{:else}
 		<div class="min-w-0 flex-1 space-y-1.5">
-			<p class="line-clamp-2 text-sm leading-snug font-medium wrap-anywhere" {title}>{title}</p>
+			<TextScroller {title} class="text-sm font-medium">
+				{title}
+			</TextScroller>
 			<div class="flex min-w-0 items-center gap-1.5 text-[0.65rem] text-muted-foreground">
 				<Avatar userId={item.addedBy._id} class="size-4 border-0">
 					{#if item.addedBy.image}<AvatarImage src={item.addedBy.image} alt="" />{/if}
