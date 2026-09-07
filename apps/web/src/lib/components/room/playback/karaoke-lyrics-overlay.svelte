@@ -16,7 +16,7 @@
 </script>
 
 <div
-	class="pointer-events-none absolute inset-x-0 top-0 flex aspect-video flex-col justify-end bg-linear-to-t from-black/80 via-black/25 to-transparent px-4 pb-12 text-center sm:px-8 sm:pb-14"
+	class="pointer-events-none absolute inset-0 flex flex-col justify-end bg-linear-to-t from-black/80 via-black/25 to-transparent px-4 pb-12 text-center sm:px-8 sm:pb-14"
 	aria-hidden="true"
 >
 	<KaraokeLyricLine

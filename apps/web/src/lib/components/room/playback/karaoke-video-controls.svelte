@@ -19,7 +19,7 @@
 
 {#if canControl}
 	<media-controls
-		class="invisible pointer-events-none absolute inset-x-0 top-0 z-30 block aspect-video opacity-0 transition-[opacity,visibility] duration-200 data-[visible]:visible data-[visible]:opacity-100"
+		class="invisible pointer-events-none absolute inset-0 z-30 block opacity-0 transition-[opacity,visibility] duration-200 data-[visible]:visible data-[visible]:opacity-100"
 		hideDelay={3000}
 	>
 		<media-controls-group class="absolute inset-x-0 bottom-0 block">

@@ -34,7 +34,7 @@
 </script>
 
 <div
-	class="pointer-events-none absolute inset-x-0 top-0 z-20 aspect-video overflow-hidden"
+	class="pointer-events-none absolute inset-0 z-20 overflow-hidden"
 	aria-hidden="true"
 >
 	{#each flyingMessages as message (message.id)}

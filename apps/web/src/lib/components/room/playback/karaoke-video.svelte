@@ -205,12 +205,12 @@
 
 	{#if canControl}
 		<media-gesture
-			class="player-gesture absolute inset-x-0 top-0 z-10 block aspect-video cursor-pointer"
+			class="player-gesture absolute inset-0 z-10 block cursor-pointer"
 			event="pointerup"
 			action="toggle:paused"
 		></media-gesture>
 		<media-gesture
-			class="player-gesture absolute inset-x-0 top-0 z-10 block aspect-video"
+			class="player-gesture absolute inset-0 z-10 block"
 			event="pointerup"
 			action="toggle:controls"
 		></media-gesture>
@@ -224,7 +224,7 @@
 
 	{#if playbackSync.needsUserGesture}
 		<div
-			class="absolute inset-x-0 top-0 z-40 flex aspect-video items-center justify-center bg-black/65 p-6 text-center"
+			class="absolute inset-0 z-40 flex items-center justify-center bg-black/65 p-6 text-center"
 		>
 			<div class="flex max-w-sm flex-col items-center gap-3">
 				<div>
