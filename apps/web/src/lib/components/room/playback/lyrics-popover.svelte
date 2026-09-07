@@ -96,7 +96,11 @@
 	</p>
 	<Popover.Root>
 		<Popover.Trigger
-			class={buttonVariants({ variant: "ghost", size: "sm", class: "shrink-0" })}
+			class={buttonVariants({
+				variant: "ghost",
+				size: "sm",
+				class: "shrink-0 text-xs",
+			})}
 			aria-label="Lyrics settings"
 		>
 			<Settings2 aria-hidden="true" /> Settings
