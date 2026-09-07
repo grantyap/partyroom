@@ -37,7 +37,7 @@
 		label: string;
 		description: string;
 	}> = [
-		{ key: "controlPlayback", label: "Control playback", description: "Play, pause, seek, and skip songs." },
+		{ key: "controlPlayback", label: "Control playback", description: "Play, pause, seek, skip songs, and change lyrics source and timing." },
 		{ key: "addToQueue", label: "Add songs", description: "Let everyone contribute to the queue." },
 		{ key: "reorderQueue", label: "Reorder queue", description: "Move songs up or down the list." },
 		{ key: "removeFromQueue", label: "Remove songs", description: "Take a song out of the queue." },

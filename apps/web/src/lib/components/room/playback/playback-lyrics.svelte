@@ -24,7 +24,7 @@ snippet to provide your own UI.
 		selectedLyricsId?: string | null;
 		lyricsOffsetMs?: number;
 		canControl: boolean;
-		onLyricsChange: (lyricsId: string, offsetMs: number) => void;
+		onLyricsChange: (lyricsId: string, offsetMs: number) => void | Promise<void>;
 	};
 </script>
 
@@ -46,8 +46,8 @@ snippet to provide your own UI.
 		lyricsOffsetMs: playbackContext.currentMedia?.lyricsOffsetMs,
 		canControl:
 			playbackContext.playback?.permissions.controlPlayback ?? false,
-		onLyricsChange: (lyricsId, offsetMs) => {
-			void setLyrics({ roomId: playbackContext.roomId, lyricsId, offsetMs });
+		onLyricsChange: async (lyricsId, offsetMs) => {
+			await setLyrics({ roomId: playbackContext.roomId, lyricsId, offsetMs });
 		},
 	}));
 </script>
@@ -55,5 +55,7 @@ snippet to provide your own UI.
 {#if children}
 	{@render children(renderProps)}
 {:else if renderProps.lyrics.length}
-	<LyricsPopover {...renderProps} />
+	{#key playbackContext.currentMedia?._id}
+		<LyricsPopover {...renderProps} />
+	{/key}
 {/if}

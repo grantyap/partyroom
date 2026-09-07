@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { usePlayback } from "$lib/components/room/playback/context.svelte";
+	import PlaybackLyrics from "$lib/components/room/playback/playback-lyrics.svelte";
 	import KaraokeLyricLine from "$lib/components/room/playback/karaoke-lyric-line.svelte";
 	import * as RoomTabs from "$lib/components/room/tabs";
 	import { ScrollFollow } from "$lib/components/scroll-follow.svelte";
@@ -76,6 +77,11 @@
 </script>
 
 <section class="flex h-full min-h-0 flex-col" data-slot="room-lyrics">
+	{#if playbackContext.currentMedia?.lyrics.length}
+		<div class="shrink-0 border-b px-4 py-1.5">
+			<PlaybackLyrics />
+		</div>
+	{/if}
 	<div class="relative min-h-0 flex-1">
 		<RoomTabs.ScrollArea
 			bind:ref={lyricsList}

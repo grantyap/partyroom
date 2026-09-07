@@ -231,7 +231,7 @@
 				<section class="stage" aria-label="Player">
 					<div class="stage-toolbar">
 						<span class="stage-label"><Radio size={15} /> THE STAGE</span>
-						<div class="stage-tools"><Playback.Lyrics /><Playback.TvMode /></div>
+						<div class="stage-tools"><Playback.TvMode /></div>
 					</div>
 					<div class="stage-screen">
 						<Playback.Player>

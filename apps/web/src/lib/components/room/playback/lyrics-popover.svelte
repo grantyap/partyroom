@@ -2,15 +2,16 @@
 	import { Button, buttonVariants } from "$lib/components/ui/button";
 	import { Input } from "$lib/components/ui/input";
 	import * as Popover from "$lib/components/ui/popover";
+	import { onDestroy } from "svelte";
 	import type { LyricsTrack } from "$lib/karaoke";
-	import { Captions } from "@lucide/svelte";
+	import { Settings2, RotateCcw } from "@lucide/svelte";
 
 	type Props = {
 		lyrics?: LyricsTrack[];
 		selectedLyricsId?: string | null;
 		lyricsOffsetMs?: number;
 		canControl?: boolean;
-		onLyricsChange?: (lyricsId: string, offsetMs: number) => void;
+		onLyricsChange?: (lyricsId: string, offsetMs: number) => void | Promise<void>;
 	};
 
 	let {
@@ -36,107 +37,121 @@
 		lyricsOffsetMs ?? selectedLyrics?.suggestedOffsetMs ?? 0,
 	);
 
+	type LyricsEdit = { lyricsId: string; offsetMs: number };
+	let optimistic = $state<LyricsEdit | null>(null);
+	let queued: LyricsEdit | null = null;
+	onDestroy(() => { queued = null; });
+	let saving = $state(false);
+	let error = $state<string | null>(null);
+	const inputLyricsId = $derived(optimistic?.lyricsId ?? selectedLyrics?.id);
+	const inputOffsetMs = $derived(optimistic?.offsetMs ?? offsetMs);
+	const disabled = $derived(!canControl || !selectedLyrics);
+
+	async function flushChanges() {
+		if (saving) return;
+		saving = true;
+		try {
+			while (queued) {
+				const edit = queued;
+				queued = null;
+				try {
+					await onLyricsChange?.(edit.lyricsId, edit.offsetMs);
+				} catch {
+					// A newer edit still contains the user's complete desired settings.
+					if (!queued) error = "Could not update lyrics. Please try again.";
+				}
+			}
+		} finally {
+			optimistic = null;
+			saving = false;
+		}
+	}
+
+	function save(lyricsId: string, offset: number) {
+		if (disabled || !Number.isFinite(offset)) return;
+		error = null;
+		optimistic = {
+			lyricsId,
+			offsetMs: Math.max(-30_000, Math.min(30_000, Math.round(offset))),
+		};
+		queued = optimistic;
+		void flushChanges();
+	}
+
 	function setOffset(value: number) {
-		if (!selectedLyrics || !canControl) return;
-		const offset = Number.isFinite(value) ? value : 0;
-		onLyricsChange?.(
-			selectedLyrics.id,
-			Math.max(-30_000, Math.min(30_000, offset)),
-		);
+		if (inputLyricsId) save(inputLyricsId, value);
 	}
 
 	function selectLyrics(id: string) {
-		if (!canControl) return;
 		const track = availableLyrics.find((candidate) => candidate.id === id);
-		onLyricsChange?.(id, track?.suggestedOffsetMs ?? 0);
+		if (track) void save(id, track.suggestedOffsetMs ?? 0);
 	}
 </script>
 
-<Popover.Root>
-	<Popover.Trigger
-		class={buttonVariants({ variant: "outline", size: "sm" })}
-		aria-label="Configure lyrics"
-	>
-		<Captions aria-hidden="true" />
-		Lyrics
-	</Popover.Trigger>
-	<Popover.Content align="end" class="w-80 gap-4 rounded-xl p-4">
-		<Popover.Header class="gap-1">
-			<Popover.Title>Lyrics</Popover.Title>
-			<Popover.Description>
-				Choose a lyrics track and adjust its timing.
-			</Popover.Description>
-		</Popover.Header>
-
-		{#if availableLyrics.length > 1}
+<div class="flex w-full items-center justify-between gap-3">
+	<p class="min-w-0 truncate text-xs text-muted-foreground">
+		{selectedLyrics?.label ?? "No source"}
+		<span class="mx-1" aria-hidden="true">·</span>
+		<span class="tabular-nums">{offsetMs === 0 ? "No delay" : `${offsetMs > 0 ? "+" : ""}${offsetMs / 1000}s delay`}</span>
+	</p>
+	<Popover.Root>
+		<Popover.Trigger
+			class={buttonVariants({ variant: "ghost", size: "sm", class: "shrink-0" })}
+			aria-label="Lyrics settings"
+		>
+			<Settings2 aria-hidden="true" /> Settings
+		</Popover.Trigger>
+		<Popover.Content align="end" class="w-80 max-w-[calc(100vw-2rem)] gap-4 rounded-xl p-4" aria-busy={saving}>
+			<Popover.Header class="gap-1">
+				<Popover.Title>Lyrics settings</Popover.Title>
+				<Popover.Description>Changes apply to everyone in the room.</Popover.Description>
+			</Popover.Header>
 			<div class="space-y-2">
-				<p class="text-xs font-medium text-muted-foreground">Track</p>
-				<div class="flex flex-wrap gap-1.5">
+				<p class="text-xs font-medium">Source</p>
+				<div class="flex flex-col gap-2">
 					{#each availableLyrics as source (source.id)}
 						<Button
-							size="sm"
-							variant={selectedLyrics?.id === source.id ? "default" : "outline"}
-							disabled={!canControl}
+							class="justify-start"
+							variant={inputLyricsId === source.id ? "default" : "outline"}
+							{disabled}
+							aria-pressed={inputLyricsId === source.id}
 							onclick={() => selectLyrics(source.id)}
 							title={source.title ?? source.label}
-						>
-							{source.label}
-						</Button>
+						>{source.label}</Button>
 					{/each}
 				</div>
+				{#if availableLyrics.length === 1}
+					<p class="text-xs text-muted-foreground">Only one source is available for this song.</p>
+				{/if}
 			</div>
-		{/if}
-
-		<div class="space-y-2">
-			<div>
-				<p class="text-xs font-medium text-muted-foreground">Offset</p>
-				<p class="text-xs text-muted-foreground">
-					Negative values show lyrics earlier; positive values show them later.
-				</p>
-			</div>
-			<div class="grid grid-cols-3 gap-1.5">
-				{#each [{ label: "−5s", delta: -5_000 }, { label: "−1s", delta: -1_000 }, { label: "−100ms", delta: -100 }] as adjustment (adjustment.delta)}
-					<Button
-						size="sm"
-						variant="outline"
-						disabled={!canControl}
-						onclick={() => setOffset(offsetMs + adjustment.delta)}
-						aria-label={`Show lyrics ${Math.abs(adjustment.delta)} milliseconds earlier`}
-					>
-						{adjustment.label}
-					</Button>
-				{/each}
-			</div>
-			<div class="relative">
-				<Input
-					class="pr-8 text-right tabular-nums"
-					type="number"
-					step="100"
-					min="-30000"
-					max="30000"
-					value={offsetMs}
-					disabled={!canControl}
-					onchange={(event) => setOffset(event.currentTarget.valueAsNumber)}
-					aria-label="Lyrics offset in milliseconds"
-				/>
-				<span
-					class="pointer-events-none absolute inset-y-0 right-2 flex items-center text-xs text-muted-foreground"
-					>ms</span
-				>
-			</div>
-			<div class="grid grid-cols-3 gap-1.5">
-				{#each [{ label: "+100ms", delta: 100 }, { label: "+1s", delta: 1_000 }, { label: "+5s", delta: 5_000 }] as adjustment (adjustment.delta)}
-					<Button
-						size="sm"
-						variant="outline"
-						disabled={!canControl}
-						onclick={() => setOffset(offsetMs + adjustment.delta)}
-						aria-label={`Show lyrics ${adjustment.delta} milliseconds later`}
-					>
-						{adjustment.label}
-					</Button>
-				{/each}
-			</div>
+			<div class="space-y-2 border-t pt-3">
+				<p class="text-xs font-medium">Timing</p>
+	<div class="flex items-center gap-1.5">
+		<Button size="icon" variant="outline" disabled={disabled || inputOffsetMs <= -30_000}
+			onclick={() => setOffset(inputOffsetMs - 100)} aria-label="Show lyrics 100 milliseconds earlier">−</Button>
+		<div class="relative min-w-0 flex-1">
+			<Input class="pr-9 text-center tabular-nums" type="number" step="0.1" min="-30" max="30"
+				value={inputOffsetMs / 1000} {disabled}
+				onchange={(event) => setOffset(event.currentTarget.valueAsNumber * 1000)}
+				aria-label="Lyrics delay in seconds" />
+			<span class="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-muted-foreground">s</span>
 		</div>
-	</Popover.Content>
-</Popover.Root>
+		<Button size="icon" variant="outline" disabled={disabled || inputOffsetMs >= 30_000}
+			onclick={() => setOffset(inputOffsetMs + 100)} aria-label="Show lyrics 100 milliseconds later">+</Button>
+		<Button size="icon" variant="ghost" disabled={disabled || inputOffsetMs === 0}
+			onclick={() => setOffset(0)} aria-label="Reset lyrics delay" title="Reset delay">
+			<RotateCcw aria-hidden="true" class="size-4" />
+		</Button>
+	</div>
+	<p class="text-xs leading-relaxed text-muted-foreground">
+		{#if canControl}
+			− Earlier · + Later · Adjusts for everyone
+		{:else}
+			Requires the room’s Control playback permission.
+		{/if}
+	</p>
+	{#if error}<p class="text-xs text-destructive" role="alert">{error}</p>{/if}
+			</div>
+		</Popover.Content>
+	</Popover.Root>
+</div>
