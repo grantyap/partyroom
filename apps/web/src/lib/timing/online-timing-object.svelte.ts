@@ -13,48 +13,111 @@ type OptimisticTimingState = {
   vector: TimingStateVector;
 };
 
-/** Configuration for a provider-backed W3C-style Timing Object. */
+/**
+ * Functions that connect a room's timeline to the server. Here, "provider" means
+ * the server that stores playback state and sends updates to everyone in the room.
+ * @see {@link OnlineTimingObject} for creating and sharing a timeline.
+ */
 export type OnlineTimingObjectOptions = {
-  /** Reads the most recent vector multicast by the online provider. */
+  /**
+   * Returns the latest playback state received from the server, or undefined
+   * while it is loading. Read Svelte reactive state here so changes are observed.
+   */
   getProviderState: () => ProviderTimingState | undefined;
-  /** Samples the provider clock for translation to `performance.now()`. */
+  /**
+   * Returns the server's current time in seconds, using the same clock as
+   * ProviderTimingState.vector.timestamp. Used to compare server and browser time.
+   */
   readProviderClock: () => Promise<{ timestamp: number }>;
-  /** Forwards an update and its requested playback lead time to the provider. */
+  /**
+   * Sends a playback change and its start delay to the server. Reject the promise
+   * if the change fails so the local timeline can undo its temporary change.
+   */
   updateProvider: (
     update: TimingStateVectorUpdate,
     options: { playStartDelaySeconds: number },
   ) => void | Promise<void>;
-  /** Decoder-preparation lead time applied whenever the resulting vector plays. */
+  /**
+   * How far ahead to schedule a playback start, in seconds; defaults to 1.
+   * This gives each device time to prepare the media. The delay between producing
+   * audio and hearing it is handled separately by SyncedMediaPlayback.
+   * @see `$lib/synced-playback` for audio output delay handling.
+   */
   playStartDelaySeconds?: number;
 };
 
-/** Connection state of the local proxy for Partyroom's online timing resource. */
+/**
+ * Whether the timeline is waiting for server state and a clock estimate
+ * (connecting), ready to use (open), or stopped by cleanup (closed).
+ */
 export type TimingObjectReadyState = "connecting" | "open" | "closed";
 
 /**
- * A local W3C-style Timing Object backed by Partyroom's online timing resource.
+ * Tracks where playback should be for everyone in a room. Import from `$lib/timing`.
+ * A timeline contains a media position, playback speed, and the time they apply.
  *
- * Provider vectors are translated into the `performance.now()` clock domain and
- * queried locally. Update requests immediately install a provisional local
- * vector, then reconcile it with the revision Convex multicasts to every client.
- * Provider timestamps remain authoritative once that revision arrives.
+ * Create one instance in the component that owns the room's playback state.
+ * Construct it during Svelte component initialization, call start() on mount,
+ * and share it with child players, lyrics, and playback controls.
  *
+ * This class compares the server clock with the browser clock so query() can
+ * calculate the room's current playback position without a network request.
+ * Requested changes appear locally first; the server's response confirms or
+ * corrects them.
+ *
+ * To play audio or video, pass this timeline to SyncedMediaPlayback from
+ * `$lib/synced-playback`. That class controls the media element and accounts
+ * for the delay before sound reaches the output device.
+ *
+ * @example Create and start a timeline using the room's server callbacks
+ * ```svelte
+ * <script lang="ts">
+ *   import { onMount } from "svelte";
+ *   import { OnlineTimingObject, type OnlineTimingObjectOptions } from "$lib/timing";
+ *
+ *   let { provider }: { provider: OnlineTimingObjectOptions } = $props();
+ *   const timing = new OnlineTimingObject({
+ *     getProviderState: () => provider.getProviderState(),
+ *     readProviderClock: () => provider.readProviderClock(),
+ *     updateProvider: (update, options) => provider.updateProvider(update, options),
+ *   });
+ *   onMount(() => timing.start());
+ *   // Share `timing` with child players and lyrics through props or context.
+ * </script>
+ * ```
+ *
+ * @see {@link OnlineTimingObjectOptions} for the server functions this class needs.
+ * @see {@link OnlineTimingObject.query} for lyric and progress time.
+ * @see `$lib/synced-playback` for synchronized audio and video playback.
  * @see https://www.w3.org/community/reports/webtiming/CG-FINAL-timingobject-20241203/#connecting-the-timing-object
  * @see https://www.w3.org/community/reports/webtiming/CG-FINAL-timingobject-20241203/#state-vector-synchronization
  */
 export class OnlineTimingObject extends EventTarget implements ITimingObject {
   readonly #options: OnlineTimingObjectOptions;
-  /** Unbounded upper position limit required by the `timing-object` interface. */
+  /**
+   * No fixed end time. Each media element supplies its own duration.
+   */
   readonly endPosition = Number.POSITIVE_INFINITY;
-  /** Earliest valid media position. */
+  /**
+   * Playback positions start at zero seconds.
+   */
   readonly startPosition = 0;
-  /** No local library provider is exposed because Convex is the remote provider. */
+  /**
+   * Always null: server access uses the supplied callbacks, not a timing-object provider instance.
+   */
   readonly timingProviderSource: ITimingProvider | null = null;
-  /** Event-handler property invoked when the effective timing vector changes. */
+  /**
+   * Called when playback state changes, including when a scheduled start takes effect.
+   */
   onchange: ITimingObject["onchange"] = null;
-  /** Event-handler property reserved for timing-provider errors. */
+  /**
+   * Required by the timing-object interface; this class does not emit error events.
+   * Failed update() calls reject their promise instead.
+   */
   onerror: ITimingObject["onerror"] = null;
-  /** Event-handler property invoked when the connection state changes. */
+  /**
+   * Called when readyState changes.
+   */
   onreadystatechange: ITimingObject["onreadystatechange"] = null;
   #readyState = $state<TimingObjectReadyState>("connecting");
   #providerTimeOrigin = $state<number>();
@@ -69,9 +132,9 @@ export class OnlineTimingObject extends EventTarget implements ITimingObject {
   #requestSequence = 0;
 
   /**
-   * Creates a local proxy without starting provider clock synchronization.
-   * `playStartDelaySeconds` defaults to one second; tune it to the slowest
-   * client's typical decoder preparation time.
+   * Creates the timeline and watches the supplied Svelte state. Call start() on
+   * mount to begin measuring the difference between server and browser clocks.
+   * @see {@link OnlineTimingObject} for a complete setup example.
    */
   constructor(options: OnlineTimingObjectOptions) {
     super();
@@ -129,30 +192,43 @@ export class OnlineTimingObject extends EventTarget implements ITimingObject {
     );
   }
 
-  /** Current connection state for the online timing resource. */
+  /**
+   * Whether the timeline has enough server information to use. Wait for "open"
+   * before reading playback time.
+   * @see {@link TimingObjectReadyState}
+   */
   get readyState() {
     return this.#readyState;
   }
 
-  /** Best half-round-trip bound for the provider clock translation, in seconds. */
+  /**
+   * Clock uncertainty estimate in seconds: half the fastest recent server request
+   * round trip. Infinity until a request succeeds. This does not measure audio delay.
+   */
   get uncertainty() {
     return this.#uncertainty;
   }
 
-  /** Latest provider change revision, or undefined before the first vector arrives. */
+  /**
+   * Version number of the latest playback state received from the server;
+   * undefined before the first state arrives.
+   */
   get revision() {
     return this.#options.getProviderState()?.revision;
   }
 
-  /** Monotonically increasing revision of the effective local vector. */
+  /**
+   * Counter that increases whenever local playback state changes. Svelte effects
+   * can read it to react to seeks, pauses, and scheduled starts.
+   */
   get changeRevision() {
     return this.#changeRevision;
   }
 
   /**
-   * Velocity requested by the latest provider vector, including a future-dated
-   * vector that has not activated yet. Controls use this authoritative intent
-   * so a scheduled or active play operation can always be paused.
+   * Requested playback speed: normally 1 for playing or 0 for paused. Includes
+   * a scheduled start that has not happened yet, so controls can show Pause
+   * while waiting for playback to begin.
    */
   get targetVelocity() {
     return (
@@ -161,9 +237,20 @@ export class OnlineTimingObject extends EventTarget implements ITimingObject {
   }
 
   /**
-   * Queries the timing resource at a local monotonic timestamp. The returned
-   * vector comes from the latest provisional update until the provider
-   * acknowledges it, then from the provider's authoritative notification.
+   * Returns the room's playback position and speed at the requested browser time.
+   * Omit localTimestamp to use the current time. Explicit timestamps are seconds
+   * on the performance.now() clock, not Date.now() or a position in the media.
+   *
+   * Use the returned position for lyrics and progress UI. SyncedMediaPlayback
+   * handles audio output delay separately; callers should not add that delay here.
+   *
+   * @example Read on each animation frame while playback is active
+   * ```ts
+   * const { position, velocity } = timing.query();
+   * updateLyrics(position);
+   * updateProgress(position, velocity);
+   * ```
+   * @see {@link OnlineTimingObject.readyState} for when the timeline is ready to read.
    */
   query(localTimestamp = performance.now() / 1_000): TimingStateVector {
     const optimisticState = this.#optimisticState;
@@ -179,11 +266,11 @@ export class OnlineTimingObject extends EventTarget implements ITimingObject {
   }
 
   /**
-   * Returns the future vector's activation timestamp in the local monotonic
-   * clock domain. Media followers use it to schedule playback at the provider's
-   * exact instant instead of starting whenever a network notification arrives.
+   * Returns when a pending playback change takes effect, in seconds on the
+   * performance.now() clock. Returns undefined if no change is scheduled after
+   * localTimestamp. The audio playback code uses this to schedule a wakeup.
    *
-   * @see https://www.w3.org/community/reports/webtiming/CG-FINAL-timingobject-20241203/#process-a-timing-provider-statevector-change-notification
+   * @see {@link OnlineTimingObject.query} for reading playback state at that time.
    */
   nextChangeTimestamp(localTimestamp = performance.now() / 1_000): number | undefined {
     const optimisticState = this.#optimisticState;
@@ -200,9 +287,13 @@ export class OnlineTimingObject extends EventTarget implements ITimingObject {
   }
 
   /**
-   * Applies a partial state-vector update optimistically, then forwards it to the
-   * provider. The provisional vector is replaced by the provider revision or
-   * rolled back if the update fails.
+   * Requests a playback change for everyone in the room. Applies a temporary
+   * local change while the server request is pending, then uses the server's
+   * response. Rejects if the timeline is not ready or the request fails.
+   *
+   * Player buttons should call SyncedMediaPlayback's request methods. Those
+   * methods check canControl before calling this lower-level method.
+   * @see `$lib/synced-playback` for the player control API.
    */
   async update(update: TimingStateVectorUpdate | TTimingStateVectorUpdate) {
     if (this.#readyState !== "open") throw new Error("Timing resource is not connected");
@@ -298,9 +389,16 @@ export class OnlineTimingObject extends EventTarget implements ITimingObject {
   }
 
   /**
-   * Starts clock synchronization and returns its lifecycle cleanup. Invoke this
-   * from `onMount`; the timing object remains connecting until it has both a
-   * provider vector and a clock estimate.
+   * Starts periodic server clock measurements. The timeline becomes ready once
+   * it has both server playback state and a clock estimate.
+   *
+   * Call once from the owning component's onMount. Return the cleanup function
+   * as shown below so measurements stop when the component is destroyed.
+   * @example
+   * ```ts
+   * onMount(() => timing.start());
+   * ```
+   * @see {@link OnlineTimingObject} for the room component setup example.
    */
   start() {
     const handleVisibilityChange = () => {

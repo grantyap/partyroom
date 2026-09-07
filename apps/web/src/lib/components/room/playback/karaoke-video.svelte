@@ -2,7 +2,7 @@
 	import { PUBLIC_CONVEX_URL } from "$env/static/public";
 	import { Button } from "$lib/components/ui/button";
 	import type { LyricsTrack } from "$lib/karaoke";
-	import { MediaPlaybackSync } from "$lib/media-playback-sync.svelte";
+	import { SyncedMediaPlayback } from "$lib/synced-playback";
 	import type { OnlineTimingObject } from "$lib/timing";
 	import { browserReachableServiceUrl } from "$lib/service-url";
 	import { RefreshCw } from "@lucide/svelte";
@@ -63,7 +63,7 @@
 				getCurrentTime: () => standaloneCurrentTime,
 			});
 	const lyricsState = $derived(sharedLyricsState ?? localLyricsState);
-	const playbackSync = new MediaPlaybackSync({
+	const playbackSync = new SyncedMediaPlayback({
 		getElement: () => video,
 		getTimingObject: () => timing,
 		canControl: () => canControl,
@@ -127,15 +127,12 @@
 				setProvider((event as CustomEvent<MediaProviderAdapter | null>).detail),
 			"loaded-metadata": () => {
 				updateTime();
-				playbackSync.handleLoadedMetadata();
 			},
 			play: startTracking,
-			playing: playbackSync.handlePlaying,
 			pause: stopTracking,
 			"time-update": () => {
 				if (!timing) updateTime();
 			},
-			"can-play": playbackSync.handleCanPlay,
 			ended: () => {
 				stopTracking();
 				onEnded?.();
@@ -189,6 +186,7 @@
 	src={{ src: videoUrl, type: "video/mp4" }}
 	title={title ?? undefined}
 	playsInline
+	crossOrigin="anonymous"
 	load="eager"
 	preload="auto"
 	keyDisabled={Boolean(timing) && !canControl}

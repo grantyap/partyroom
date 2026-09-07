@@ -1,10 +1,12 @@
 import type { TimingStateVector } from "../types";
 
 /**
- * Evaluates constant-acceleration motion at `timestamp`, returning a new vector
- * whose position, velocity, and timestamp are valid at that exact instant.
+ * Calculates playback state at a requested time, in seconds on the same clock
+ * as vector.timestamp. Before the scheduled start, holds the position paused.
+ * After that time, advances it using the speed and acceleration in the vector.
  *
- * @see https://www.w3.org/community/reports/webtiming/CG-FINAL-timingobject-20241203/#process-a-query-operation
+ * Internal math helper. UI code should call OnlineTimingObject.query().
+ * @see `$lib/timing` for the shared timeline API.
  */
 export function queryTimingStateVector(vector: TimingStateVector, timestamp: number) {
   if (timestamp < vector.timestamp) {
@@ -28,10 +30,11 @@ export function queryTimingStateVector(vector: TimingStateVector, timestamp: num
 }
 
 /**
- * Translates a provider vector timestamp to the user agent's monotonic clock.
- * `providerTimeOrigin` is the provider timestamp corresponding to local time 0.
+ * Converts a server timestamp to seconds on the browser's performance.now()
+ * clock. providerTimeOrigin is the server time when that browser clock was zero.
+ * The media position and speed stay unchanged.
  *
- * @see https://www.w3.org/community/reports/webtiming/CG-FINAL-timingobject-20241203/#translate-timestamp-from-timing-resource-provider-to-user-agent-timeline
+ * @see {@link queryTimingStateVector} for calculating playback from the result.
  */
 export function translateProviderVector(
   vector: TimingStateVector,
