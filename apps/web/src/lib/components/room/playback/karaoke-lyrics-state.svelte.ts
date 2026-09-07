@@ -1,3 +1,4 @@
+import { untrack } from "svelte";
 import { PUBLIC_CONVEX_URL } from "$env/static/public";
 import { browserReachableServiceUrl } from "$lib/service-url";
 import {
@@ -32,8 +33,16 @@ export class KaraokeLyricsState {
   #error = $state<string | null>(null);
 
   constructor(private readonly options: KaraokeLyricsStateOptions) {
-    $effect(() => {
+    // Query updates can replace track objects even when only the offset changed.
+    // A primitive key keeps loading tied to the actual source, not object identity.
+    const sourceKey = $derived.by(() => {
       const track = this.selectedLyrics;
+      return track ? JSON.stringify([track.id, track.content, track.timing]) : null;
+    });
+
+    $effect(() => {
+      sourceKey;
+      const track = untrack(() => this.selectedLyrics);
       this.#cues = [];
       this.#error = null;
 
@@ -60,6 +69,7 @@ export class KaraokeLyricsState {
           return response.json();
         })
         .then((document: unknown) => {
+          if (controller.signal.aborted) return;
           this.#cues = lyricsIntoCues(parseLyricObservations(document), track.timing);
         })
         .catch((cause: unknown) => {
