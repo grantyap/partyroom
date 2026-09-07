@@ -93,6 +93,8 @@ layout. It handles playback, the empty state, skipping, and TV mode. Add an
 			overlayMessages={playbackContext.overlayMessages}
 			timing={playbackContext.timing}
 			canControl={playbackContext.playback.permissions.controlPlayback}
+			fullscreen={playbackContext.tvMode}
+			onToggleFullscreen={() => void playbackContext.toggleTvMode()}
 			onEnded={() => void advancePlayback()}
 			onSkip={() => void advancePlayback()}
 		/>

@@ -31,6 +31,8 @@
 		canControl?: boolean;
 		onEnded?: () => void;
 		onSkip?: () => void;
+		fullscreen?: boolean;
+		onToggleFullscreen?: () => void;
 		overlayMessages?: OverlayMessage[];
 	};
 
@@ -46,6 +48,8 @@
 		canControl = true,
 		onEnded,
 		onSkip,
+		fullscreen = false,
+		onToggleFullscreen,
 		overlayMessages,
 	}: Props = $props();
 
@@ -219,6 +223,8 @@
 	<KaraokeVideoControls
 		{timing}
 		{canControl}
+		{fullscreen}
+		{onToggleFullscreen}
 		onSkip={onSkip ? playbackSync.handleSkipRequest : undefined}
 	/>
 

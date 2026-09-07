@@ -2,16 +2,20 @@
 	import { buttonVariants } from "$lib/components/ui/button";
 	import type { OnlineTimingObject } from "$lib/timing";
 	import { cn } from "$lib/utils";
-	import { Pause, Play, SkipForward } from "@lucide/svelte";
+	import { Maximize, Minimize, Pause, Play, SkipForward } from "@lucide/svelte";
 
 	let {
 		timing,
 		canControl,
 		onSkip,
+		fullscreen = false,
+		onToggleFullscreen,
 	}: {
 		timing?: OnlineTimingObject;
 		canControl: boolean;
 		onSkip?: () => void;
+		fullscreen?: boolean;
+		onToggleFullscreen?: () => void;
 	} = $props();
 
 	const controlsReady = $derived(!timing || timing.readyState === "open");
@@ -87,6 +91,24 @@
 					type="duration"
 					class="w-10 text-xs tabular-nums"
 				></media-time>
+				{#if onToggleFullscreen}
+					<button
+						type="button"
+						class={cn(
+							buttonVariants({ variant: "ghost", size: "icon" }),
+							"shrink-0 text-white hover:bg-white/15 hover:text-white",
+						)}
+						onclick={onToggleFullscreen}
+						aria-label={fullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+						title={fullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+					>
+						{#if fullscreen}
+							<Minimize />
+						{:else}
+							<Maximize />
+						{/if}
+					</button>
+				{/if}
 			</div>
 		</media-controls-group>
 	</media-controls>
