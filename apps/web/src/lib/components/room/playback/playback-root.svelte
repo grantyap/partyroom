@@ -20,7 +20,7 @@ spacing, or other layout.
 ```
 -->
 <script lang="ts">
-	import { OnlineTimingObject } from "$lib/online-timing-object.svelte";
+	import { OnlineTimingObject } from "$lib/timing";
 	import { api } from "@partyroom/backend/convex/_generated/api";
 	import type { Id } from "@partyroom/backend/convex/_generated/dataModel";
 	import { useAction, useMutation, useQuery } from "convex-svelte";

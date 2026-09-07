@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { queryTimingStateVector, translateProviderVector } from "$lib/timing-object";
+import { queryTimingStateVector, translateProviderVector } from "./state-vector";
 
 describe("W3C timing state vectors", () => {
   test("queries position and velocity at one monotonic timestamp", () => {

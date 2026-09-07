@@ -1,10 +1,5 @@
-import {
-  queryTimingStateVector,
-  translateProviderVector,
-  type ProviderTimingState,
-  type TimingStateVector,
-  type TimingStateVectorUpdate,
-} from "$lib/timing-object";
+import { queryTimingStateVector, translateProviderVector } from "./internal/state-vector";
+import type { ProviderTimingState, TimingStateVector, TimingStateVectorUpdate } from "./types";
 import type { ITimingObject, ITimingProvider, TTimingStateVectorUpdate } from "timing-object";
 
 type ClockSample = {

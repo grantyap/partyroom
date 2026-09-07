@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { buttonVariants } from "$lib/components/ui/button";
-	import type { OnlineTimingObject } from "$lib/online-timing-object.svelte";
+	import type { OnlineTimingObject } from "$lib/timing";
 	import { cn } from "$lib/utils";
 	import { Pause, Play, SkipForward } from "@lucide/svelte";
 

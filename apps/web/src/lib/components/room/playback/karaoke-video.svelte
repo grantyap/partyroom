@@ -3,7 +3,7 @@
 	import { Button } from "$lib/components/ui/button";
 	import type { LyricsTrack } from "$lib/karaoke";
 	import { MediaPlaybackSync } from "$lib/media-playback-sync.svelte";
-	import type { OnlineTimingObject } from "$lib/online-timing-object.svelte";
+	import type { OnlineTimingObject } from "$lib/timing";
 	import { browserReachableServiceUrl } from "$lib/service-url";
 	import { RefreshCw } from "@lucide/svelte";
 	import {

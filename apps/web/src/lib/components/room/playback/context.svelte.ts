@@ -1,4 +1,4 @@
-import type { OnlineTimingObject } from "$lib/online-timing-object.svelte";
+import type { OnlineTimingObject } from "$lib/timing";
 import type { Id } from "@partyroom/backend/convex/_generated/dataModel";
 import { createContext } from "svelte";
 import type { CurrentMedia, OverlayMessage, Playback, RoomMediaItem } from "../types";

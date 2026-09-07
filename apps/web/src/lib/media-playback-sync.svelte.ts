@@ -1,4 +1,4 @@
-import type { OnlineTimingObject } from "$lib/online-timing-object.svelte";
+import type { OnlineTimingObject } from "$lib/timing";
 import {
   createSetTimingsrc,
   createUpdateGradually,
