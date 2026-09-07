@@ -1,4 +1,4 @@
-FROM python:3.12-slim AS dependencies
+FROM python:3.12-slim-trixie AS dependencies
 COPY --from=ghcr.io/astral-sh/uv:0.11.28 /uv /uvx /bin/
 
 WORKDIR /workspace/apps/annotations-worker
@@ -9,7 +9,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-editable --no-install-project
 
 
-FROM python:3.12-slim
+FROM python:3.12-slim-trixie
 
 WORKDIR /workspace/apps/annotations-worker
 COPY --from=dependencies /workspace/apps/annotations-worker/.venv ./.venv

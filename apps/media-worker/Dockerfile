@@ -1,4 +1,4 @@
-FROM debian:bookworm-slim AS media-tools
+FROM debian:trixie-slim AS media-tools
 
 ARG TARGETARCH
 ARG DENO_VERSION=2.8.1
@@ -32,7 +32,7 @@ RUN apt-get update \
     && install -m 0755 /tmp/deno/deno /out/deno \
     && install -m 0755 /tmp/yt-dlp /out/yt-dlp
 
-FROM oven/bun:1.4.0-debian AS application
+FROM oven/bun:1.4.2-debian AS application
 
 WORKDIR /workspace
 COPY package.json bun.lock ./
@@ -54,7 +54,7 @@ RUN bun install --frozen-lockfile --production --filter @partyroom/media-worker 
       --minify
 
 
-FROM oven/bun:1.4.0-debian
+FROM oven/bun:1.4.2-debian
 
 COPY --from=media-tools /out/deno /usr/local/bin/deno
 COPY --from=media-tools /out/yt-dlp /usr/local/bin/yt-dlp
