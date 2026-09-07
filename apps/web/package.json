@@ -30,6 +30,7 @@
     "@dnd-kit-svelte/svelte": "^0.1.6",
     "@mmailaender/convex-better-auth-svelte": "catalog:",
     "@partyroom/backend": "workspace:*",
+    "@partyroom/capabilities": "workspace:*",
     "@partyroom/env": "workspace:*",
     "better-auth": "catalog:",
     "convex": "catalog:",

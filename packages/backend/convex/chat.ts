@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { authComponent } from "./auth";
+import { capabilities } from "./capabilities";
 import { requireRoomAction } from "./rooms";
 
 const uuidV4Pattern =
@@ -21,7 +22,7 @@ export const getMessages = query({
     }),
   ),
   handler: async (ctx, { room }) => {
-    await requireRoomAction(ctx, room, "rooms:read");
+    await requireRoomAction(ctx, room, capabilities.rooms.read);
     const messages = await ctx.db
       .query("messages")
       .withIndex("by_room", (q) => q.eq("room", room))
@@ -53,7 +54,7 @@ export const sendMessage = mutation({
   },
   returns: v.id("messages"),
   handler: async (ctx, args) => {
-    const { user } = await requireRoomAction(ctx, args.room, "rooms:chat");
+    const { user } = await requireRoomAction(ctx, args.room, capabilities.rooms.chat);
     const body = args.body.trim();
     if (!body) throw new Error("Message cannot be empty");
     if (body.length > 500) throw new Error("Message is too long");

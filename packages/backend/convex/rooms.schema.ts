@@ -1,4 +1,4 @@
-import { v } from "convex/values";
+import { v, type Infer } from "convex/values";
 
 export const roomMemberPermissionsSchema = v.object({
   controlPlayback: v.boolean(),
@@ -8,10 +8,12 @@ export const roomMemberPermissionsSchema = v.object({
   sendChat: v.boolean(),
 });
 
+type RoomMemberPermissions = Infer<typeof roomMemberPermissionsSchema>;
+
 export const defaultRoomMemberPermissions = {
   controlPlayback: false,
   addToQueue: true,
   reorderQueue: false,
   removeFromQueue: false,
   sendChat: true,
-} as const;
+} satisfies RoomMemberPermissions;

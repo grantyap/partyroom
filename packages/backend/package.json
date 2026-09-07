@@ -30,6 +30,7 @@
     "@mmailaender/convex-better-auth-svelte": "catalog:",
     "@partyroom/activities": "workspace:*",
     "@partyroom/activity-worker": "workspace:*",
+    "@partyroom/capabilities": "workspace:*",
     "@partyroom/media-activities": "workspace:*",
     "better-auth": "catalog:",
     "convex": "catalog:",

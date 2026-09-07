@@ -5,6 +5,7 @@ import { anonymous } from "better-auth/plugins";
 import { generateSlug } from "random-word-slugs";
 import { components, internal } from "./_generated/api";
 import { type DataModel } from "./_generated/dataModel";
+import { getCapabilities, isAnonymousUser } from "./capabilities";
 import { query, env, type QueryCtx } from "./_generated/server";
 import authConfig from "./auth.config";
 
@@ -50,7 +51,14 @@ export const createAuth = (convexCtx: GenericCtx<DataModel>) => {
 export const getCurrentUser = query({
   args: {},
   handler: async (ctx) => {
-    return await getCurrentUserImpl(ctx);
+    const user = await getCurrentUserImpl(ctx);
+    return user
+      ? {
+          ...user,
+          isAnonymous: isAnonymousUser(user),
+          capabilities: getCapabilities(user),
+        }
+      : null;
   },
 });
 

@@ -43,6 +43,7 @@ COPY apps/web/package.json ./apps/web/package.json
 COPY packages/activities ./packages/activities
 COPY packages/activity-worker ./packages/activity-worker
 COPY packages/backend/package.json ./packages/backend/package.json
+COPY packages/capabilities ./packages/capabilities
 COPY packages/config ./packages/config
 COPY packages/env ./packages/env
 COPY packages/media-activities ./packages/media-activities

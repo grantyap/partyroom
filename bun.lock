@@ -47,6 +47,7 @@
         "@dnd-kit-svelte/svelte": "^0.1.6",
         "@mmailaender/convex-better-auth-svelte": "catalog:",
         "@partyroom/backend": "workspace:*",
+        "@partyroom/capabilities": "workspace:*",
         "@partyroom/env": "workspace:*",
         "better-auth": "catalog:",
         "convex": "catalog:",
@@ -131,6 +132,7 @@
         "@mmailaender/convex-better-auth-svelte": "catalog:",
         "@partyroom/activities": "workspace:*",
         "@partyroom/activity-worker": "workspace:*",
+        "@partyroom/capabilities": "workspace:*",
         "@partyroom/media-activities": "workspace:*",
         "better-auth": "catalog:",
         "convex": "catalog:",
@@ -148,6 +150,14 @@
         "typescript": "catalog:",
         "vite": "^8.1.5",
         "vitest": "^4.1.10",
+      },
+    },
+    "packages/capabilities": {
+      "name": "@partyroom/capabilities",
+      "version": "0.0.0",
+      "devDependencies": {
+        "@partyroom/config": "workspace:*",
+        "typescript": "catalog:",
       },
     },
     "packages/config": {
@@ -434,6 +444,8 @@
     "@partyroom/annotations-worker": ["@partyroom/annotations-worker@workspace:apps/annotations-worker"],
 
     "@partyroom/backend": ["@partyroom/backend@workspace:packages/backend"],
+
+    "@partyroom/capabilities": ["@partyroom/capabilities@workspace:packages/capabilities"],
 
     "@partyroom/config": ["@partyroom/config@workspace:packages/config"],
 

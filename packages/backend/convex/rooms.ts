@@ -4,6 +4,11 @@ import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { authComponent, getCurrentUserImpl } from "./auth";
+import {
+	capabilities,
+	requireCapability,
+	type RoomPermission,
+} from "./capabilities";
 import { defaultRoomMemberPermissions, roomMemberPermissionsSchema } from "./rooms.schema";
 
 const roomDocSchema = v.object({
@@ -24,6 +29,13 @@ const listedRoomFields = {
 
 const listedRoomSchema = v.object(listedRoomFields);
 const recentRoomSchema = v.object({ ...listedRoomFields, lastVisitedAt: v.number() });
+const roomMemberPermissionByCapability = {
+  [capabilities.rooms.controlPlayback]: "controlPlayback",
+  [capabilities.rooms.addToQueue]: "addToQueue",
+  [capabilities.rooms.reorderQueue]: "reorderQueue",
+  [capabilities.rooms.removeFromQueue]: "removeFromQueue",
+  [capabilities.rooms.chat]: "sendChat",
+} as const;
 
 export const getRoomByName = query({
   args: {
@@ -35,7 +47,6 @@ export const getRoomByName = query({
     if (!user) {
       throw new Error("Unauthenticated");
     }
-
     const room = await ctx.db
       .query("rooms")
       .withIndex("by_name", (q) => q.eq("name", name))
@@ -59,6 +70,7 @@ export const getRooms = query({
     if (!user) {
       throw new Error("Unauthenticated");
     }
+    requireCapability(user, capabilities.rooms.list);
 
     return await ctx.db
       .query("rooms")
@@ -82,6 +94,7 @@ export const getRecentRooms = query({
     if (!user) {
       throw new Error("Unauthenticated");
     }
+    requireCapability(user, capabilities.rooms.list);
 
     const visits = await ctx.db
       .query("roomVisits")
@@ -163,7 +176,7 @@ export const createRoom = mutation({
       throw new Error("Unauthenticated");
     }
 
-    requireRegisteredUser(user);
+    requireCapability(user, capabilities.rooms.create);
 
     const roomName = name || generateSlug();
     const room = await ctx.db.insert("rooms", {
@@ -201,61 +214,31 @@ export const updateMemberPermissions = mutation({
   },
   returns: v.null(),
   handler: async (ctx, { roomId, memberPermissions }) => {
-    await requireRoomAction(ctx, roomId, "rooms:update");
+    await requireRoomAction(ctx, roomId, capabilities.rooms.update);
     await ctx.db.patch("rooms", roomId, { memberPermissions });
     return null;
   },
 });
 
-const roomPermissionsKey = "rooms";
-const roomActions = [
-  "read",
-  "create",
-  "update",
-  "delete",
-  "chat",
-  "controlPlayback",
-  "addToQueue",
-  "reorderQueue",
-  "removeFromQueue",
-] as const;
-
-type RoomPermissionName = `${typeof roomPermissionsKey}:${(typeof roomActions)[number]}`;
-
-function isUserRoomOwner(user: string, room: { owner: string }) {
-  return room.owner === user;
-}
-
 export function userHasRoomPermission(
-  opts: { user: string } & (
-    | {
-        room: Pick<Doc<"rooms">, "owner" | "memberPermissions">;
-        permission: Exclude<RoomPermissionName, "rooms:create">;
-      }
-    | { room?: never; permission: "rooms:create" }
-  ),
+  opts: {
+    user: string;
+    room: Pick<Doc<"rooms">, "owner" | "memberPermissions">;
+    permission: RoomPermission;
+  },
 ) {
-  if (opts.permission === "rooms:create") {
+  if (opts.room.owner === opts.user) {
     return true;
   }
 
-  const isOwner = isUserRoomOwner(opts.user, opts.room);
-  if (isOwner) {
+  if (opts.permission === capabilities.rooms.read) {
     return true;
   }
 
-  if (opts.permission === "rooms:read") {
-    return true;
-  }
-
-  const roomSetting = {
-    "rooms:controlPlayback": "controlPlayback",
-    "rooms:addToQueue": "addToQueue",
-    "rooms:reorderQueue": "reorderQueue",
-    "rooms:removeFromQueue": "removeFromQueue",
-    "rooms:chat": "sendChat",
-  } as const;
-  const setting = roomSetting[opts.permission as keyof typeof roomSetting];
+  const setting =
+    roomMemberPermissionByCapability[
+      opts.permission as keyof typeof roomMemberPermissionByCapability
+    ];
   return setting ? (opts.room.memberPermissions ?? defaultRoomMemberPermissions)[setting] : false;
 }
 
@@ -264,14 +247,6 @@ export const requireRoomPermission = (...args: Parameters<typeof userHasRoomPerm
     throw new Error("Unauthorized");
   }
 };
-
-export function requireRegisteredUser(user: { _id: string; isAnonymous?: boolean | null }) {
-  if ("isAnonymous" in user && user.isAnonymous === true) {
-    throw new Error("Only registered users can create rooms");
-  }
-}
-
-export type RoomPermission = Exclude<RoomPermissionName, "rooms:create">;
 
 export async function requireRoomAction(
   ctx: QueryCtx | MutationCtx,

@@ -1,6 +1,7 @@
 import { internal } from "./_generated/api";
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { capabilities } from "./capabilities";
 import { requireRoomAction } from "./rooms";
 import { authComponent } from "./auth";
 import { markRoomOccupied } from "./playback";
@@ -16,7 +17,7 @@ export const heartbeat = mutation({
   },
   returns: v.object({ roomToken: v.string(), sessionToken: v.string() }),
   handler: async (ctx, { room: roomId, session, interval }) => {
-    const { user } = await requireRoomAction(ctx, roomId, "rooms:read");
+    const { user } = await requireRoomAction(ctx, roomId, capabilities.rooms.read);
     const result = await presence.heartbeat(ctx, roomId, user._id, session, interval);
     await markRoomOccupied(ctx, roomId);
     return result;

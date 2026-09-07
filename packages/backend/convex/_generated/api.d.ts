@@ -14,6 +14,7 @@ import type * as activities_http from "../activities/http.js";
 import type * as activities_managedWorkflow from "../activities/managedWorkflow.js";
 import type * as activities_workflowManager from "../activities/workflowManager.js";
 import type * as auth from "../auth.js";
+import type * as capabilities from "../capabilities.js";
 import type * as chat from "../chat.js";
 import type * as healthCheck from "../healthCheck.js";
 import type * as http from "../http.js";
@@ -52,6 +53,7 @@ declare const fullApi: ApiFromModules<{
   "activities/managedWorkflow": typeof activities_managedWorkflow;
   "activities/workflowManager": typeof activities_workflowManager;
   auth: typeof auth;
+  capabilities: typeof capabilities;
   chat: typeof chat;
   healthCheck: typeof healthCheck;
   http: typeof http;

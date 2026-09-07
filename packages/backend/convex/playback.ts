@@ -12,9 +12,10 @@ import {
 } from "./_generated/server";
 import { activities } from "./activities/workflowManager";
 import { authComponent } from "./auth";
+import { capabilities, type RoomPermission } from "./capabilities";
 import { removeRoomMedia } from "./media/domain/jobs";
 import { presence } from "./presenceComponent";
-import { requireRoomAction, userHasRoomPermission, type RoomPermission } from "./rooms";
+import { requireRoomAction, userHasRoomPermission } from "./rooms";
 
 const PRESENCE_CHECK_INTERVAL_MS = 30_000;
 const EMPTY_PAUSE_GRACE_MS = 15_000;
@@ -309,7 +310,7 @@ export const get = query({
   args: { roomId: v.id("rooms") },
   returns: playbackResult,
   handler: async (ctx, { roomId }) => {
-    const { room, user } = await requireRoomAction(ctx, roomId, "rooms:read");
+    const { room, user } = await requireRoomAction(ctx, roomId, capabilities.rooms.read);
     const playback = await playbackForRoom(ctx, roomId);
     const current = currentItem(playback.state);
     const timing = activeTiming(playback.state);
@@ -337,12 +338,12 @@ export const get = query({
         : null,
       queue,
       permissions: {
-        controlPlayback: userCan(room, user._id, "rooms:controlPlayback"),
-        addToQueue: userCan(room, user._id, "rooms:addToQueue"),
-        reorderQueue: userCan(room, user._id, "rooms:reorderQueue"),
-        removeFromQueue: userCan(room, user._id, "rooms:removeFromQueue"),
-        sendChat: userCan(room, user._id, "rooms:chat"),
-        updateRoom: userCan(room, user._id, "rooms:update"),
+        controlPlayback: userCan(room, user._id, capabilities.rooms.controlPlayback),
+        addToQueue: userCan(room, user._id, capabilities.rooms.addToQueue),
+        reorderQueue: userCan(room, user._id, capabilities.rooms.reorderQueue),
+        removeFromQueue: userCan(room, user._id, capabilities.rooms.removeFromQueue),
+        sendChat: userCan(room, user._id, capabilities.rooms.chat),
+        updateRoom: userCan(room, user._id, capabilities.rooms.update),
       },
     };
   },
@@ -379,7 +380,7 @@ export const add = mutation({
   args: { roomId: v.id("rooms"), roomMediaId: v.id("roomMedia") },
   returns: v.string(),
   handler: async (ctx, args) => {
-    const { user } = await requireRoomAction(ctx, args.roomId, "rooms:addToQueue");
+    const { user } = await requireRoomAction(ctx, args.roomId, capabilities.rooms.addToQueue);
     return await enqueueRoomMedia(ctx, { ...args, addedBy: user._id });
   },
 });
@@ -473,7 +474,7 @@ export const update = mutation({
   },
   returns: v.null(),
   handler: async (ctx, { roomId, currentKey, vector, playStartDelaySeconds }) => {
-    await requireRoomAction(ctx, roomId, "rooms:controlPlayback");
+    await requireRoomAction(ctx, roomId, capabilities.rooms.controlPlayback);
     await updateRoomTiming(ctx, {
       roomId,
       currentKey,
@@ -536,7 +537,7 @@ export const advance = mutation({
   args: { roomId: v.id("rooms"), currentKey: v.string() },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await requireRoomAction(ctx, args.roomId, "rooms:controlPlayback");
+    await requireRoomAction(ctx, args.roomId, capabilities.rooms.controlPlayback);
     await advanceRoomPlayback(ctx, args);
     return null;
   },
@@ -556,7 +557,7 @@ export const remove = mutation({
   args: { roomId: v.id("rooms"), queueItemKey: v.string() },
   returns: v.null(),
   handler: async (ctx, { roomId, queueItemKey }) => {
-    await requireRoomAction(ctx, roomId, "rooms:removeFromQueue");
+    await requireRoomAction(ctx, roomId, capabilities.rooms.removeFromQueue);
     const playback = await playbackForRoom(ctx, roomId);
     const queue = queueItems(playback.state);
     if (!queue.some((item) => item.key === queueItemKey)) throw new Error("Queue item not found");
@@ -581,7 +582,7 @@ export const reorder = mutation({
   },
   returns: v.null(),
   handler: async (ctx, { roomId, queueItemKey, afterItemKey, beforeItemKey }) => {
-    await requireRoomAction(ctx, roomId, "rooms:reorderQueue");
+    await requireRoomAction(ctx, roomId, capabilities.rooms.reorderQueue);
     const playback = await playbackForRoom(ctx, roomId);
     const queue = queueItems(playback.state);
     const moving = queue.find((item) => item.key === queueItemKey);
@@ -617,7 +618,7 @@ export const setLyrics = mutation({
   },
   returns: v.null(),
   handler: async (ctx, { roomId, lyricsId, offsetMs }) => {
-    await requireRoomAction(ctx, roomId, "rooms:controlPlayback");
+    await requireRoomAction(ctx, roomId, capabilities.rooms.controlPlayback);
     const playback = await playbackForRoom(ctx, roomId);
     const current = currentItem(playback.state);
     if (!current) throw new Error("Nothing is playing");

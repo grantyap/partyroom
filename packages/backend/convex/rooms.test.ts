@@ -2,9 +2,13 @@ import { convexTest } from "convex-test";
 import { describe, expect, test } from "vitest";
 import {
   recordRoomVisitByNameForUser,
-  requireRegisteredUser,
   userHasRoomPermission,
 } from "./rooms";
+import {
+  capabilities,
+  getCapabilities,
+  requireCapability,
+} from "./capabilities";
 import { defaultRoomMemberPermissions } from "./rooms.schema";
 import schema from "./schema";
 import { modules } from "./test.setup";
@@ -15,39 +19,56 @@ const room = {
 };
 
 describe("room permissions without persistent membership", () => {
-  test("does not allow anonymous users to create rooms", () => {
-    expect(() => requireRegisteredUser({ _id: "guest", isAnonymous: true })).toThrow(
-      "Only registered users can create rooms",
-    );
+  test("gives registered users list and create capabilities", () => {
+    expect(getCapabilities({ isAnonymous: false })).toEqual([
+      capabilities.rooms.list,
+      capabilities.rooms.create,
+    ]);
   });
 
-  test("allows registered users to create rooms", () => {
-    expect(() => requireRegisteredUser({ _id: "user", isAnonymous: false })).not.toThrow();
+  test("does not give anonymous or unauthenticated users the room list capability", () => {
+    expect(getCapabilities({ isAnonymous: true })).toEqual([]);
+    expect(getCapabilities(null)).toEqual([]);
+  });
+
+  test("enforces registered-only capabilities", () => {
+    expect(() => requireCapability({ isAnonymous: true }, capabilities.rooms.list)).toThrow(
+      "Unauthorized",
+    );
+    expect(() => requireCapability({ isAnonymous: false }, capabilities.rooms.create)).not.toThrow();
   });
 
   test("allows any authenticated visitor to read a room", () => {
-    expect(userHasRoomPermission({ user: "visitor", room, permission: "rooms:read" })).toBe(true);
+    expect(
+      userHasRoomPermission({ user: "visitor", room, permission: capabilities.rooms.read }),
+    ).toBe(true);
   });
 
   test("applies room-configured permissions to visitors", () => {
-    expect(userHasRoomPermission({ user: "visitor", room, permission: "rooms:addToQueue" })).toBe(
-      true,
-    );
     expect(
-      userHasRoomPermission({ user: "visitor", room, permission: "rooms:controlPlayback" }),
+      userHasRoomPermission({ user: "visitor", room, permission: capabilities.rooms.addToQueue }),
+    ).toBe(true);
+    expect(
+      userHasRoomPermission({
+        user: "visitor",
+        room,
+        permission: capabilities.rooms.controlPlayback,
+      }),
     ).toBe(false);
   });
 
   test("does not allow visitors to change room settings", () => {
-    expect(userHasRoomPermission({ user: "visitor", room, permission: "rooms:update" })).toBe(
-      false,
-    );
+    expect(
+      userHasRoomPermission({ user: "visitor", room, permission: capabilities.rooms.update }),
+    ).toBe(false);
   });
 
   test("gives the owner every room permission", () => {
-    expect(userHasRoomPermission({ user: "owner", room, permission: "rooms:update" })).toBe(true);
     expect(
-      userHasRoomPermission({ user: "owner", room, permission: "rooms:controlPlayback" }),
+      userHasRoomPermission({ user: "owner", room, permission: capabilities.rooms.update }),
+    ).toBe(true);
+    expect(
+      userHasRoomPermission({ user: "owner", room, permission: capabilities.rooms.controlPlayback }),
     ).toBe(true);
   });
 });

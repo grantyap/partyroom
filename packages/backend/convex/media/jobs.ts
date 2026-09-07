@@ -11,6 +11,7 @@ import {
   type QueryCtx,
 } from "../_generated/server";
 import { activities, managedWorkflow } from "../activities/workflowManager";
+import { capabilities } from "../capabilities";
 import { enqueueRoomMedia } from "../playback";
 import { requireRoomAction } from "../rooms";
 import { getMediaEnrichment } from "./domain/assets";
@@ -77,7 +78,7 @@ async function workflowProgressSteps(
 }
 
 async function requireRoomAccess(ctx: QueryCtx, roomId: Id<"rooms">) {
-  const { user } = await requireRoomAction(ctx, roomId, "rooms:read");
+  const { user } = await requireRoomAction(ctx, roomId, capabilities.rooms.read);
   return user._id;
 }
 
@@ -85,7 +86,7 @@ export const authorizeRequest = internalQuery({
   args: { roomId: v.id("rooms") },
   returns: v.string(),
   handler: async (ctx, { roomId }) => {
-    const { user } = await requireRoomAction(ctx, roomId, "rooms:addToQueue");
+    const { user } = await requireRoomAction(ctx, roomId, capabilities.rooms.addToQueue);
     return user._id;
   },
 });
