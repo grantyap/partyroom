@@ -106,6 +106,11 @@ describe("media audio output routing", () => {
       Audio: Media,
       AudioContext: Context,
       location: { href: "https://party.test/", origin: "https://party.test" },
+      navigator: {
+        userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15) Safari/605.1.15",
+        platform: "MacIntel",
+        maxTouchPoints: 0,
+      },
     })) {
       originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
       Object.defineProperty(globalThis, name, { value, configurable: true, writable: true });
@@ -200,6 +205,40 @@ describe("media audio output routing", () => {
     Reflect.deleteProperty(globalThis, "AudioContext");
     output = create(new Media());
     expect(output).toBeUndefined();
+  });
+
+  test.each([
+    [
+      "iPhone Safari",
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) Safari/605.1.15",
+      "iPhone",
+      5,
+    ],
+    ["iPad Safari", "Mozilla/5.0 (iPad; CPU OS 26_0 like Mac OS X) Safari/605.1.15", "iPad", 5],
+    [
+      "iPad desktop mode",
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15) Safari/605.1.15",
+      "MacIntel",
+      5,
+    ],
+    [
+      "iOS Chrome",
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) CriOS/140.0 Mobile Safari/604.1",
+      "iPhone",
+      5,
+    ],
+  ])("keeps a single native media element on %s", (_name, userAgent, platform, maxTouchPoints) => {
+    Object.defineProperty(globalThis, "navigator", {
+      value: { userAgent, platform, maxTouchPoints },
+      configurable: true,
+    });
+    const element = new Media();
+    element.src = "https://party.test/song.mp4";
+    output = create(element);
+    expect(output).toBeUndefined();
+    expect(Media.instances).toHaveLength(1);
+    expect(Context.instances).toHaveLength(0);
+    expect(connects).toBe(0);
   });
 
   test("requests a gesture when the context suspends and restores audio after resume", async () => {

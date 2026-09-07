@@ -29,6 +29,17 @@ export class MediaAudioOutput {
   #delay = 0;
 
   static create(element: HTMLMediaElement, timing: OnlineTimingObject, connect: Connect) {
+    // iOS can interrupt one audible media element when another starts. A zero
+    // Web Audio gain does not mute the underlying element for that policy, so
+    // the two followers can repeatedly pause each other and reopen the join UI.
+    // Keep native, single-element playback on iPhone and iPad (including iPad's
+    // desktop user agent), before attaching an irreversible Web Audio graph.
+    if (
+      typeof navigator !== "undefined" &&
+      (/iPad|iPhone|iPod/.test(navigator.userAgent) ||
+        (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1))
+    )
+      return;
     if (typeof AudioContext === "undefined" || !("outputLatency" in AudioContext.prototype)) return;
     // Web Audio silences non-CORS cross-origin media. Retain native playback in
     // that case; never attach an irreversible source node to a tainted element.

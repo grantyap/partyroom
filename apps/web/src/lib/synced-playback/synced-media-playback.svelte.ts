@@ -115,7 +115,8 @@ const createConfiguredTimingsrc = (alignmentToleranceSeconds: number) => {
  * the sound slightly ahead to allow for output delay. This requires an additional
  * media load and decoder. On supported browsers, the delay estimate combines
  * AudioContext.baseLatency and outputLatency. If compensation is unavailable,
- * playback continues without it; estimates do not guarantee exact audible sync.
+ * playback continues without it. iPhone and iPad use a single media element to
+ * avoid competing playback sessions; estimates do not guarantee exact audible sync.
  * Read the shared timeline for lyrics and progress UI without adding an offset.
  *
  * @example Audio-only Svelte player (use HTMLVideoElement for video)
