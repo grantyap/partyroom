@@ -18,7 +18,7 @@
 		title?: string;
 		description?: string;
 		message?: string | null;
-		backHref?: string;
+		backHref?: string | null;
 		backLabel?: string;
 		onRetry?: () => void;
 		fullPage?: boolean;
@@ -70,10 +70,12 @@
 			{#if onRetry}
 				<Button variant="outline" onclick={onRetry}>Try again</Button>
 			{/if}
-			<Button href={backHref}>
-				<ArrowLeftIcon />
-				{backLabel}
-			</Button>
+			{#if backHref}
+				<Button href={backHref}>
+					<ArrowLeftIcon />
+					{backLabel}
+				</Button>
+			{/if}
 		</Card.Footer>
 	</Card.Root>
 </div>

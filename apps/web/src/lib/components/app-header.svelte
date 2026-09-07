@@ -7,6 +7,7 @@
 	import * as DropdownMenu from "$lib/components/ui/dropdown-menu";
 	import * as Drawer from "$lib/components/ui/drawer";
 	import { Input } from "$lib/components/ui/input";
+	import { capabilities, hasCapability, type Capability } from "$lib/capabilities";
 	import {
 		hasStoredUserName,
 		setUserName,
@@ -26,6 +27,7 @@
 		email?: string | null;
 		image?: string | null;
 		isAnonymous?: boolean | null;
+		capabilities?: readonly Capability[] | null;
 	};
 
 	let { user }: { user: AppUser | null } = $props();
@@ -39,6 +41,7 @@
 	let hasSetUserName = $state(false);
 	let nameDialogOpen = $state(false);
 
+	const canViewRoomList = $derived(hasCapability(user, capabilities.rooms.list));
 	const isGuest = $derived(user?.isAnonymous === true);
 	const currentUserName = $derived(
 		user && locallySavedForUserId === user._id
@@ -131,9 +134,9 @@
 	>
 		<div class="flex min-w-0 items-center gap-5">
 			<a
-				href="/app"
+				href={canViewRoomList ? "/app" : "/"}
 				class="flex shrink-0 items-center gap-2 font-medium text-foreground transition-opacity hover:opacity-75"
-				aria-label="Partyroom rooms"
+				aria-label={canViewRoomList ? "Partyroom rooms" : "Partyroom home"}
 			>
 				<div
 					class="bg-primary text-primary-foreground flex size-8 items-center justify-center rounded-xl"
@@ -145,6 +148,7 @@
 				>
 			</a>
 
+			{#if canViewRoomList}
 			<nav
 				class="hidden items-center gap-1 sm:flex"
 				aria-label="App navigation"
@@ -156,6 +160,7 @@
 					Rooms
 				</a>
 			</nav>
+			{/if}
 		</div>
 
 		{#if user}

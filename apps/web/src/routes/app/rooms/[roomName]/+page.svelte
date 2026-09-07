@@ -8,6 +8,7 @@
 		RoomLyrics,
 		RoomPermissions,
 		type ChatMessage,
+		type RoomMemberPermission,
 	} from "$lib/components/room";
 	import RoomMembersPopover from "$lib/components/room/chat/room-members-popover.svelte";
 	import * as Playback from "$lib/components/room/playback";
@@ -15,6 +16,7 @@
 	import { Button, buttonVariants } from "$lib/components/ui/button";
 	import { createUuidInAnyContext } from "$lib/context-uuid";
 	import { Presence } from "$lib/presence.svelte";
+	import { capabilities, hasCapability } from "$lib/capabilities";
 	import { api } from "@partyroom/backend/convex/_generated/api";
 	import type { Id } from "@partyroom/backend/convex/_generated/dataModel";
 	import { useAuth } from "@mmailaender/convex-better-auth-svelte/svelte";
@@ -61,11 +63,8 @@
 		(presence.current ?? []).filter(({ online }) => online),
 	);
 	const overlayMessages = $derived(toChatOverlayMessages(messages.data));
-	const isGuest = $derived(
-		data.user != null &&
-		"isAnonymous" in data.user &&
-		data.user.isAnonymous === true,
-	);
+	const canViewRoomList = $derived(hasCapability(data.user, capabilities.rooms.list));
+	const isGuest = $derived(data.user?.isAnonymous === true);
 	const roomError = $derived.by(() => {
 		if (!room.error) return null;
 		return room.error.message.toLowerCase().includes("room not found")
@@ -160,7 +159,7 @@
 	}
 
 	async function setMemberPermission(
-		permission: keyof NonNullable<typeof roomData>["memberPermissions"],
+		permission: RoomMemberPermission,
 		enabled: boolean,
 	) {
 		const current = roomData?.memberPermissions;
@@ -183,12 +182,14 @@
 		message={joinError}
 		onRetry={retryGuestSignIn}
 		backLabel="All rooms"
+		backHref={canViewRoomList ? "/app" : null}
 	/>
 {:else if roomError}
 	<ErrorState
 		title="Unable to load room"
 		description={roomError}
 		backLabel="All rooms"
+		backHref={canViewRoomList ? "/app" : null}
 	/>
 {:else if !auth.isAuthenticated || !data.user || !roomId}
 	<div class="mx-auto flex min-h-[50dvh] w-full max-w-md flex-col items-center justify-center gap-2 p-6 text-center">
@@ -201,9 +202,11 @@
 		<Playback.Root roomId={activeRoomId} {overlayMessages}>
 			<header class="room-heading">
 				<div class="room-identity">
-					<Button href="/app" variant="ghost" size="icon" aria-label="Back to rooms" class="shrink-0">
-						<ArrowLeftIcon />
-					</Button>
+					{#if canViewRoomList}
+						<Button href="/app" variant="ghost" size="icon" aria-label="Back to rooms" class="shrink-0">
+							<ArrowLeftIcon />
+						</Button>
+					{/if}
 					<div class="min-w-0">
 						<p class="eyebrow">Listening room <span class="inline font-normal tracking-normal normal-case min-[800px]:hidden">· {onlineUsers.length} here</span></p>
 						<h1 class="font-heading" title={roomData?.name}>{roomData?.name.replaceAll("-", " ")}</h1>

@@ -1,25 +1,18 @@
 <script lang="ts">
-
-	type MemberPermissions = {
-		controlPlayback: boolean;
-		addToQueue: boolean;
-		reorderQueue: boolean;
-		removeFromQueue: boolean;
-		sendChat: boolean;
-	};
+	import type { RoomMemberPermission, RoomMemberPermissions } from "../types";
 
 	let {
 		permissions,
 		onChange,
 	}: {
-		permissions: MemberPermissions;
-		onChange: (permission: keyof MemberPermissions, enabled: boolean) => void | Promise<void>;
+		permissions: RoomMemberPermissions;
+		onChange: (permission: RoomMemberPermission, enabled: boolean) => void | Promise<void>;
 	} = $props();
 
 	let saving = $state(false);
 	let error = $state<string | null>(null);
 
-	async function toggle(permission: keyof MemberPermissions) {
+	async function toggle(permission: RoomMemberPermission) {
 		if (saving) return;
 		saving = true;
 		error = null;
@@ -32,17 +25,37 @@
 		}
 	}
 
-	const permissionOptions: Array<{
-		key: keyof MemberPermissions;
+	const permissionOptions = [
+		{
+			key: "controlPlayback",
+			label: "Control playback",
+			description: "Play, pause, seek, skip songs, and change lyrics source and timing.",
+		},
+		{
+			key: "addToQueue",
+			label: "Add songs",
+			description: "Let everyone contribute to the queue.",
+		},
+		{
+			key: "reorderQueue",
+			label: "Reorder queue",
+			description: "Move songs up or down the list.",
+		},
+		{
+			key: "removeFromQueue",
+			label: "Remove songs",
+			description: "Take a song out of the queue.",
+		},
+		{
+			key: "sendChat",
+			label: "Chat",
+			description: "Share messages with the room.",
+		},
+	] satisfies Array<{
+		key: RoomMemberPermission;
 		label: string;
 		description: string;
-	}> = [
-		{ key: "controlPlayback", label: "Control playback", description: "Play, pause, seek, skip songs, and change lyrics source and timing." },
-		{ key: "addToQueue", label: "Add songs", description: "Let everyone contribute to the queue." },
-		{ key: "reorderQueue", label: "Reorder queue", description: "Move songs up or down the list." },
-		{ key: "removeFromQueue", label: "Remove songs", description: "Take a song out of the queue." },
-		{ key: "sendChat", label: "Chat", description: "Share messages with the room." },
-	];
+	}>;
 </script>
 
 <section aria-label="Visitor permissions" aria-busy={saving}>

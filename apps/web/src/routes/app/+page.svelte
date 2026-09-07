@@ -5,14 +5,6 @@
 	import * as Item from "$lib/components/ui/item";
 	import { api } from "@partyroom/backend/convex/_generated/api";
 	import { useMutation, useQuery } from "convex-svelte";
-	import type { PageProps } from "./$types";
-
-	const { data }: PageProps = $props();
-	const isGuest = $derived(
-		data.user != null &&
-		"isAnonymous" in data.user &&
-		data.user.isAnonymous === true,
-	);
 
 	const rooms = useQuery(api.rooms.getRooms);
 	const recentRooms = useQuery(api.rooms.getRecentRooms);
@@ -24,22 +16,16 @@
 	<header class="flex items-center justify-between gap-4">
 		<div>
 			<h1 class="font-heading text-2xl font-semibold">Rooms</h1>
-			<p class="text-sm text-muted-foreground">
-				{isGuest
-					? "You're visiting as a guest."
-					: "Pick up where you left off or start a room."}
-			</p>
+			<p class="text-sm text-muted-foreground">Pick up where you left off or start a room.</p>
 		</div>
-		{#if !isGuest}
-			<Button
-				onclick={async () => {
-					const room = await createRoom({});
-					await goto(`/app/rooms/${room.name}`);
-				}}
-			>
-				Create room
-			</Button>
-		{/if}
+		<Button
+			onclick={async () => {
+				const room = await createRoom({});
+				await goto(`/app/rooms/${room.name}`);
+			}}
+		>
+			Create room
+		</Button>
 	</header>
 
 	<section class="space-y-3">
@@ -48,11 +34,7 @@
 			<Empty.Root class="border p-6">
 				<Empty.Header>
 					<Empty.Title class="text-base">No rooms yet</Empty.Title>
-					<Empty.Description>
-						{isGuest
-							? "Create an account to start your own room."
-							: "You haven't created a room yet."}
-					</Empty.Description>
+					<Empty.Description>You haven't created a room yet.</Empty.Description>
 				</Empty.Header>
 			</Empty.Root>
 		{:else}
@@ -74,15 +56,11 @@
 	</section>
 
 	<section class="space-y-3">
-		<h2 class="font-heading text-lg font-semibold">
-			{isGuest ? "Joined rooms" : "Recent rooms"}
-		</h2>
+		<h2 class="font-heading text-lg font-semibold">Recent rooms</h2>
 		{#if (recentRooms.data?.length ?? 0) === 0}
 			<Empty.Root class="border p-6">
 				<Empty.Header>
-					<Empty.Title class="text-base">
-						{isGuest ? "No joined rooms" : "No recent rooms"}
-					</Empty.Title>
+					<Empty.Title class="text-base">No recent rooms</Empty.Title>
 					<Empty.Description>
 						Rooms you visit from a shared link will appear here.
 					</Empty.Description>
