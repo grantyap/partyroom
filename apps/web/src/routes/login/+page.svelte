@@ -2,9 +2,9 @@
 	import { goto } from "$app/navigation";
 	import { page } from "$app/state";
 	import { authClient } from "$lib/auth-client";
+	import partyroomLogo from "$lib/assets/icons/Partyroom logo.svg";
 	import { loginSchema } from "$lib/components/auth/form-schema";
 	import LoginForm from "$lib/components/auth/login-form.svelte";
-	import GalleryVerticalEndIcon from "@lucide/svelte/icons/gallery-vertical-end";
 	import { setMessage, superForm } from "sveltekit-superforms";
 	import { zod4 } from "sveltekit-superforms/adapters";
 	import type { PageProps } from "./$types";
@@ -50,11 +50,7 @@
 			href="##"
 			class="flex items-center gap-2 self-center font-medium text-foreground"
 		>
-			<div
-				class="bg-primary text-primary-foreground flex size-6 items-center justify-center rounded-md"
-			>
-				<GalleryVerticalEndIcon class="size-4" />
-			</div>
+			<img class="size-6 rounded-md" src={partyroomLogo} alt="" />
 			Partyroom
 		</a>
 		<LoginForm {form} />

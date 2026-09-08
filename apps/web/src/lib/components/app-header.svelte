@@ -2,6 +2,7 @@
 	import { goto, refreshAll } from "$app/navigation";
 	import { page } from "$app/state";
 	import { authClient } from "$lib/auth-client";
+	import partyroomLogo from "$lib/assets/icons/Partyroom logo.svg";
 	import * as Avatar from "$lib/components/ui/avatar";
 	import { Button } from "$lib/components/ui/button";
 	import * as DropdownMenu from "$lib/components/ui/dropdown-menu";
@@ -15,7 +16,6 @@
 	} from "$lib/user-name";
 	import ChevronDownIcon from "@lucide/svelte/icons/chevron-down";
 	import CircleAlertIcon from "@lucide/svelte/icons/circle-alert";
-	import GalleryVerticalEndIcon from "@lucide/svelte/icons/gallery-vertical-end";
 	import LogInIcon from "@lucide/svelte/icons/log-in";
 	import LogOutIcon from "@lucide/svelte/icons/log-out";
 	import PencilIcon from "@lucide/svelte/icons/pencil";
@@ -138,11 +138,7 @@
 				class="flex shrink-0 items-center gap-2 font-medium text-foreground transition-opacity hover:opacity-75"
 				aria-label={canViewRoomList ? "Partyroom rooms" : "Partyroom home"}
 			>
-				<div
-					class="bg-primary text-primary-foreground flex size-8 items-center justify-center rounded-xl"
-				>
-					<GalleryVerticalEndIcon class="size-4" />
-				</div>
+				<img class="size-8 rounded-xl" src={partyroomLogo} alt="" />
 				<span class="font-heading text-lg font-semibold tracking-tight"
 					>Partyroom</span
 				>
