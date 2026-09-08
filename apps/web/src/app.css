@@ -2,7 +2,7 @@
 @import "tw-animate-css";
 @import "shadcn-svelte/tailwind.css";
 @import "@fontsource-variable/inter";
-@import "@fontsource-variable/noto-serif";
+@import "@fontsource-variable/playfair-display";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -218,7 +218,7 @@
 @theme inline {
   --font-sans: "Inter Variable", sans-serif;
 
-  --font-heading: "Noto Serif Variable", serif;
+  --font-heading: "Playfair Display", serif;
 
   --color-sidebar-ring: var(--sidebar-ring);
 
