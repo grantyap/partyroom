@@ -36,18 +36,17 @@ FROM oven/bun:1.4.2-debian AS application
 
 WORKDIR /workspace
 COPY package.json bun.lock ./
-COPY apps/annotations-worker/package.json ./apps/annotations-worker/package.json
-COPY apps/lyrics-worker/package.json ./apps/lyrics-worker/package.json
-COPY apps/stem-worker/package.json ./apps/stem-worker/package.json
-COPY apps/web/package.json ./apps/web/package.json
-COPY packages/activities ./packages/activities
-COPY packages/activity-worker ./packages/activity-worker
-COPY packages/backend/package.json ./packages/backend/package.json
-COPY packages/capabilities ./packages/capabilities
-COPY packages/config ./packages/config
-COPY packages/env ./packages/env
-COPY packages/media-activities ./packages/media-activities
-COPY apps/media-worker ./apps/media-worker
+COPY apps/media-worker/package.json ./apps/media-worker/
+COPY packages/activity-worker/package.json ./packages/activity-worker/
+COPY packages/activities/package.json ./packages/activities/
+COPY packages/media-activities/package.json ./packages/media-activities/
+COPY packages/config/package.json ./packages/config/
+COPY packages/env/package.json ./packages/env/
+COPY apps/media-worker/src/network.ts apps/media-worker/src/process.ts apps/media-worker/src/server.ts ./apps/media-worker/src/
+COPY packages/activity-worker/src/index.ts packages/activity-worker/src/protocol.ts packages/activity-worker/src/runtime.ts ./packages/activity-worker/src/
+COPY packages/activities/protocol.ts ./packages/activities/
+COPY packages/activities/src/artifactLifecycle.ts packages/activities/src/client.ts packages/activities/src/managedWorkflow.ts packages/activities/src/wire.ts ./packages/activities/src/
+COPY packages/media-activities/src/registry.ts ./packages/media-activities/src/
 RUN bun install --frozen-lockfile --production --filter @partyroom/media-worker \
     && bun build apps/media-worker/src/server.ts \
       --target=bun \

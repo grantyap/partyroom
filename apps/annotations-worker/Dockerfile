@@ -1,10 +1,10 @@
 FROM python:3.12-slim-trixie AS dependencies
 COPY --from=ghcr.io/astral-sh/uv:0.11.28 /uv /uvx /bin/
+ENV UV_LINK_MODE=copy
 
 WORKDIR /workspace/apps/annotations-worker
 COPY packages/activity-worker-python /workspace/packages/activity-worker-python
 COPY apps/annotations-worker/pyproject.toml apps/annotations-worker/uv.lock ./
-ENV UV_LINK_MODE=copy
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-editable --no-install-project
 
