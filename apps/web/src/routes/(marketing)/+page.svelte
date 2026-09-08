@@ -1,7 +1,8 @@
 <script lang="ts">
+	import { enhance } from "$app/forms";
 	import { page } from "$app/state";
-	import ArrowUpRightIcon from "@lucide/svelte/icons/arrow-up-right";
 	import partyroomLogo from "$lib/assets/icons/Partyroom logo.svg";
+	import ArrowUpRightIcon from "@lucide/svelte/icons/arrow-up-right";
 	import type { PageProps } from "./$types";
 
 	const { form }: PageProps = $props();
@@ -79,7 +80,10 @@
 		<a
 			href="#invite"
 			class="text-sm text-(--marketing-copy) underline decoration-(--marketing-link-rule) underline-offset-4 hover:text-(--marketing-foreground)"
-			>Get early access <ArrowUpRightIcon class="inline-block size-4 shrink-0 align-text-bottom" aria-hidden="true" /></a
+			>Get early access <ArrowUpRightIcon
+				class="inline-block size-4 shrink-0 align-text-bottom"
+				aria-hidden="true"
+			/></a
 		>
 	</header>
 
@@ -112,7 +116,10 @@
 				<a
 					href="#invite"
 					class="mt-9 inline-flex min-h-12 items-center gap-8 rounded-lg bg-(--marketing-accent) px-6 py-3 text-sm font-semibold text-(--marketing-accent-ink) transition-colors hover:bg-(--marketing-accent-hover)"
-					>Join the early access list <ArrowUpRightIcon class="inline-block size-4 shrink-0 align-text-bottom" aria-hidden="true" /></a
+					>Join the early access list <ArrowUpRightIcon
+						class="inline-block size-4 shrink-0 align-text-bottom"
+						aria-hidden="true"
+					/></a
 				>
 				<p class="mt-4 text-xs text-(--marketing-muted)">
 					We’re inviting our first singers.
@@ -233,7 +240,13 @@
 							</p>
 						</div>
 					{:else}
-						<form method="POST" action="?/join" class="space-y-4">
+						<form
+							method="POST"
+							action="?/join"
+							class="space-y-4"
+							use:enhance
+							data-sveltekit-noscroll
+						>
 							<label class="block">
 								<span
 									class="mb-2 block text-sm font-medium text-(--marketing-label)"
