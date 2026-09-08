@@ -7,6 +7,7 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
+  --marketing-background: color-mix(in oklch, var(--primary) 12%, oklch(0.2 0.015 310));
   --background: oklch(1 0 0);
 
   --foreground: oklch(0.145 0.008 326);

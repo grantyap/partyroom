@@ -138,8 +138,8 @@
 				class="flex shrink-0 items-center gap-2 font-medium text-foreground transition-opacity hover:opacity-75"
 				aria-label={canViewRoomList ? "Partyroom rooms" : "Partyroom home"}
 			>
-				<img class="size-8 rounded-xl" src={partyroomLogo} alt="" />
-				<span class="font-heading text-lg font-semibold tracking-tight"
+				<img class="size-8 rounded-lg" src={partyroomLogo} alt="" />
+				<span class="text-xl font-semibold tracking-tight"
 					>Partyroom</span
 				>
 			</a>
