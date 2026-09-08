@@ -156,6 +156,15 @@ restored after their stored copies were erased.
 Open [http://localhost:5173](http://localhost:5173) in your browser to see the web application.
 Your app will connect to the local self-hosted Convex backend automatically.
 
+## Coolify
+
+Deploy `docker-compose.yaml` as the production stack and route the `web` service to port `3000`.
+Set the web, Convex, Google Form, and Google Sheets values listed in `.env.example` in Coolify before
+building; the two `PUBLIC_CONVEX_*` values are build arguments and require a rebuild when changed.
+
+Development commands also merge `docker-compose.dev.yaml`, which disables the containerized `web`
+service so Vite continues to run on the host with HMR.
+
 ## Project Structure
 
 ```

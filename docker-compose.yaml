@@ -1,6 +1,37 @@
 name: partyroom
 
 services:
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        PUBLIC_CONVEX_URL: ${PUBLIC_CONVEX_URL:-}
+        PUBLIC_CONVEX_SITE_URL: ${PUBLIC_CONVEX_SITE_URL:-}
+    restart: unless-stopped
+    expose:
+      - "3000"
+    environment:
+      - ORIGIN=${ORIGIN:-http://localhost:3000}
+      - GOOGLE_FORM_ACTION_URL
+      - GOOGLE_FORM_NAME_FIELD
+      - GOOGLE_FORM_EMAIL_FIELD
+      - GOOGLE_SHEETS_ACCESS_URL
+      - GOOGLE_SHEETS_ACCESS_SECRET
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - bun
+        - -e
+        - fetch('http://localhost:3000/').then((response) => { if (!response.ok) process.exit(1); }).catch(() => process.exit(1));
+      interval: 5s
+      timeout: 3s
+      start_period: 10s
+      retries: 10
+
   backend:
     image: ghcr.io/get-convex/convex-backend:latest
     stop_grace_period: 10s

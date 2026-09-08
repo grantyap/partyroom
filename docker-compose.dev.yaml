@@ -1,4 +1,9 @@
 services:
+  # Keep Vite on the host for HMR; the production web image is built by the base stack only.
+  web:
+    profiles:
+      - production
+
   backend:
     labels:
       partyroom.dev.mode: docker
