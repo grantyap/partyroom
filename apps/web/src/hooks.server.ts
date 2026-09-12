@@ -27,7 +27,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 };
 
 function isEarlyAccessRoute(pathname: string) {
-  return pathname === "/sign-up" || isAuthenticatedRoute(pathname);
+  return pathname === "/sign-up" || (isAuthenticatedRoute(pathname) && !isRoomRoute(pathname));
 }
 
 function isAuthenticatedRoute(pathname: string) {
