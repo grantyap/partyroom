@@ -20,8 +20,8 @@ services:
       GOOGLE_SHEETS_ACCESS_URL: ${GOOGLE_SHEETS_ACCESS_URL:?}
       GOOGLE_SHEETS_ACCESS_SECRET: ${GOOGLE_SHEETS_ACCESS_SECRET:?}
     depends_on:
-      backend:
-        condition: service_healthy
+      backend-deploy:
+        condition: service_completed_successfully
     healthcheck:
       test:
         - CMD
@@ -88,6 +88,22 @@ services:
       interval: 5s
       start_period: 10s
 
+  backend-deploy:
+    build:
+      context: .
+      dockerfile: packages/backend/Dockerfile
+    restart: "no"
+    environment:
+      SITE_URL: ${ORIGIN:?}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?}
+      ACTIVITY_WORKER_TOKEN: ${ACTIVITY_WORKER_TOKEN:?}
+      WORKER_SIGNING_SECRET: ${WORKER_SIGNING_SECRET:?}
+    volumes:
+      - data:/convex/data:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+
   dashboard:
     image: ghcr.io/get-convex/convex-dashboard:latest
     stop_grace_period: 10s
@@ -99,8 +115,8 @@ services:
       NEXT_PUBLIC_DEPLOYMENT_URL: ${NEXT_PUBLIC_DEPLOYMENT_URL:?}
       NEXT_PUBLIC_LOAD_MONACO_INTERNALLY:
     depends_on:
-      backend:
-        condition: service_healthy
+      backend-deploy:
+        condition: service_completed_successfully
 
   media-worker:
     build:
@@ -121,8 +137,8 @@ services:
       MAX_MEDIA_DURATION_SECONDS: ${MAX_MEDIA_DURATION_SECONDS:-1200}
       MEDIA_WORKER_CONCURRENCY: ${MEDIA_WORKER_CONCURRENCY:-1}
     depends_on:
-      backend:
-        condition: service_healthy
+      backend-deploy:
+        condition: service_completed_successfully
     healthcheck:
       test:
         - CMD
@@ -159,8 +175,8 @@ services:
     volumes:
       - stem_models:/models
     depends_on:
-      backend:
-        condition: service_healthy
+      backend-deploy:
+        condition: service_completed_successfully
     healthcheck:
       test:
         - CMD
@@ -196,8 +212,8 @@ services:
     volumes:
       - lyrics_models:/models
     depends_on:
-      backend:
-        condition: service_healthy
+      backend-deploy:
+        condition: service_completed_successfully
     healthcheck:
       test:
         - CMD
@@ -227,8 +243,8 @@ services:
       ACTIVITY_WORKER_TOKEN: ${ACTIVITY_WORKER_TOKEN:?}
       MAX_MEDIA_BYTES: ${MAX_MEDIA_BYTES:-2147483648}
     depends_on:
-      backend:
-        condition: service_healthy
+      backend-deploy:
+        condition: service_completed_successfully
     healthcheck:
       test:
         - CMD

@@ -161,6 +161,9 @@ Your app will connect to the local self-hosted Convex backend automatically.
 Deploy `docker-compose.yaml` as the production stack and route the `web` service to port `3000`.
 Set the web, Convex, Google Form, and Google Sheets values listed in `.env.example` in Coolify before
 building; the two `PUBLIC_CONVEX_*` values are build arguments and require a rebuild when changed.
+The `backend-deploy` service automatically applies the Convex function environment and deploys the
+functions after the backend is healthy. It reads the generated instance credentials from the
+persistent `data` volume, so no admin key needs to be copied into Coolify.
 
 Development commands also merge `docker-compose.dev.yaml`, which disables the containerized `web`
 service so Vite continues to run on the host with HMR.
