@@ -12,6 +12,7 @@ services:
     expose:
       - "3000"
     environment:
+      PORT: 3000
       ORIGIN: ${ORIGIN:?}
       GOOGLE_FORM_ACTION_URL: ${GOOGLE_FORM_ACTION_URL:?}
       GOOGLE_FORM_NAME_FIELD: ${GOOGLE_FORM_NAME_FIELD:?}
@@ -42,6 +43,7 @@ services:
     volumes:
       - data:/convex/data
     environment:
+      PORT: 3210
       V8_ACTION_USER_TIMEOUT_SECS:
       ACTIVITY_WORKER_TOKEN: ${ACTIVITY_WORKER_TOKEN:?}
       NODE_ACTION_USER_TIMEOUT_SECS:
@@ -93,6 +95,7 @@ services:
     expose:
       - "6791"
     environment:
+      PORT: 6791
       NEXT_PUBLIC_DEPLOYMENT_URL: ${NEXT_PUBLIC_DEPLOYMENT_URL:?}
       NEXT_PUBLIC_LOAD_MONACO_INTERNALLY:
     depends_on:
@@ -111,6 +114,7 @@ services:
     expose:
       - "4100"
     environment:
+      PORT: 4100
       MAX_MEDIA_BYTES: ${MAX_MEDIA_BYTES:-2147483648}
       ACTIVITY_WORKER_API_URL: ${ACTIVITY_WORKER_API_URL:-http://backend:3211/activities/workers/}
       ACTIVITY_WORKER_TOKEN: ${ACTIVITY_WORKER_TOKEN:?}
@@ -142,6 +146,7 @@ services:
     expose:
       - "4200"
     environment:
+      PORT: 4200
       MAX_MEDIA_BYTES: ${MAX_MEDIA_BYTES:-2147483648}
       ACTIVITY_WORKER_API_URL: ${ACTIVITY_WORKER_API_URL:-http://backend:3211/activities/workers/}
       ACTIVITY_WORKER_TOKEN: ${ACTIVITY_WORKER_TOKEN:?}
@@ -179,6 +184,7 @@ services:
     expose:
       - "4300"
     environment:
+      PORT: 4300
       LYRICS_ALIGNER_MODEL: ${LYRICS_ALIGNER_MODEL:-Qwen/Qwen3-ForcedAligner-0.6B}
       ACTIVITY_WORKER_API_URL: ${ACTIVITY_WORKER_API_URL:-http://backend:3211/activities/workers/}
       ACTIVITY_WORKER_TOKEN: ${ACTIVITY_WORKER_TOKEN:?}
@@ -215,6 +221,7 @@ services:
     expose:
       - "4400"
     environment:
+      PORT: 4400
       ANNOTATIONS_WORKER_CONCURRENCY: ${ANNOTATIONS_WORKER_CONCURRENCY:-1}
       ACTIVITY_WORKER_API_URL: ${ACTIVITY_WORKER_API_URL:-http://backend:3211/activities/workers/}
       ACTIVITY_WORKER_TOKEN: ${ACTIVITY_WORKER_TOKEN:?}
