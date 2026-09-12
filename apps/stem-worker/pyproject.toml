@@ -12,6 +12,7 @@ dependencies = [
 [project.optional-dependencies]
 nvidia = [
   "audio-separator[gpu]==0.44.5; sys_platform == 'linux' and platform_machine == 'x86_64'",
+  "onnxruntime-gpu>=1.21,<1.27; sys_platform == 'linux' and platform_machine == 'x86_64'",
   "torch==2.9.1; sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
 
