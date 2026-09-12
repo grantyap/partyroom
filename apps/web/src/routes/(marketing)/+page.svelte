@@ -321,7 +321,7 @@
 								required
 								maxlength="100"
 								value={code}
-								class="h-11 min-w-0 flex-1 rounded-lg border border-(--marketing-border) bg-(--brand-input-background) px-4 font-mono text-sm tracking-wider text-(--marketing-ink) uppercase placeholder:font-sans placeholder:tracking-normal placeholder:text-(--brand-placeholder) placeholder:normal-case focus:border-(--marketing-highlight) focus:ring-2 focus:ring-(--brand-ring) focus:outline-none"
+								class="h-11 min-w-0 flex-1 rounded-lg border border-(--marketing-border) bg-(--brand-input-background) px-4 font-mono text-sm tracking-wider text-(--marketing-ink) placeholder:font-sans placeholder:tracking-normal placeholder:text-(--brand-placeholder) focus:border-(--marketing-highlight) focus:ring-2 focus:ring-(--brand-ring) focus:outline-none"
 								placeholder="Enter your code"
 							/>
 							<button
