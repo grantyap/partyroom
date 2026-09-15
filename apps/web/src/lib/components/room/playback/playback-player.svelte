@@ -66,7 +66,7 @@ layout. It handles playback, the empty state, skipping, and TV mode. Add an
 	class={cn(
 		"overflow-hidden rounded-xl border bg-black shadow-sm",
 		playbackContext.tvMode &&
-			"fixed inset-0 z-50 flex items-center bg-black",
+			"fixed inset-0 z-50 flex items-center justify-center bg-black",
 		className,
 	)}
 	{...restProps}
