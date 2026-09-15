@@ -22,6 +22,38 @@
 	/>
 </svelte:head>
 
+{#snippet accessCodeForm(id: string)}
+	<form method="POST" action="?/access" class="flex gap-2">
+		<label class="sr-only" for={id}>Access code</label>
+		<input
+			{id}
+			name="code"
+			type="text"
+			autocomplete="one-time-code"
+			required
+			maxlength="100"
+			value={code}
+			class="h-11 min-w-0 flex-1 rounded-lg border border-(--marketing-border) bg-(--brand-input-background) px-4 font-mono text-sm tracking-wider text-(--marketing-ink) placeholder:font-sans placeholder:tracking-normal placeholder:text-(--brand-placeholder) focus:border-(--marketing-highlight) focus:ring-2 focus:ring-(--brand-ring) focus:outline-none"
+			placeholder="Enter your code"
+		/>
+		<button
+			type="submit"
+			class="h-11 rounded-lg border border-(--marketing-secondary-border) px-4 text-sm font-semibold transition hover:border-(--marketing-secondary-hover-border) hover:bg-(--marketing-secondary-hover) focus:ring-2 focus:ring-(--marketing-secondary-ring) focus:outline-none"
+		>
+			Enter
+		</button>
+	</form>
+	{#if form?.accessError}
+		<p class="mt-3 text-sm text-(--marketing-error)" role="alert">
+			{form.accessError}
+		</p>
+	{:else if accessRequired}
+		<p class="mt-3 text-sm text-(--marketing-copy-subtle)" role="status">
+			Enter your access code to continue.
+		</p>
+	{/if}
+{/snippet}
+
 <div
 	data-marketing-page
 	class="min-h-svh bg-(--marketing-background) text-(--marketing-foreground) [&_a:focus-visible]:outline-2 [&_a:focus-visible]:outline-offset-6 [&_a:focus-visible]:outline-current [&_summary:focus-visible]:outline-2 [&_summary:focus-visible]:outline-offset-6 [&_summary:focus-visible]:outline-current"
@@ -121,6 +153,11 @@
 						aria-hidden="true"
 					/></a
 				>
+				{#if !data.hasEarlyAccess}
+					<div class="mt-4 max-w-md">
+						{@render accessCodeForm("hero-access-code")}
+					</div>
+				{/if}
 				<p class="mt-4 text-xs text-(--marketing-muted)">
 					We’re inviting our first singers.
 				</p>
@@ -311,38 +348,9 @@
 								>Have an access code?</span
 							>
 						</summary>
-						<form method="POST" action="?/access" class="mt-5 flex gap-2">
-							<label class="sr-only" for="access-code">Access code</label>
-							<input
-								id="access-code"
-								name="code"
-								type="text"
-								autocomplete="one-time-code"
-								required
-								maxlength="100"
-								value={code}
-								class="h-11 min-w-0 flex-1 rounded-lg border border-(--marketing-border) bg-(--brand-input-background) px-4 font-mono text-sm tracking-wider text-(--marketing-ink) placeholder:font-sans placeholder:tracking-normal placeholder:text-(--brand-placeholder) focus:border-(--marketing-highlight) focus:ring-2 focus:ring-(--brand-ring) focus:outline-none"
-								placeholder="Enter your code"
-							/>
-							<button
-								type="submit"
-								class="h-11 rounded-lg border border-(--marketing-secondary-border) px-4 text-sm font-semibold transition hover:border-(--marketing-secondary-hover-border) hover:bg-(--marketing-secondary-hover) focus:ring-2 focus:ring-(--marketing-secondary-ring) focus:outline-none"
-							>
-								Enter
-							</button>
-						</form>
-						{#if form?.accessError}
-							<p class="mt-3 text-sm text-(--marketing-error)" role="alert">
-								{form.accessError}
-							</p>
-						{:else if accessRequired}
-							<p
-								class="mt-3 text-sm text-(--marketing-copy-subtle)"
-								role="status"
-							>
-								Enter your access code to continue.
-							</p>
-						{/if}
+						<div class="mt-5">
+							{@render accessCodeForm("access-code")}
+						</div>
 					</details>
 				</div>
 			</div>
