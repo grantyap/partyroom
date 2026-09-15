@@ -5,10 +5,18 @@ import {
   createEarlyAccessToken,
   EARLY_ACCESS_COOKIE,
   EARLY_ACCESS_MAX_AGE,
+  hasEarlyAccess,
 } from "$lib/server/early-access";
 import { fail, redirect } from "@sveltejs/kit";
 import { z } from "zod";
-import type { Actions } from "./$types";
+import type { Actions, PageServerLoad } from "./$types";
+
+export const load: PageServerLoad = ({ cookies }) => ({
+  hasEarlyAccess: hasEarlyAccess(
+    cookies.get(EARLY_ACCESS_COOKIE),
+    env.GOOGLE_SHEETS_ACCESS_SECRET,
+  ),
+});
 
 const inviteSchema = z.object({
   name: z.string().trim().min(1).max(100),

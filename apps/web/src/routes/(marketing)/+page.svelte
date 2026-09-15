@@ -5,7 +5,7 @@
 	import ArrowUpRightIcon from "@lucide/svelte/icons/arrow-up-right";
 	import type { PageProps } from "./$types";
 
-	const { form }: PageProps = $props();
+	const { data, form }: PageProps = $props();
 	const name = $derived(form && "name" in form ? form.name : "");
 	const email = $derived(form && "email" in form ? form.email : "");
 	const code = $derived(form && "code" in form ? form.code : "");
@@ -114,9 +114,9 @@
 					Party started.
 				</p>
 				<a
-					href="#invite"
+					href={data.hasEarlyAccess ? "/app" : "#invite"}
 					class="mt-9 inline-flex min-h-12 items-center gap-8 rounded-lg bg-(--marketing-accent) px-6 py-3 text-sm font-semibold text-(--marketing-accent-ink) transition-colors hover:bg-(--marketing-accent-hover)"
-					>Join the early access list <ArrowUpRightIcon
+					>{data.hasEarlyAccess ? "Go to app" : "Join the early access list"} <ArrowUpRightIcon
 						class="inline-block size-4 shrink-0 align-text-bottom"
 						aria-hidden="true"
 					/></a
