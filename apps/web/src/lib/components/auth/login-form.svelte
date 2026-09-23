@@ -41,14 +41,16 @@
 	<Card.Root>
 		<Card.Header class="text-center">
 			<Card.Title class="text-xl">Welcome back</Card.Title>
-			<Card.Description
+			<!-- TODO: Uncomment when SSO is supported. -->
+			<!-- <Card.Description
 				>Login with your Apple or Google account</Card.Description
-			>
+			> -->
 		</Card.Header>
 		<Card.Content>
 			<form method="POST" use:enhance>
 				<FieldGroup>
-					<Field>
+					<!-- TODO: Uncomment when SSO is supported. -->
+					<!-- <Field>
 						<Button variant="outline" type="button">
 							<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
 								<path
@@ -70,7 +72,7 @@
 					</Field>
 					<FieldSeparator class="*:data-[slot=field-separator-content]:bg-card">
 						Or continue with
-					</FieldSeparator>
+					</FieldSeparator> -->
 					<Form.Field {form} name="email">
 						<Form.Control>
 							{#snippet children({ props })}
