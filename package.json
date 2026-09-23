@@ -48,7 +48,7 @@
     "check-types": "turbo check-types",
     "dev:web": "turbo -F web dev",
     "dev:server": "turbo -F @partyroom/backend dev",
-    "dev:setup": "turbo -F @partyroom/backend dev:setup",
+    "dev:setup": "bun scripts/dev-setup.ts",
     "format": "turbo -F web format && turbo -F @partyroom/backend format"
   },
   "dependencies": {
