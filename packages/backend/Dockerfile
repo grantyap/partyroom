@@ -1,4 +1,4 @@
-FROM ghcr.io/get-convex/convex-backend:latest AS convex
+FROM ghcr.io/get-convex/convex-backend:2cbcf8179207eb4521360e6d81ebee5e7abbfa07 AS convex
 
 FROM oven/bun:1.4.2-debian
 

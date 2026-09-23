@@ -106,7 +106,7 @@ services:
         condition: service_healthy
 
   dashboard:
-    image: ghcr.io/get-convex/convex-dashboard:2cbcf8179207eb4521360e6d81ebee5e7abbfa07
+    image: ghcr.io/get-convex/convex-dashboard:latest
     stop_grace_period: 10s
     stop_signal: SIGINT
     expose:
