@@ -1,14 +1,19 @@
 <script lang="ts">
 	import { goto, refreshAll } from "$app/navigation";
 	import { page } from "$app/state";
-	import { authClient } from "$lib/auth-client";
+	import { PUBLIC_FEEDBACK_FORM_URL } from "$env/static/public";
 	import partyroomLogo from "$lib/assets/icons/Partyroom logo.svg";
+	import { authClient } from "$lib/auth-client";
+	import {
+		capabilities,
+		hasCapability,
+		type Capability,
+	} from "$lib/capabilities";
 	import * as Avatar from "$lib/components/ui/avatar";
 	import { Button } from "$lib/components/ui/button";
-	import * as DropdownMenu from "$lib/components/ui/dropdown-menu";
 	import * as Drawer from "$lib/components/ui/drawer";
+	import * as DropdownMenu from "$lib/components/ui/dropdown-menu";
 	import { Input } from "$lib/components/ui/input";
-	import { capabilities, hasCapability, type Capability } from "$lib/capabilities";
 	import {
 		hasStoredUserName,
 		setUserName,
@@ -16,6 +21,7 @@
 	} from "$lib/user-name";
 	import ChevronDownIcon from "@lucide/svelte/icons/chevron-down";
 	import CircleAlertIcon from "@lucide/svelte/icons/circle-alert";
+	import LifeBuoyIcon from "@lucide/svelte/icons/life-buoy";
 	import LogInIcon from "@lucide/svelte/icons/log-in";
 	import LogOutIcon from "@lucide/svelte/icons/log-out";
 	import PencilIcon from "@lucide/svelte/icons/pencil";
@@ -41,7 +47,9 @@
 	let hasSetUserName = $state(false);
 	let nameDialogOpen = $state(false);
 
-	const canViewRoomList = $derived(hasCapability(user, capabilities.rooms.list));
+	const canViewRoomList = $derived(
+		hasCapability(user, capabilities.rooms.list),
+	);
 	const isGuest = $derived(user?.isAnonymous === true);
 	const currentUserName = $derived(
 		user && locallySavedForUserId === user._id
@@ -67,9 +75,7 @@
 	$effect(() => {
 		const userId = user?._id;
 		void currentUserName;
-		hasSetUserName = Boolean(
-			isGuest && userId && hasStoredUserName(userId),
-		);
+		hasSetUserName = Boolean(isGuest && userId && hasStoredUserName(userId));
 	});
 
 	$effect(() => {
@@ -139,23 +145,21 @@
 				aria-label={canViewRoomList ? "Partyroom rooms" : "Partyroom home"}
 			>
 				<img class="size-8 rounded-lg" src={partyroomLogo} alt="" />
-				<span class="text-xl font-semibold tracking-tight"
-					>Partyroom</span
-				>
+				<span class="text-xl font-semibold tracking-tight">Partyroom</span>
 			</a>
 
 			{#if canViewRoomList}
-			<nav
-				class="hidden items-center gap-1 sm:flex"
-				aria-label="App navigation"
-			>
-				<a
-					href="/app"
-					class="text-muted-foreground hover:bg-muted hover:text-foreground rounded-3xl px-3 py-2 text-sm font-medium transition-colors"
+				<nav
+					class="hidden items-center gap-1 sm:flex"
+					aria-label="App navigation"
 				>
-					Rooms
-				</a>
-			</nav>
+					<a
+						href="/app"
+						class="text-muted-foreground hover:bg-muted hover:text-foreground rounded-3xl px-3 py-2 text-sm font-medium transition-colors"
+					>
+						Rooms
+					</a>
+				</nav>
 			{/if}
 		</div>
 
@@ -174,7 +178,9 @@
 								{initial}
 							</Avatar.Fallback>
 						</Avatar.Root>
-						<span class="hidden max-w-40 truncate text-sm font-medium sm:inline">
+						<span
+							class="hidden max-w-40 truncate text-sm font-medium sm:inline"
+						>
 							{displayName}
 						</span>
 						{#if isGuest}
@@ -190,7 +196,8 @@
 							<p class="truncate font-medium text-foreground">{displayName}</p>
 							{#if isGuest}
 								<p class="text-muted-foreground text-pretty text-xs">
-									You're visiting as a guest. Create an account to keep your joined rooms.
+									You're visiting as a guest. Create an account to keep your
+									joined rooms.
 								</p>
 							{:else}
 								<p class="truncate text-xs">{user.email || "Signed in"}</p>
@@ -215,6 +222,15 @@
 							</DropdownMenu.Item>
 						{:else}
 							<DropdownMenu.Separator />
+							<DropdownMenu.Item>
+								{#snippet child({ props })}
+									<a {...props} href={PUBLIC_FEEDBACK_FORM_URL} target="_blank">
+										<LifeBuoyIcon />
+										Give feedback
+									</a>
+								{/snippet}
+							</DropdownMenu.Item>
+							<DropdownMenu.Separator />
 							<DropdownMenu.Item
 								variant="destructive"
 								disabled={signingOut}
@@ -231,13 +247,11 @@
 						<Drawer.Header class="text-start">
 							<Drawer.Title>Set your name</Drawer.Title>
 							<Drawer.Description>
-								Choose the name other people in the room will see. You can only set it once.
+								Choose the name other people in the room will see. You can only
+								set it once.
 							</Drawer.Description>
 						</Drawer.Header>
-						<form
-							class="flex flex-col gap-4 px-4 pb-4"
-							onsubmit={saveUserName}
-						>
+						<form class="flex flex-col gap-4 px-4 pb-4" onsubmit={saveUserName}>
 							<div class="space-y-2">
 								<Input
 									bind:value={userNameInput}
