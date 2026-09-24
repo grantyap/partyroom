@@ -20,3 +20,4 @@ export const managedWorkflow: ManagedWorkflowManager = new ManagedWorkflowManage
 
 export const sendWorkflowEvent = workflow.sendEvent.bind(workflow) as WorkflowManager["sendEvent"];
 export const cancelWorkflow = workflow.cancel.bind(workflow) as WorkflowManager["cancel"];
+export const workflowStatus = workflow.status.bind(workflow) as WorkflowManager["status"];

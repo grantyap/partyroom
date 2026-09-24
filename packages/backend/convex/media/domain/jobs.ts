@@ -258,6 +258,33 @@ export async function requeueRoomMedia(
   return job._id;
 }
 
+export async function queueReprocessDuringDrain(
+  ctx: MutationCtx,
+  { roomId, roomMediaId }: { roomId: Id<"rooms">; roomMediaId: Id<"roomMedia"> },
+) {
+  const association = await ctx.db.get("roomMedia", roomMediaId);
+  if (!association || association.room !== roomId) throw new Error("Room media item not found");
+  const job = await requireJob(ctx, association.job);
+  if (job.state === "queued" || job.state === "processing")
+    throw new Error("Media is already being processed");
+  const now = Date.now();
+  const queued = await ctx.db.insert("mediaJobs", {
+    requestKey: job.requestKey,
+    encryptedSource: job.encryptedSource,
+    sourceIv: job.sourceIv,
+    requestedBy: job.requestedBy,
+    rebuild: true,
+    rebuildOf: job._id,
+    state: "queued",
+    stage: "queued",
+    progress: 0,
+    createdAt: now,
+    updatedAt: now,
+  });
+  await ctx.db.patch("roomMedia", roomMediaId, { job: queued });
+  return queued;
+}
+
 export async function removeRoomMedia(
   ctx: MutationCtx,
   {

@@ -142,8 +142,8 @@ async function readyItemForRoomMedia(
   const roomMedia = await ctx.db.get("roomMedia", roomMediaId);
   if (!roomMedia) return null;
   const job = await ctx.db.get("mediaJobs", roomMedia.job);
-  if (job?.state !== "ready") return null;
-  const assetId = roomMedia.asset ?? job.asset;
+  if (!roomMedia.asset && job?.state !== "ready") return null;
+  const assetId = roomMedia.asset ?? job?.asset;
   const asset = assetId ? await ctx.db.get("mediaAssets", assetId) : null;
   if (!asset || asset.state !== "ready" || !asset.finalArtifactId) return null;
   return {

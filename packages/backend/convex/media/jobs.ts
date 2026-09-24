@@ -8,6 +8,7 @@ import {
   internalQuery,
   mutation,
   query,
+  type MutationCtx,
   type QueryCtx,
 } from "../_generated/server";
 import { activities, managedWorkflow } from "../activities/workflowManager";
@@ -24,10 +25,12 @@ import {
   failMediaJob,
   finalizeAssetForJob,
   recordStageResultForJob,
+  queueReprocessDuringDrain,
   requeueRoomMedia,
   removeRoomMedia,
 } from "./domain/jobs";
 import { getLyricTrack } from "./domain/lyrics";
+import { isDraining } from "../migration/drain";
 import { mediaPipelineStepStatuses, workflowPipelineStepStatuses } from "./progress/model";
 import {
   lyricTrackMetadata,
@@ -126,7 +129,7 @@ export const request = internalMutation({
   }),
   handler: async (ctx, args) => {
     const result = await createOrJoinMedia(ctx, args);
-    if (result.created) {
+    if (result.created && !isDraining()) {
       const workflowId = await managedWorkflow.start(
         ctx,
         internal.media.pipeline.mediaPipeline,
@@ -184,7 +187,11 @@ export const reprocess = mutation({
   returns: v.null(),
   handler: async (ctx, args) => {
     await requireRoomAccess(ctx, args.roomId);
-    const jobId = await requeueRoomMedia(ctx, args);
+    const draining = isDraining();
+    const jobId = draining
+      ? await queueReprocessDuringDrain(ctx, args)
+      : await requeueRoomMedia(ctx, args);
+    if (draining) return null;
     const workflowId = await managedWorkflow.start(
       ctx,
       internal.media.pipeline.mediaPipeline,
@@ -196,6 +203,43 @@ export const reprocess = mutation({
     );
     await attachWorkflowToJob(ctx, jobId, workflowId);
     return null;
+  },
+});
+
+export const resumeQueuedV1 = internalMutation({
+  args: {},
+  returns: v.boolean(),
+  handler: async (ctx: MutationCtx) => {
+    const queued = await ctx.db
+      .query("mediaJobs")
+      .withIndex("by_state", (q) => q.eq("state", "queued"))
+      .first();
+    if (!queued) return false;
+    let jobId = queued._id;
+    if (queued.rebuildOf) {
+      const association = await ctx.db
+        .query("roomMedia")
+        .withIndex("by_job", (q) => q.eq("job", queued._id))
+        .unique();
+      if (!association) throw new Error(`Queued reprocess ${queued._id} has no room association`);
+      await ctx.db.patch(association._id, { job: queued.rebuildOf });
+      await ctx.db.delete(queued._id);
+      jobId = await requeueRoomMedia(ctx, {
+        roomId: association.room,
+        roomMediaId: association._id,
+      });
+    }
+    const workflowId = await managedWorkflow.start(
+      ctx,
+      internal.media.pipeline.mediaPipeline,
+      { jobId },
+      {
+        onComplete: internal.media.pipeline.onPipelineComplete,
+        context: { jobId },
+      },
+    );
+    await attachWorkflowToJob(ctx, jobId, workflowId);
+    return true;
   },
 });
 

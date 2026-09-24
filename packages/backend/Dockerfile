@@ -14,8 +14,10 @@ COPY packages/media-activities/package.json ./packages/media-activities/
 RUN bun install --frozen-lockfile --filter @partyroom/backend
 
 COPY packages ./packages
+COPY scripts/workflow-drain.ts ./scripts/workflow-drain.ts
 RUN bunx tsc --noEmit -p packages/backend/convex/tsconfig.json
 COPY scripts/deploy-convex.sh /usr/local/bin/deploy-convex
+COPY scripts/run-workflow-drain.sh /usr/local/bin/run-workflow-drain
 COPY --from=convex /convex/generate_key /usr/local/bin/generate_key
 
 WORKDIR /workspace/packages/backend

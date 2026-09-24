@@ -56,11 +56,14 @@ export const mediaTables = {
     .index("by_asset_and_source", ["asset", "source"]),
 
   mediaJobs: defineTable({
+    workflowVersion: v.optional(v.union(v.literal(1), v.literal(2))),
     requestKey: v.string(),
     encryptedSource: v.string(),
     sourceIv: v.string(),
     requestedBy: v.string(),
     state: mediaJobState,
+    rebuild: v.optional(v.boolean()),
+    rebuildOf: v.optional(v.id("mediaJobs")),
     stage: v.string(),
     progress: v.number(),
     asset: v.optional(v.id("mediaAssets")),
@@ -83,10 +86,12 @@ export const mediaTables = {
     updatedAt: v.number(),
   })
     .index("by_request_key", ["requestKey"])
+    .index("by_state", ["state"])
     .index("by_requested_by", ["requestedBy"])
     .index("by_asset", ["asset"]),
 
   mediaEnrichments: defineTable({
+    workflowVersion: v.optional(v.union(v.literal(1), v.literal(2))),
     asset: v.id("mediaAssets"),
     workflowId: v.optional(v.string()),
     state: mediaEnrichmentState,
@@ -105,7 +110,9 @@ export const mediaTables = {
     error: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
-  }).index("by_asset", ["asset"]),
+  })
+    .index("by_asset", ["asset"])
+    .index("by_state", ["state"]),
 
   roomMedia: defineTable({
     room: v.id("rooms"),
