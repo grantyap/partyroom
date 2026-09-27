@@ -1,5 +1,4 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { createHash } from "node:crypto";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const command = process.argv[2];
@@ -44,15 +43,10 @@ function scan(name: string, base: Record<string, unknown>, component?: string) {
 }
 
 const reportDir = resolve(import.meta.dir, "../migration-reports");
-const readinessPath = resolve(reportDir, "workflow-drain-readiness.json");
-const instanceFingerprint = createHash("sha256")
-  .update(process.env.CONVEX_SELF_HOSTED_ADMIN_KEY!)
-  .digest("hex");
 
 function readStatus(drainValue = cli(["env", "get", "MEDIA_WORKFLOW_DRAIN"])) {
   return {
     target,
-    instanceFingerprint,
     createdAt: new Date().toISOString(),
     drainValue,
     jobs: scan("migration/drain:statusPage", { table: "mediaJobs" }),
@@ -62,20 +56,9 @@ function readStatus(drainValue = cli(["env", "get", "MEDIA_WORKFLOW_DRAIN"])) {
 }
 
 if (command === "monitor") {
-  mkdirSync(reportDir, { recursive: true });
   let firstCleanAt: string | null = null;
-  try {
-    const previous = JSON.parse(readFileSync(readinessPath, "utf8"));
-    if (
-      previous.instanceFingerprint === instanceFingerprint &&
-      previous.target === target &&
-      Date.now() - Date.parse(previous.checkedAt) < 180_000 &&
-      previous.clean
-    )
-      firstCleanAt = previous.firstCleanAt;
-  } catch {
-    // A new or invalid report starts a fresh observation window.
-  }
+  let publishedReady = false;
+  cli(["env", "set", "MEDIA_WORKFLOW_DRAIN_READY_AT", "not-ready"]);
   for (;;) {
     let clean = false;
     let queued = 0;
@@ -91,9 +74,13 @@ if (command === "monitor") {
       else firstCleanAt ??= report.createdAt;
       const checkedAt = report.createdAt;
       const ready = clean && Date.parse(checkedAt) - Date.parse(firstCleanAt!) >= 600_000;
+      if (ready && !publishedReady)
+        cli(["env", "set", "MEDIA_WORKFLOW_DRAIN_READY_AT", checkedAt]);
+      if (!ready && publishedReady)
+        cli(["env", "set", "MEDIA_WORKFLOW_DRAIN_READY_AT", "not-ready"]);
+      publishedReady = ready;
       const summary = {
         target,
-        instanceFingerprint,
         checkedAt,
         firstCleanAt,
         clean,
@@ -103,16 +90,15 @@ if (command === "monitor") {
         activeEnrichments: report.enrichments.active.length,
         activeActivities: report.activities.active.length,
       };
-      writeFileSync(`${readinessPath}.tmp`, `${JSON.stringify(summary)}\n`);
-      renameSync(`${readinessPath}.tmp`, readinessPath);
       console.log(JSON.stringify({ workflowMigration: summary }));
     } catch (error) {
       firstCleanAt = null;
-      writeFileSync(
-        `${readinessPath}.tmp`,
-        `${JSON.stringify({ target, instanceFingerprint, checkedAt: new Date().toISOString(), clean: false, ready: false })}\n`,
-      );
-      renameSync(`${readinessPath}.tmp`, readinessPath);
+      publishedReady = false;
+      try {
+        cli(["env", "set", "MEDIA_WORKFLOW_DRAIN_READY_AT", "not-ready"]);
+      } catch {
+        // A failed backend connection is reported below and retried next scan.
+      }
       console.error("workflow migration drain scan failed", error);
     }
     await Bun.sleep(60_000);

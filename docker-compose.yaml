@@ -132,7 +132,6 @@ services:
       MIGRATION_TARGET: production
     volumes:
       - data:/convex/data:ro
-      - migration_reports:/workspace/migration-reports
     depends_on:
       backend-deploy:
         condition: service_completed_successfully
