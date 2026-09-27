@@ -3,9 +3,9 @@ import { resolve } from "node:path";
 
 const command = process.argv[2];
 const target = process.argv.includes("--production") ? "production" : "restored-copy";
-if (!command || !["status", "route-v2", "release-v2", "open-v2"].includes(command))
+if (!command || !["status", "route-v2", "release-v2", "open-v2", "pause-v2"].includes(command))
   throw new Error(
-    "usage: workflow-drain <status|route-v2|release-v2|open-v2> (--production|--restored-copy)",
+    "usage: workflow-drain <status|route-v2|release-v2|open-v2|pause-v2> (--production|--restored-copy)",
   );
 if (process.argv.includes("--production") === process.argv.includes("--restored-copy"))
   throw new Error("choose exactly one target");
@@ -42,6 +42,8 @@ function scan(name: string, base: Record<string, unknown>, component?: string) {
   } while (cursor);
   return { scanned, queued, active };
 }
+
+if (command === "pause-v2") cli(["env", "set", "MEDIA_WORKFLOW_DRAIN", "1"]);
 
 const report = {
   target,
