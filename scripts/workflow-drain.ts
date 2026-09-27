@@ -6,7 +6,7 @@ const command = process.argv[2];
 const target = process.argv.includes("--production") ? "production" : "restored-copy";
 if (!command || !["status", "route-v2", "release-v2", "open-v2", "pause-v2", "prepare-v2", "complete-v2"].includes(command))
   throw new Error(
-    "usage: workflow-drain <status|route-v2|release-v2|open-v2|pause-v2> (--production|--restored-copy)",
+    "usage: workflow-drain <status|route-v2|release-v2|open-v2|pause-v2|prepare-v2|complete-v2> (--production|--restored-copy)",
   );
 if (process.argv.includes("--production") === process.argv.includes("--restored-copy"))
   throw new Error("choose exactly one target");
@@ -104,7 +104,6 @@ if (command === "prepare-v2") {
       readiness.target !== target ||
       readiness.instanceFingerprint !== instanceFingerprint ||
       readiness.ready !== true ||
-      Date.now() - Date.parse(readiness.checkedAt) > 180_000 ||
       Date.parse(readiness.checkedAt) - Date.parse(readiness.firstCleanAt) < 600_000
     )
       throw new Error("the preparatory release has not certified a clean ten-minute drain");

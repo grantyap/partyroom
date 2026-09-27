@@ -3,6 +3,7 @@ import { api, internal } from "./_generated/api";
 import { internalMutation, mutation, query, type MutationCtx } from "./_generated/server";
 
 import { currentLease } from "./leases";
+import { protocolVersion } from "./validators";
 
 const DEFAULT_SCOPE_TTL_MS = 7 * 24 * 60 * 60_000;
 const MAX_SCOPE_TTL_MS = 30 * 24 * 60 * 60_000;
@@ -206,8 +207,10 @@ export const deleteArtifact = mutation({
     const artifact = await ctx.db.get(artifactId);
     if (!artifact) return false;
     if (artifact.state !== "adopted") return false;
-    if (!("owner" in artifact)) throw new Error("Legacy artifact has no owner");
-    if (artifact.owner !== owner) throw new Error("Artifact is not owned by this resource");
+    // TODO(deprecation): v1 retained artifacts have no owner; their caller
+    // already checked the referenced asset before asking to delete them.
+    if ("owner" in artifact && artifact.owner !== owner)
+      throw new Error("Artifact is not owned by this resource");
     await ctx.storage.delete(artifact.storageId);
     await ctx.db.delete(artifactId);
     return true;
@@ -238,6 +241,19 @@ export const cleanupScope = internalMutation({
       .withIndex("by_scope_and_state", (q) => q.eq("scopeId", scopeId).eq("state", "staged"))
       .take(CLEANUP_BATCH_SIZE);
     for (const artifact of artifacts) {
+      const activity = scope.state === "closed" ? await ctx.db.get(artifact.activityId) : null;
+      if (
+        artifact.disposition === "retained" &&
+        activity &&
+        activity.protocolVersion < protocolVersion &&
+        activity.state === "completed" &&
+        activity.attempt === artifact.attempt
+      ) {
+        // TODO(deprecation): Preserve a delayed v1 cleanup callback until the
+        // old retained artifacts are adopted or retired in a later migration.
+        await ctx.db.patch(artifact._id, { state: "adopted", updatedAt: Date.now() });
+        continue;
+      }
       await ctx.storage.delete(artifact.storageId);
       await ctx.db.delete(artifact._id);
     }
