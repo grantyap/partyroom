@@ -121,6 +121,22 @@ services:
       backend:
         condition: service_healthy
 
+  drain-monitor:
+    build:
+      context: .
+      dockerfile: packages/backend/Dockerfile
+    entrypoint: ["bash", "/usr/local/bin/run-workflow-drain"]
+    command: ["monitor", "--production"]
+    restart: unless-stopped
+    environment:
+      MIGRATION_TARGET: production
+    volumes:
+      - data:/convex/data:ro
+      - migration_reports:/workspace/migration-reports
+    depends_on:
+      backend-deploy:
+        condition: service_completed_successfully
+
   dashboard:
     image: ghcr.io/get-convex/convex-dashboard:latest
     stop_grace_period: 10s

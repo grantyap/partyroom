@@ -16,4 +16,6 @@ bunx convex env set BETTER_AUTH_SECRET "$BETTER_AUTH_SECRET"
 bunx convex env set ACTIVITY_WORKER_TOKEN "$ACTIVITY_WORKER_TOKEN"
 bunx convex env set WORKER_SIGNING_SECRET "$WORKER_SIGNING_SECRET"
 bunx convex env set WORKER_CONVEX_CLOUD_ORIGIN http://backend:3210
+# This preparatory release queues new requests as soon as its functions are deployed.
+bunx convex env set MEDIA_WORKFLOW_DRAIN 1
 bunx convex deploy --typecheck disable
