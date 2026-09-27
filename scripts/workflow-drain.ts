@@ -1,14 +1,15 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const command = process.argv[2];
 const target = process.argv.includes("--production") ? "production" : "restored-copy";
-if (!command || !["start", "status", "resume-v1", "monitor"].includes(command))
-  throw new Error("usage: workflow-drain <start|status|resume-v1|monitor> (--production|--restored-copy)");
+if (!command || !["status", "route-v2", "release-v2", "open-v2"].includes(command))
+  throw new Error(
+    "usage: workflow-drain <status|route-v2|release-v2|open-v2> (--production|--restored-copy)",
+  );
 if (process.argv.includes("--production") === process.argv.includes("--restored-copy"))
   throw new Error("choose exactly one target");
-if (process.env.MIGRATION_TARGET !== target)
-  throw new Error(`MIGRATION_TARGET must be ${target}`);
+if (process.env.MIGRATION_TARGET !== target) throw new Error(`MIGRATION_TARGET must be ${target}`);
 if (!process.env.CONVEX_SELF_HOSTED_URL || !process.env.CONVEX_SELF_HOSTED_ADMIN_KEY)
   throw new Error("self-hosted Convex URL and admin key are required");
 
@@ -42,79 +43,21 @@ function scan(name: string, base: Record<string, unknown>, component?: string) {
   return { scanned, queued, active };
 }
 
-const reportDir = resolve(import.meta.dir, "../migration-reports");
-
-function readStatus(drainValue = cli(["env", "get", "MEDIA_WORKFLOW_DRAIN"])) {
-  return {
-    target,
-    createdAt: new Date().toISOString(),
-    drainValue,
-    jobs: scan("migration/drain:statusPage", { table: "mediaJobs" }),
-    enrichments: scan("migration/drain:statusPage", { table: "mediaEnrichments" }),
-    activities: scan("drain:statusPage", {}, "activities"),
-  };
-}
-
-if (command === "monitor") {
-  let firstCleanAt: string | null = null;
-  let publishedReady = false;
-  cli(["env", "set", "MEDIA_WORKFLOW_DRAIN_READY_AT", "not-ready"]);
-  for (;;) {
-    let clean = false;
-    let queued = 0;
+const report = {
+  target,
+  createdAt: new Date().toISOString(),
+  drainValue: (() => {
     try {
-      const report = readStatus();
-      queued = report.jobs.queued + report.enrichments.queued;
-      clean =
-        report.drainValue === "1" &&
-        report.jobs.active.length === 0 &&
-        report.enrichments.active.length === 0 &&
-        report.activities.active.length === 0;
-      if (!clean) firstCleanAt = null;
-      else firstCleanAt ??= report.createdAt;
-      const checkedAt = report.createdAt;
-      const ready = clean && Date.parse(checkedAt) - Date.parse(firstCleanAt!) >= 600_000;
-      if (ready && !publishedReady)
-        cli(["env", "set", "MEDIA_WORKFLOW_DRAIN_READY_AT", checkedAt]);
-      if (!ready && publishedReady)
-        cli(["env", "set", "MEDIA_WORKFLOW_DRAIN_READY_AT", "not-ready"]);
-      publishedReady = ready;
-      const summary = {
-        target,
-        checkedAt,
-        firstCleanAt,
-        clean,
-        ready,
-        queued,
-        activeJobs: report.jobs.active.length,
-        activeEnrichments: report.enrichments.active.length,
-        activeActivities: report.activities.active.length,
-      };
-      console.log(JSON.stringify({ workflowMigration: summary }));
-    } catch (error) {
-      firstCleanAt = null;
-      publishedReady = false;
-      try {
-        cli(["env", "set", "MEDIA_WORKFLOW_DRAIN_READY_AT", "not-ready"]);
-      } catch {
-        // A failed backend connection is reported below and retried next scan.
-      }
-      console.error("workflow migration drain scan failed", error);
+      return cli(["env", "get", "MEDIA_WORKFLOW_DRAIN"]);
+    } catch {
+      return "";
     }
-    await Bun.sleep(60_000);
-  }
-}
-
-if (command === "start") cli(["env", "set", "MEDIA_WORKFLOW_DRAIN", "1"]);
-if (command === "resume-v1") {
-  cli(["env", "remove", "MEDIA_WORKFLOW_DRAIN"]);
-  let resumed = 0;
-  while (run("media/jobs:resumeQueuedV1", {})) resumed += 1;
-  console.log(JSON.stringify({ resumed }));
-}
-
-const report = command === "resume-v1" ? readStatus("") : readStatus();
-mkdirSync(reportDir, { recursive: true });
+  })(),
+  jobs: scan("migration/drain:statusPage", { table: "mediaJobs" }),
+  enrichments: scan("migration/drain:statusPage", { table: "mediaEnrichments" }),
+  activities: scan("drain:statusPage", {}, "activities"),
+};
+mkdirSync(resolve(import.meta.dir, "../migration-reports"), { recursive: true });
 const path = resolve(
   import.meta.dir,
   `../migration-reports/workflow-drain-${new Date().toISOString().replaceAll(":", "-")}.json`,
@@ -122,4 +65,35 @@ const path = resolve(
 writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
 console.log(path);
 console.log(JSON.stringify(report, null, 2));
-if (command !== "resume-v1" && report.drainValue !== "1") process.exitCode = 2;
+if (command === "route-v2") {
+  const reports = ["--report-a=", "--report-b="].map((prefix) => {
+    const name = process.argv.find((arg) => arg.startsWith(prefix))?.slice(prefix.length);
+    if (!name) throw new Error(`route-v2 requires ${prefix}<path>`);
+    return JSON.parse(readFileSync(resolve(name), "utf8"));
+  });
+  const scans = [...reports, report];
+  if (scans.some((scan) => scan.target !== target || scan.drainValue !== "1"))
+    throw new Error("all drain reports must target this deployment with the drain enabled");
+  if (
+    scans.some(
+      (scan) =>
+        scan.jobs.active.length || scan.enrichments.active.length || scan.activities.active.length,
+    )
+  )
+    throw new Error("v1 work is still active");
+  const times = reports.map((scan) => Date.parse(scan.createdAt));
+  if (!times.every(Number.isFinite) || times[1] - times[0] < 10 * 60_000)
+    throw new Error("clean drain scans must be at least 10 minutes apart");
+  run("migration/workflowStateRedesign:setRoutingVersion", { version: 2 });
+}
+if (command === "open-v2") {
+  if (run("migration/workflowStateRedesign:getRoutingVersion", {}) !== 2)
+    throw new Error("route v2 before opening submissions");
+  cli(["env", "remove", "MEDIA_WORKFLOW_DRAIN"]);
+}
+if (command === "release-v2" || command === "open-v2") {
+  let released = 0;
+  while (run("media/jobs:releaseQueuedV2", {})) released += 1;
+  console.log(JSON.stringify({ released }));
+}
+if (command === "route-v2" && report.drainValue !== "1") process.exitCode = 2;

@@ -117,6 +117,23 @@ services:
     volumes:
       - data:/convex/data:ro
       - migration_reports:/workspace/migration-reports
+
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  migration-runner:
+    profiles: ["migration"]
+    build:
+      context: .
+      dockerfile: packages/backend/Dockerfile
+    entrypoint: ["bash", "/usr/local/bin/run-workflow-migration"]
+    restart: "no"
+    environment:
+      MIGRATION_TARGET: ${MIGRATION_TARGET:-production}
+    volumes:
+      - data:/convex/data:ro
+      - migration_reports:/workspace/migration-reports
     depends_on:
       backend:
         condition: service_healthy
