@@ -63,6 +63,8 @@ const artifactFields = {
   updatedAt: v.number(),
 };
 
+// TODO(deprecation): Remove v1 activity rows after retained history is migrated
+// and the rollback window has closed.
 const legacyActivity = v.object({
   protocolVersion: v.number(),
   activityType: v.string(),
@@ -109,6 +111,7 @@ const legacyActivity = v.object({
   completedAt: v.optional(v.number()),
 });
 
+// TODO(deprecation): Remove v1 workflow-step rows in the same future migration.
 const legacyWorkflowStep = v.object({
   workflowId: v.string(),
   key: v.string(),
@@ -133,6 +136,8 @@ const legacyWorkflowStep = v.object({
   updatedAt: v.number(),
 });
 
+// TODO(deprecation): Legacy retained artifacts have no owner; adopt or retire
+// them in a future migration before removing this schema arm.
 const legacyArtifact = v.object({
   ...artifactFields,
   state: v.union(v.literal("staged"), v.literal("adopted")),

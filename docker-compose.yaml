@@ -95,48 +95,32 @@ services:
       dockerfile: packages/backend/Dockerfile
     restart: "no"
     environment:
+      MIGRATION_TARGET: production
       SITE_URL: ${ORIGIN:?}
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?}
       ACTIVITY_WORKER_TOKEN: ${ACTIVITY_WORKER_TOKEN:?}
       WORKER_SIGNING_SECRET: ${WORKER_SIGNING_SECRET:?}
     volumes:
       - data:/convex/data:ro
+      - migration_reports:/workspace/migration-reports
     depends_on:
       backend:
         condition: service_healthy
 
-  drain-runner:
-    profiles: ["migration"]
+  queue-release:
     build:
       context: .
       dockerfile: packages/backend/Dockerfile
     entrypoint: ["bash", "/usr/local/bin/run-workflow-drain"]
-    restart: "no"
+    command: ["release-v2", "--production"]
+    restart: on-failure
     environment:
-      MIGRATION_TARGET: ${MIGRATION_TARGET:-production}
+      MIGRATION_TARGET: production
     volumes:
       - data:/convex/data:ro
-      - migration_reports:/workspace/migration-reports
-
     depends_on:
-      backend:
-        condition: service_healthy
-
-  migration-runner:
-    profiles: ["migration"]
-    build:
-      context: .
-      dockerfile: packages/backend/Dockerfile
-    entrypoint: ["bash", "/usr/local/bin/run-workflow-migration"]
-    restart: "no"
-    environment:
-      MIGRATION_TARGET: ${MIGRATION_TARGET:-production}
-    volumes:
-      - data:/convex/data:ro
-      - migration_reports:/workspace/migration-reports
-    depends_on:
-      backend:
-        condition: service_healthy
+      backend-deploy:
+        condition: service_completed_successfully
 
   drain-monitor:
     build:

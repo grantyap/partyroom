@@ -14,6 +14,8 @@ const mediaOperationKind = v.union(
   v.literal("mux"),
 );
 
+// TODO(deprecation): Remove v1 activity projections in a future migration after
+// production no longer contains rows written by the pre-cutover release.
 const legacyActivityProjection = {
   activeActivities: v.optional(
     v.array(v.object({ activityId: v.string(), kind: mediaOperationKind })),
@@ -30,6 +32,7 @@ const legacyActivityProjection = {
 };
 
 const mediaJobsFields = {
+  // TODO(deprecation): Drop v1 workflowVersion values after all old journals expire.
   workflowVersion: v.optional(v.union(v.literal(1), v.literal(2))),
   requestKey: v.string(),
   encryptedSource: v.string(),
@@ -83,6 +86,7 @@ const mediaLyricTracksFields = {
 };
 
 const mediaEnrichmentsFields = {
+  // TODO(deprecation): Drop v1 workflowVersion values with the same later migration.
   workflowVersion: v.optional(v.union(v.literal(1), v.literal(2))),
   asset: v.id("mediaAssets"),
   workflowId: v.optional(v.string()),
