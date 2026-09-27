@@ -18,6 +18,6 @@ Inspect Coolify for a successful `backend-deploy`, a successful `queue-release`,
 
 ## Compatibility left for a later migration
 
-The v2 schema accepts old rows and legacy projections. It does not contract tables or delete historical artifacts during this rollout. `TODO(deprecation)` comments mark fields and schema arms that can be removed only in a separate migration after production has run safely on v2 and the rollback window closes. The old manual preflight/apply/verify runner is not a production deployment step.
+The v2 schema accepts old rows and legacy projections. It does not contract tables or delete historical artifacts during this rollout. `TODO(deprecation)` comments mark fields and schema arms that can be removed only in a separate migration after production has run safely on v2 and the rollback window closes. The manual preflight/apply/verify runner has been removed from this deployment path.
 
 This procedure is rehearsable with the same two ordinary deployments against an isolated restored copy. A successful local rehearsal does not certify production: the production monitor's ready signal, volume identity, and post-deployment health still have to be observed.
