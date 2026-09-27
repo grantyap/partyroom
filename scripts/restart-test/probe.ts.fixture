@@ -1,0 +1,39 @@
+// Copied into an isolated backend by run.ts; never deployed with the application.
+import { v } from "convex/values";
+import { components, internal } from "./_generated/api";
+import { internalMutation, internalQuery } from "./_generated/server";
+import { managedWorkflow, workflowStatus } from "./activities/workflowManager";
+import { createOrJoinMedia, attachWorkflowToJob } from "./media/domain/jobs";
+import { defaultRoomMemberPermissions } from "./rooms.schema";
+
+export const start = internalMutation({
+  args: {}, returns: v.id("mediaJobs"),
+  handler: async ctx => {
+    const roomId = await ctx.db.insert("rooms", {owner: "restart-test", name: "restart-test", memberPermissions: defaultRoomMemberPermissions});
+    await ctx.db.insert("roomPlayback", {room: roomId, state: {kind: "empty", emptySince: Date.now(), occupancyGeneration: 0, transport: {kind: "idle"}, queue: []}, revision: 0, queueRevision: 0});
+    const {jobId} = await createOrJoinMedia(ctx, {roomId, requestedBy: "restart-test", requestKey: "restart-test", encryptedSource: "fixture", sourceIv: "fixture"});
+    const workflowId = await managedWorkflow.start(ctx, internal.media.pipeline.mediaPipeline, {jobId}, {onComplete: internal.media.pipeline.onPipelineComplete, context: {jobId}});
+    await attachWorkflowToJob(ctx, jobId, workflowId);
+    return jobId;
+  },
+});
+export const snapshot = internalQuery({
+  args: {jobId: v.id("mediaJobs")}, returns: v.any(),
+  handler: async (ctx, {jobId}) => {
+    const job = await ctx.db.get(jobId);
+    const asset = job?.asset ? await ctx.db.get(job.asset) : null;
+    const enrichment = asset ? await ctx.db.query("mediaEnrichments").withIndex("by_asset", q => q.eq("asset", asset._id)).unique() : null;
+    const workflows = [job?.workflowId, enrichment?.workflowId].filter((id): id is string => !!id);
+    const steps = (await Promise.all(workflows.map(id => managedWorkflow.getProgress(ctx, id as any)))).flat();
+    return {
+      job, asset, enrichment, steps,
+      statuses: await Promise.all(workflows.map(id => workflowStatus(ctx, id as any))),
+      lyrics: asset ? await ctx.db.query("mediaLyricTracks").withIndex("by_asset", q => q.eq("asset", asset._id)).take(10) : [],
+      counts: {jobs: (await ctx.db.query("mediaJobs").take(10)).length, assets: (await ctx.db.query("mediaAssets").take(10)).length, enrichments: (await ctx.db.query("mediaEnrichments").take(10)).length},
+    };
+  },
+});
+export const artifactUrls = internalQuery({
+  args: {ids: v.array(v.string())}, returns: v.any(),
+  handler: async (ctx, {ids}) => await Promise.all(ids.map(artifactId => ctx.runQuery(components.activities.artifacts.getUrl, {artifactId}))),
+});
