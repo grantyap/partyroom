@@ -1,5 +1,4 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 
 const command = process.argv[2];
@@ -44,17 +43,9 @@ function scan(name: string, base: Record<string, unknown>, component?: string) {
   return { scanned, queued, active };
 }
 
-const reportDir = resolve(import.meta.dir, "../migration-reports");
-const instanceFingerprint = createHash("sha256")
-  .update(process.env.CONVEX_SELF_HOSTED_ADMIN_KEY!)
-  .digest("hex");
-const readinessPath = resolve(reportDir, "workflow-drain-readiness.json");
-const authorizationPath = resolve(reportDir, "workflow-cutover-authorized.json");
-
 function authorized() {
   try {
-    const marker = JSON.parse(readFileSync(authorizationPath, "utf8"));
-    return marker.target === target && marker.instanceFingerprint === instanceFingerprint;
+    return cli(["env", "get", "MEDIA_WORKFLOW_CUTOVER_AUTHORIZED"]) === "1";
   } catch {
     return false;
   }
@@ -97,22 +88,13 @@ if (command === "prepare-v2") {
     report.enrichments.scanned === 0 &&
     report.activities.scanned === 0;
   if (empty && report.drainValue !== "1") cli(["env", "set", "MEDIA_WORKFLOW_DRAIN", "1"]);
+  if (!empty && report.drainValue !== "1") throw new Error("the v1 drain is not enabled");
   if (!empty && !authorized()) {
-    if (report.drainValue !== "1") throw new Error("the v1 drain is not enabled");
-    const readiness = JSON.parse(readFileSync(readinessPath, "utf8"));
-    if (
-      readiness.target !== target ||
-      readiness.instanceFingerprint !== instanceFingerprint ||
-      readiness.ready !== true ||
-      Date.parse(readiness.checkedAt) - Date.parse(readiness.firstCleanAt) < 600_000
-    )
+    const readyAt = Date.parse(cli(["env", "get", "MEDIA_WORKFLOW_DRAIN_READY_AT"]));
+    if (!Number.isFinite(readyAt) || readyAt > Date.now())
       throw new Error("the preparatory release has not certified a clean ten-minute drain");
   }
-  mkdirSync(reportDir, { recursive: true });
-  writeFileSync(
-    authorizationPath,
-    `${JSON.stringify({ target, instanceFingerprint, authorizedAt: new Date().toISOString() })}\n`,
-  );
+  cli(["env", "set", "MEDIA_WORKFLOW_CUTOVER_AUTHORIZED", "1"]);
   console.log(empty ? "Empty deployment may start v2" : "Certified v1 drain; may deploy v2");
   process.exit(0);
 }

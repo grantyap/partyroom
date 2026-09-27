@@ -102,7 +102,6 @@ services:
       WORKER_SIGNING_SECRET: ${WORKER_SIGNING_SECRET:?}
     volumes:
       - data:/convex/data:ro
-      - migration_reports:/workspace/migration-reports
     depends_on:
       backend:
         condition: service_healthy
@@ -276,6 +275,5 @@ services:
 
 volumes:
   data:
-  migration_reports:
   stem_models:
   lyrics_models:
