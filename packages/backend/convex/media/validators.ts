@@ -84,3 +84,25 @@ export type MediaEnrichmentOperationKind =
   | "assembleAnnotations";
 
 export type OperationKind = CoreMediaOperationKind | MediaEnrichmentOperationKind;
+
+export const stageResult = v.union(
+  v.object({ kind: v.literal("download"), artifactId: v.string() }),
+  v.object({ kind: v.literal("extractAudio"), artifactId: v.string() }),
+  v.object({
+    kind: v.literal("separate"),
+    instrumentalArtifactId: v.string(),
+    vocalsArtifactId: v.string(),
+  }),
+  v.object({ kind: v.literal("mux"), artifactId: v.string() }),
+);
+export const lrclibResult = v.union(
+  v.object({ state: v.literal("processing") }),
+  v.object({ state: v.literal("not_found") }),
+  v.object({ state: v.literal("failed"), error: v.string() }),
+  v.object({
+    state: v.literal("ready"),
+    timing: v.union(v.literal("word"), v.literal("line")),
+    observations: v.array(lyricObservation),
+    metadata: v.optional(lyricTrackMetadata),
+  }),
+);

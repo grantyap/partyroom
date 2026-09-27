@@ -52,13 +52,13 @@ const worker = new ActivityWorker({
   activities: [
     defineHandler(
       mediaActivities.resolve,
-      async (context, input) => await resolveActivity(input.jobId, reporter(context)),
+      async (context) => await resolveActivity(context.info.attemptToken, reporter(context)),
     ),
     defineHandler(
       mediaActivities.download,
-      async (context, input) =>
+      async (context) =>
         await withDirectory(context, (directory) =>
-          downloadActivity(input.jobId, reporter(context), directory),
+          downloadActivity(context.info.attemptToken, reporter(context), directory),
         ),
     ),
     defineHandler(

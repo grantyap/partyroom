@@ -860,11 +860,15 @@ export const deleteIfEmpty = internalMutation({
 });
 
 export const onRoomMediaReady = internalMutation({
-  args: { roomMediaId: v.id("roomMedia") },
+  args: {
+    roomMediaId: v.id("roomMedia"),
+    jobId: v.id("mediaJobs"),
+    assetId: v.id("mediaAssets"),
+  },
   returns: v.null(),
-  handler: async (ctx, { roomMediaId }) => {
+  handler: async (ctx, { roomMediaId, assetId }) => {
     const roomMedia = await ctx.db.get("roomMedia", roomMediaId);
-    if (!roomMedia) return null;
+    if (!roomMedia || roomMedia.asset !== assetId) return null;
     const playback = await playbackForRoom(ctx, roomMedia.room);
     const matching = queueItems(playback.state).find((item) => item.roomMedia === roomMediaId);
     if (!matching) return null;
@@ -894,29 +898,48 @@ export const onRoomMediaReady = internalMutation({
 });
 
 export const onRoomMediaFailed = internalMutation({
-  args: { roomMediaId: v.id("roomMedia"), message: v.string() },
+  args: {
+    roomMediaId: v.id("roomMedia"),
+    jobId: v.id("mediaJobs"),
+    message: v.string(),
+  },
   returns: v.null(),
-  handler: async (ctx, { roomMediaId, message }) => {
+  handler: async (ctx, { roomMediaId, jobId, message }) => {
     const roomMedia = await ctx.db.get("roomMedia", roomMediaId);
-    if (!roomMedia) return null;
+    if (!roomMedia || roomMedia.job !== jobId) return null;
     const playback = await playbackForRoom(ctx, roomMedia.room);
+    const matching = queueItems(playback.state).find((item) => item.roomMedia === roomMediaId);
+    if (!matching) return null;
+    const replacement = await readyItemForRoomMedia(ctx, roomMediaId, matching);
     const state = replaceQueuedMedia(
       playback.state,
       roomMediaId,
-      (item) => ({
-        key: item.key,
-        roomMedia: item.roomMedia,
-        addedBy: item.addedBy,
-        createdAt: item.createdAt,
-        kind: "failed",
-        message,
-      }),
+      (item) =>
+        replacement
+          ? {
+              ...replacement,
+              key: item.key,
+              addedBy: item.addedBy,
+              createdAt: item.createdAt,
+            }
+          : {
+              key: item.key,
+              roomMedia: item.roomMedia,
+              addedBy: item.addedBy,
+              createdAt: item.createdAt,
+              kind: "failed",
+              message,
+            },
       Date.now(),
     );
+    const revision =
+      playback.revision + (currentItem(state)?.key !== currentItem(playback.state)?.key ? 1 : 0);
     await ctx.db.patch("roomPlayback", playback._id, {
       state,
+      revision,
       queueRevision: playback.queueRevision + 1,
     });
+    await scheduleIfNewCurrent(ctx, roomMedia.room, playback.state, state, revision);
     return null;
   },
 });

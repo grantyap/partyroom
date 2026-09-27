@@ -1,3 +1,4 @@
+import { validate } from "convex-helpers/validators";
 import { v, type Validator } from "convex/values";
 
 export type ArtifactId = string & { readonly __artifactId: unique symbol };
@@ -131,4 +132,9 @@ function toValidator(schema: WireSchema): Validator<any, any, any> {
         ),
       );
   }
+}
+
+export function parseWire(schema: WireSchema, value: unknown): unknown {
+  validate(toValidator(schema), value, { throw: true });
+  return value;
 }

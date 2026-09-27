@@ -1,7 +1,8 @@
 import { v } from "convex/values";
-import { internal } from "./_generated/api";
-import type { Id } from "./_generated/dataModel";
+import { api, internal } from "./_generated/api";
 import { internalMutation, mutation, query, type MutationCtx } from "./_generated/server";
+
+import { currentLease } from "./leases";
 
 const DEFAULT_SCOPE_TTL_MS = 7 * 24 * 60 * 60_000;
 const MAX_SCOPE_TTL_MS = 30 * 24 * 60 * 60_000;
@@ -11,21 +12,12 @@ const CLEANUP_BATCH_SIZE = 100;
 async function requireCurrentLease(
   ctx: MutationCtx,
   args: {
-    activityId: Id<"activities">;
-    attempt: number;
-    leaseToken: string;
+    attemptToken: string;
     slot: string;
   },
 ) {
-  const activity = await ctx.db.get(args.activityId);
-  if (!activity) throw new Error("Activity not found");
-  if (
-    activity.state !== "running" ||
-    activity.attempt !== args.attempt ||
-    activity.leaseToken !== args.leaseToken
-  ) {
-    throw new Error("Activity lease is no longer current");
-  }
+  const activity = await currentLease(ctx, args.attemptToken);
+  if (!activity || activity.cancelRequested) throw new Error("Activity lease is no longer current");
   if (!activity.artifactScopeId) {
     throw new Error("Activity was not scheduled with an artifact scope");
   }
@@ -39,7 +31,7 @@ async function requireCurrentLease(
     throw new Error(`Activity artifact slot ${args.slot} has no lifecycle definition`);
   }
   const scope = await ctx.db.get(activity.artifactScopeId);
-  if (!scope || scope.state !== "open") {
+  if (!scope || scope.state !== "open" || scope.expiresAt <= Date.now()) {
     throw new Error("Artifact scope is not open");
   }
   return { activity, scope, definition };
@@ -80,7 +72,8 @@ export const attachWorkflow = mutation({
   handler: async (ctx, { scopeId, workflowId }) => {
     const scope = await ctx.db.get(scopeId);
     if (!scope) throw new Error("Artifact scope not found");
-    if (scope.state !== "open") throw new Error("Artifact scope is not open");
+    if (scope.state !== "open" || scope.expiresAt <= Date.now())
+      throw new Error("Artifact scope is not open");
     if (scope.workflowId && scope.workflowId !== workflowId) {
       throw new Error("Artifact scope is already attached to another workflow");
     }
@@ -110,9 +103,7 @@ export const getScopeForWorkflow = query({
 
 export const createUpload = mutation({
   args: {
-    activityId: v.id("activities"),
-    attempt: v.number(),
-    leaseToken: v.string(),
+    attemptToken: v.string(),
     slot: v.string(),
   },
   returns: v.object({ uploadUrl: v.string() }),
@@ -124,9 +115,7 @@ export const createUpload = mutation({
 
 export const registerUpload = mutation({
   args: {
-    activityId: v.id("activities"),
-    attempt: v.number(),
-    leaseToken: v.string(),
+    attemptToken: v.string(),
     slot: v.string(),
     storageId: v.id("_storage"),
   },
@@ -140,7 +129,7 @@ export const registerUpload = mutation({
     if (existing) {
       if (
         existing.activityId !== activity._id ||
-        existing.attempt !== args.attempt ||
+        existing.attempt !== activity.attempt ||
         existing.slot !== args.slot
       ) {
         throw new Error("Storage object is already registered to another artifact");
@@ -150,7 +139,7 @@ export const registerUpload = mutation({
     const existingSlot = await ctx.db
       .query("artifacts")
       .withIndex("by_activity_attempt_and_slot", (q) =>
-        q.eq("activityId", activity._id).eq("attempt", args.attempt).eq("slot", args.slot),
+        q.eq("activityId", activity._id).eq("attempt", activity.attempt).eq("slot", args.slot),
       )
       .unique();
     if (existingSlot) {
@@ -162,7 +151,7 @@ export const registerUpload = mutation({
     return await ctx.db.insert("artifacts", {
       scopeId: activity.artifactScopeId!,
       activityId: activity._id,
-      attempt: args.attempt,
+      attempt: activity.attempt,
       slot: args.slot,
       disposition: definition.disposition,
       storageId: args.storageId,
@@ -189,7 +178,8 @@ export const closeScope = mutation({
   handler: async (ctx, { scopeId }) => {
     const scope = await ctx.db.get(scopeId);
     if (!scope) return null;
-    if (scope.state === "abandoned") throw new Error("Artifact scope was abandoned");
+    if (scope.state === "abandoned") return null;
+    await ctx.runMutation(api.activities.cancelScope, { scopeId });
     await ctx.db.patch(scopeId, { state: "closed", updatedAt: Date.now() });
     await ctx.scheduler.runAfter(0, internal.artifacts.cleanupScope, { scopeId });
     return null;
@@ -202,6 +192,7 @@ export const abandonScope = mutation({
   handler: async (ctx, { scopeId }) => {
     const scope = await ctx.db.get(scopeId);
     if (!scope || scope.state === "closed") return null;
+    await ctx.runMutation(api.activities.cancelScope, { scopeId });
     await ctx.db.patch(scopeId, { state: "abandoned", updatedAt: Date.now() });
     await ctx.scheduler.runAfter(0, internal.artifacts.cleanupScope, { scopeId });
     return null;
@@ -209,11 +200,14 @@ export const abandonScope = mutation({
 });
 
 export const deleteArtifact = mutation({
-  args: { artifactId: v.id("artifacts") },
+  args: { artifactId: v.id("artifacts"), owner: v.string() },
   returns: v.boolean(),
-  handler: async (ctx, { artifactId }) => {
+  handler: async (ctx, { artifactId, owner }) => {
     const artifact = await ctx.db.get(artifactId);
     if (!artifact) return false;
+    if (artifact.state !== "adopted") return false;
+    if (!("owner" in artifact)) throw new Error("Legacy artifact has no owner");
+    if (artifact.owner !== owner) throw new Error("Artifact is not owned by this resource");
     await ctx.storage.delete(artifact.storageId);
     await ctx.db.delete(artifactId);
     return true;
@@ -226,6 +220,7 @@ export const expireScope = internalMutation({
   handler: async (ctx, { scopeId }) => {
     const scope = await ctx.db.get(scopeId);
     if (!scope || scope.state !== "open" || scope.expiresAt > Date.now()) return null;
+    await ctx.runMutation(api.activities.cancelScope, { scopeId });
     await ctx.db.patch(scopeId, { state: "abandoned", updatedAt: Date.now() });
     await ctx.scheduler.runAfter(0, internal.artifacts.cleanupScope, { scopeId });
     return null;
@@ -243,20 +238,8 @@ export const cleanupScope = internalMutation({
       .withIndex("by_scope_and_state", (q) => q.eq("scopeId", scopeId).eq("state", "staged"))
       .take(CLEANUP_BATCH_SIZE);
     for (const artifact of artifacts) {
-      const activity = scope.state === "closed" ? await ctx.db.get(artifact.activityId) : null;
-      const shouldAdopt =
-        artifact.disposition === "retained" &&
-        activity?.state === "completed" &&
-        activity.attempt === artifact.attempt;
-      if (shouldAdopt) {
-        await ctx.db.patch(artifact._id, {
-          state: "adopted",
-          updatedAt: Date.now(),
-        });
-      } else {
-        await ctx.storage.delete(artifact.storageId);
-        await ctx.db.delete(artifact._id);
-      }
+      await ctx.storage.delete(artifact.storageId);
+      await ctx.db.delete(artifact._id);
     }
     if (artifacts.length === CLEANUP_BATCH_SIZE) {
       await ctx.scheduler.runAfter(0, internal.artifacts.cleanupScope, { scopeId });
@@ -323,6 +306,68 @@ export const runStorageSweep = internalMutation({
     if (!result.isDone) {
       await ctx.scheduler.runAfter(0, internal.artifacts.runStorageSweep, {});
     }
+    return null;
+  },
+});
+
+// Called inside the same parent mutation that publishes the domain reference.
+export const adopt = mutation({
+  args: {
+    workflowId: v.string(),
+    owner: v.string(),
+    artifacts: v.array(v.object({ artifactId: v.id("artifacts"), slot: v.string() })),
+  },
+  returns: v.null(),
+  handler: async (ctx, { workflowId, owner, artifacts }) => {
+    for (const { artifactId, slot } of artifacts) {
+      const artifact = await ctx.db.get(artifactId);
+      if (!artifact || artifact.disposition !== "retained" || artifact.slot !== slot)
+        throw new Error("Invalid published artifact");
+      const scope = await ctx.db.get(artifact.scopeId);
+      if (!scope || scope.workflowId !== workflowId)
+        throw new Error("Artifact belongs to another run");
+      if (artifact.state === "adopted") {
+        if (!("owner" in artifact)) throw new Error("Legacy artifact has no owner");
+        if (artifact.owner !== owner) throw new Error("Artifact already has another owner");
+        continue;
+      }
+      const activity = await ctx.db.get(artifact.activityId);
+      if (
+        scope.state !== "open" ||
+        scope.expiresAt <= Date.now() ||
+        activity?.state !== "completed" ||
+        activity.attempt !== artifact.attempt
+      )
+        throw new Error("Artifact is not publishable");
+      if (!(await ctx.db.system.get("_storage", artifact.storageId)))
+        throw new Error("Artifact storage is missing");
+      await ctx.db.patch(artifactId, { state: "adopted", owner, updatedAt: Date.now() });
+    }
+    return null;
+  },
+});
+
+// Validate scratch references before a domain mutation stores them. They remain
+// staged and are owned by the run until publication or scope cleanup.
+export const validateProduced = query({
+  args: { workflowId: v.string(), artifactId: v.id("artifacts"), slot: v.string() },
+  returns: v.null(),
+  handler: async (ctx, { workflowId, artifactId, slot }) => {
+    const artifact = await ctx.db.get(artifactId);
+    if (!artifact || artifact.slot !== slot || artifact.state !== "staged")
+      throw new Error("Invalid produced artifact");
+    const scope = await ctx.db.get(artifact.scopeId);
+    const activity = await ctx.db.get(artifact.activityId);
+    if (
+      scope?.workflowId !== workflowId ||
+      scope.state !== "open" ||
+      scope.expiresAt <= Date.now() ||
+      activity?.state !== "completed" ||
+      activity.attempt !== artifact.attempt
+    )
+      throw new Error("Artifact belongs to an inactive attempt or another run");
+    if (!(await ctx.db.system.get("_storage", artifact.storageId)))
+      throw new Error("Artifact storage is missing");
     return null;
   },
 });

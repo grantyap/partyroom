@@ -34,6 +34,7 @@ export type ActivityInfo = Pick<
   | "activityType"
   | "activityVersion"
   | "taskQueue"
+  | "attemptToken"
   | "attempt"
   | "attemptDeadline"
   | "scheduleDeadline"
@@ -325,9 +326,7 @@ export class ActivityWorker {
       const response = await this.request(
         "renew",
         {
-          activityId: activity.activityId,
-          attempt: activity.attempt,
-          leaseToken: activity.leaseToken,
+          attemptToken: activity.attemptToken,
           progress: progress.value,
           progressMessage: progress.message,
           heartbeatDetails: progress.details,
@@ -372,6 +371,7 @@ export class ActivityWorker {
         activityVersion: activity.activityVersion,
         taskQueue: activity.taskQueue,
         attempt: activity.attempt,
+        attemptToken: activity.attemptToken,
         attemptDeadline: activity.attemptDeadline,
         scheduleDeadline: activity.scheduleDeadline,
       },
@@ -397,9 +397,7 @@ export class ActivityWorker {
           throw new Error(`Activity does not declare artifact slot ${slot}`);
         }
         const identity = {
-          activityId: activity.activityId,
-          attempt: activity.attempt,
-          leaseToken: activity.leaseToken,
+          attemptToken: activity.attemptToken,
           slot,
         };
         const { uploadUrl } = await this.request(
@@ -435,14 +433,20 @@ export class ActivityWorker {
       const input = parse(handler.definition.input, activity.input);
       const value = await handler.execute(context, input);
       if (cancelRequested) {
-        await this.sendTerminal("cancel", activity, {});
+        await this.sendTerminal("cancel", activity, {}, terminalResponseSchema, stopSignal);
       } else if (!execution.signal.aborted) {
         const output = parse(handler.definition.output, value) as Value;
-        await this.sendTerminal("complete", activity, { value: output });
+        await this.sendTerminal(
+          "complete",
+          activity,
+          { value: output },
+          terminalResponseSchema,
+          stopSignal,
+        );
       }
     } catch (error) {
       if (cancelRequested) {
-        await this.sendTerminal("cancel", activity, {});
+        await this.sendTerminal("cancel", activity, {}, terminalResponseSchema, stopSignal);
       } else if (!stopSignal.aborted) {
         const applicationError =
           error instanceof ApplicationError
@@ -457,6 +461,7 @@ export class ActivityWorker {
             nonRetryable: applicationError.nonRetryable,
           },
           failureResponseSchema,
+          stopSignal,
         );
       }
     } finally {
@@ -472,25 +477,28 @@ export class ActivityWorker {
     activity: ClaimedActivity,
     body: Record<string, unknown>,
     schema = terminalResponseSchema,
+    stopSignal: AbortSignal,
   ) {
-    const requestId = crypto.randomUUID();
     let delayMs = 250;
-    while (Date.now() < activity.scheduleDeadline) {
+    while (!stopSignal.aborted && Date.now() < activity.scheduleDeadline) {
       try {
         return await this.request(
           path,
           {
-            activityId: activity.activityId,
-            attempt: activity.attempt,
-            leaseToken: activity.leaseToken,
-            requestId,
+            attemptToken: activity.attemptToken,
             ...body,
           },
           schema,
+          stopSignal,
         );
       } catch (error) {
+        if (stopSignal.aborted) return;
         console.error(`Unable to report terminal activity state ${activity.activityId}`, error);
-        await delay(delayMs);
+        try {
+          await delay(delayMs, stopSignal);
+        } catch {
+          return;
+        }
         delayMs = Math.min(5_000, delayMs * 2);
       }
     }

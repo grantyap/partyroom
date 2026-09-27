@@ -108,15 +108,21 @@ type StructuredRunOptions<Type extends StructuredOperationType> = Omit<RunOption
       }
     : unknown);
 
-type StructuredOperationOptions<
-  Type extends StructuredOperationType = StructuredOperationType,
-  Target extends StructuredTarget<Type> = StructuredTarget<Type>,
-> = {
-  readonly kind: "workflowOperation";
-  readonly operation: Type;
-  readonly target: Target;
-  readonly runOptions: StructuredRunOptions<Type>;
+type WorkflowStepMetadata = {
+  readonly label?: string;
+  readonly order?: number;
 };
+
+type WorkflowStepConfig<
+  Type extends StructuredOperationType,
+  Target extends StructuredTarget<Type>,
+> = Type extends "query"
+  ? { readonly query: Target } & StructuredRunOptions<"query"> & WorkflowStepMetadata
+  : Type extends "mutation"
+    ? { readonly mutation: Target } & StructuredRunOptions<"mutation"> & WorkflowStepMetadata
+    : Type extends "action"
+      ? { readonly action: Target } & StructuredRunOptions<"action"> & WorkflowStepMetadata
+      : { readonly workflow: Target } & StructuredRunOptions<"workflow"> & WorkflowStepMetadata;
 
 type ActivityStepDefinition<
   Definition extends ActivityDefinition = ActivityDefinition,
@@ -141,148 +147,26 @@ type WorkflowStepDefinition<
   readonly order?: number;
 };
 
-type ManualWorkflowStepDefinition = {
-  readonly kind: "manualWorkflow";
-  readonly label?: string;
-  readonly order?: number;
-};
-
 type AnyStepDefinition =
   | ActivityStepDefinition
-  | WorkflowStepDefinition
-  | ManualWorkflowStepDefinition;
+  | WorkflowStepDefinition;
 type StepDefinitions = Readonly<Record<string, AnyStepDefinition>>;
 
 /**
- * Creates reusable options for a registered Convex query used by
- * {@link workflowStep}.
+ * Declares a managed step that runs in an external activity worker.
  *
- * Query arguments and results stay inferred from `query`. Execution options
- * belong here so retry/scheduling policy can be shared independently from a
- * workflow's consumer-facing label and order.
+ * Calling the bound `run(input)` method schedules the activity, waits for its
+ * result, validates the output, and reports worker progress. The activity's
+ * input and output types remain available to the workflow handler.
  *
- * @see {@link mutationOptions}
- * @see {@link actionOptions}
- * @see {@link workflowOptions}
- * @see {@link workflowStep}
- */
-export function queryOptions<Target extends StructuredTarget<"query">>(
-  config: {
-    query: Target;
-  } & StructuredRunOptions<"query">,
-): StructuredOperationOptions<"query", Target> {
-  const { query, ...runOptions } = config;
-  return Object.freeze({
-    kind: "workflowOperation",
-    operation: "query",
-    target: query,
-    runOptions,
-  });
-}
-
-/**
- * Creates reusable options for a registered Convex mutation used by
- * {@link workflowStep}.
+ * If the workflow does not already have the activity input, set `options.input`
+ * to a typed Convex query. The query must accept `workflowId`; the runtime adds
+ * that argument, validates the query result, and schedules the activity with it.
  *
- * Mutation arguments and results stay inferred from `mutation`. Put execution
- * behavior such as `inline` here; keep labels and display order on the
- * consuming workflow step.
- *
- * @see {@link queryOptions}
- * @see {@link actionOptions}
- * @see {@link workflowOptions}
- * @see {@link workflowStep}
- */
-export function mutationOptions<Target extends StructuredTarget<"mutation">>(
-  config: {
-    mutation: Target;
-  } & StructuredRunOptions<"mutation">,
-): StructuredOperationOptions<"mutation", Target> {
-  const { mutation, ...runOptions } = config;
-  return Object.freeze({
-    kind: "workflowOperation",
-    operation: "mutation",
-    target: mutation,
-    runOptions,
-  });
-}
-
-/**
- * Creates reusable options for a registered Convex action used by
- * {@link workflowStep}.
- *
- * Action arguments and results stay inferred from `action`. Retry and
- * scheduling behavior belong here so multiple workflows can reuse one
- * execution policy without duplicating configuration.
- *
- * @see {@link queryOptions}
- * @see {@link mutationOptions}
- * @see {@link workflowOptions}
- * @see {@link workflowStep}
- */
-export function actionOptions<Target extends StructuredTarget<"action">>(
-  config: {
-    action: Target;
-  } & StructuredRunOptions<"action">,
-): StructuredOperationOptions<"action", Target> {
-  const { action, ...runOptions } = config;
-  return Object.freeze({
-    kind: "workflowOperation",
-    operation: "action",
-    target: action,
-    runOptions,
-  });
-}
-
-/**
- * Creates reusable options for a registered child workflow used by
- * {@link workflowStep}.
- *
- * Choose this when one consumer-visible step needs several durable operations.
- * The child workflow owns that sequence while its parent retains one
- * structured, safely parallelizable step boundary.
- *
- * @see {@link queryOptions}
- * @see {@link mutationOptions}
- * @see {@link actionOptions}
- * @see {@link workflowStep}
- * @see {@link manualWorkflowStep}
- */
-export function workflowOptions<Target extends StructuredTarget<"workflow">>(
-  config: {
-    workflow: Target;
-  } & StructuredRunOptions<"workflow">,
-): StructuredOperationOptions<"workflow", Target> {
-  const { workflow, ...runOptions } = config;
-  return Object.freeze({
-    kind: "workflowOperation",
-    operation: "workflow",
-    target: workflow,
-    runOptions,
-  });
-}
-
-/**
- * Declares a consumer-visible workflow step backed by an external activity.
- *
- * Choose an activity step when the work has a {@link ActivityDefinition} and
- * runs through an activity worker. Calling its bound `run(input)` method
- * automatically schedules the activity, reports its queue and worker progress,
- * waits for completion, validates the output, and preserves the activity's
- * inferred input and output types.
- *
- * When workflow/domain arguments do not already match the activity input,
- * provide a typed Convex query through `options.input`. The bound `run()`
- * method will accept that query's arguments without `workflowId`; the runtime
- * injects the current workflow ID, executes the builder, validates its declared
- * return type against the activity input, and schedules the resulting value.
- *
- * For work represented by a registered Convex operation or child workflow,
- * use {@link workflowStep}. For a small inline sequence that must be awaited
- * immediately, use {@link manualWorkflowStep}.
+ * Use {@link workflowStep} for a registered query, mutation, action, or child
+ * workflow.
  *
  * @see {@link workflowStep}
- * @see {@link manualWorkflowStep}
  * @see {@link ManagedWorkflowManager.define}
  */
 export function activityStep<Definition extends ActivityDefinition>(
@@ -329,78 +213,78 @@ export function activityStep<
 }
 
 /**
- * Declares a structured workflow step backed by one registered Convex
- * operation or child workflow.
+ * Declares a managed step for one registered query, mutation, action, or child
+ * workflow.
  *
- * Prefer this for nearly all workflow-managed work. The operation forms one
- * durable journal boundary, can safely participate in `step.parallel()`, and
- * exposes inferred argument and return types. If a step requires multiple
- * durable operations, extract them into a child workflow and reference that
- * workflow here. Construct the operation with {@link queryOptions},
- * {@link mutationOptions}, {@link actionOptions}, or {@link workflowOptions};
- * keep reusable execution policy there and consumer-facing metadata here.
+ * Each step is one durable workflow operation, so it can run in
+ * `step.parallel()` and keeps its argument and return types inferred. Put the
+ * operation target, run options, label, and order in the same object, such as
+ * `{ action, retry, label, order }`.
  *
- * For a small, strictly sequential sequence that is tightly coupled to its
- * parent workflow, use {@link manualWorkflowStep}.
+ * If a step needs several durable operations, put them in a child workflow. If
+ * the work runs in an activity worker, use {@link activityStep} instead.
  *
- * If the work is implemented by an activity worker, use {@link activityStep}
- * so scheduling, worker progress, output validation, and input/output type
- * inference are handled automatically.
- *
- * @see {@link manualWorkflowStep}
  * @see {@link activityStep}
- * @see {@link queryOptions}
- * @see {@link mutationOptions}
- * @see {@link actionOptions}
- * @see {@link workflowOptions}
  * @see {@link ManagedWorkflowManager.define}
  */
+export function workflowStep<Target extends StructuredTarget<"query">>(
+  config: WorkflowStepConfig<"query", Target>,
+): WorkflowStepDefinition<"query", Target>;
+export function workflowStep<Target extends StructuredTarget<"mutation">>(
+  config: WorkflowStepConfig<"mutation", Target>,
+): WorkflowStepDefinition<"mutation", Target>;
+export function workflowStep<Target extends StructuredTarget<"action">>(
+  config: WorkflowStepConfig<"action", Target>,
+): WorkflowStepDefinition<"action", Target>;
+export function workflowStep<Target extends StructuredTarget<"workflow">>(
+  config: WorkflowStepConfig<"workflow", Target>,
+): WorkflowStepDefinition<"workflow", Target>;
 export function workflowStep<
-  const Type extends StructuredOperationType,
+  Type extends StructuredOperationType,
   Target extends StructuredTarget<Type>,
->(
-  operation: StructuredOperationOptions<Type, Target>,
-  options?: {
-    label?: string;
-    order?: number;
-  },
-): WorkflowStepDefinition<Type, Target> {
+>(config: WorkflowStepConfig<Type, Target>): WorkflowStepDefinition<Type, Target> {
+  if ("query" in config) {
+    const { query, label, order, ...runOptions } = config;
+    return Object.freeze({
+      kind: "workflow",
+      operation: "query",
+      target: query,
+      runOptions,
+      label,
+      order,
+    }) as WorkflowStepDefinition<Type, Target>;
+  }
+  if ("mutation" in config) {
+    const { mutation, label, order, ...runOptions } = config;
+    return Object.freeze({
+      kind: "workflow",
+      operation: "mutation",
+      target: mutation,
+      runOptions,
+      label,
+      order,
+    }) as WorkflowStepDefinition<Type, Target>;
+  }
+  if ("action" in config) {
+    const { action, label, order, ...runOptions } = config;
+    return Object.freeze({
+      kind: "workflow",
+      operation: "action",
+      target: action,
+      runOptions,
+      label,
+      order,
+    }) as WorkflowStepDefinition<Type, Target>;
+  }
+  const { workflow, label, order, ...runOptions } = config;
   return Object.freeze({
     kind: "workflow",
-    operation: operation.operation,
-    target: operation.target,
-    runOptions: operation.runOptions,
-    label: options?.label,
-    order: options?.order,
-  });
-}
-
-/**
- * Declares an inline, manually orchestrated workflow progress step.
- *
- * Use this only for a small parent-specific sequence of queries, mutations,
- * actions, or event waits that does not justify a registered child workflow.
- * Its bound `run(callback)` call must be awaited immediately and must not be
- * started concurrently or joined later, because the callback may append
- * multiple journal entries whose replay order must remain deterministic.
- *
- * Prefer {@link workflowStep} whenever the work can be represented by one
- * registered operation or child workflow, especially when it may run in
- * parallel, be reused, or grow over time.
- *
- * @see {@link workflowStep}
- * @see {@link activityStep}
- * @see {@link ManagedWorkflowManager.define}
- */
-export function manualWorkflowStep(options?: {
-  label?: string;
-  order?: number;
-}): ManualWorkflowStepDefinition {
-  return Object.freeze({
-    kind: "manualWorkflow",
-    label: options?.label,
-    order: options?.order,
-  });
+    operation: "workflow",
+    target: workflow,
+    runOptions,
+    label,
+    order,
+  }) as WorkflowStepDefinition<Type, Target>;
 }
 
 type BoundStep = {
@@ -462,6 +346,12 @@ type ManagedOperationSettledResult<Operation> = PromiseSettledResult<
 
 class ManagedOperationCoordinator {
   private active = false;
+  private readonly used = new Set<string>();
+
+  claim(key: string) {
+    if (this.used.has(key)) throw new Error(`Workflow step ${key} has already been run`);
+    this.used.add(key);
+  }
 
   operation<Result>(createPlan: () => ManagedOperationPlan<Result>): ManagedStepOperation<Result> {
     let consumed = false;
@@ -496,9 +386,7 @@ class ManagedOperationCoordinator {
       (result): result is PromiseRejectedResult => result.status === "rejected",
     );
     if (failure) throw failure.reason;
-    const results = settled.map(
-      (result) => (result as PromiseFulfilledResult<unknown>).value,
-    );
+    const results = settled.map((result) => (result as PromiseFulfilledResult<unknown>).value);
     return Object.fromEntries(entries.map(([key], index) => [key, results[index]])) as {
       [Key in keyof Operations]: ManagedOperationResult<Operations[Key]>;
     };
@@ -515,9 +403,7 @@ class ManagedOperationCoordinator {
     const settled = await this.settlePlans(
       entries.map(([, operation]) => operation[managedOperation]()),
     );
-    return Object.fromEntries(
-      entries.map(([key], index) => [key, settled[index]]),
-    ) as {
+    return Object.fromEntries(entries.map(([key], index) => [key, settled[index]])) as {
       [Key in keyof Operations]: ManagedOperationSettledResult<Operations[Key]>;
     };
   }
@@ -532,9 +418,7 @@ class ManagedOperationCoordinator {
       (result): result is PromiseRejectedResult => result.status === "rejected",
     );
     if (failure) throw failure.reason;
-    return settled.map(
-      (result) => (result as PromiseFulfilledResult<unknown>).value,
-    );
+    return settled.map((result) => (result as PromiseFulfilledResult<unknown>).value);
   }
 
   private async settlePlans(plans: ManagedOperationPlan<unknown>[]) {
@@ -593,14 +477,6 @@ type BoundWorkflowStep<
   run(args: StructuredStepArgs<Type, Target>): ManagedStepOperation<FunctionReturnType<Target>>;
 };
 
-type BoundManualWorkflowStep = BoundStep & {
-  /**
-   * Tracks a small inline sequence as one progress step. Always await this call
-   * immediately; manual steps cannot participate in structured parallelism.
-   */
-  run<Result>(callback: () => Promise<Result>): Promise<Result>;
-};
-
 type BoundSteps<Steps extends StepDefinitions> = {
   readonly [Key in keyof Steps]: Steps[Key] extends ActivityStepDefinition<
     infer Definition,
@@ -609,7 +485,7 @@ type BoundSteps<Steps extends StepDefinitions> = {
     ? BoundActivityStep<Definition, Builder>
     : Steps[Key] extends WorkflowStepDefinition<infer Type, infer Target>
       ? BoundWorkflowStep<Type, Target>
-      : BoundManualWorkflowStep;
+      : never;
 };
 
 /**
@@ -623,31 +499,27 @@ type BoundSteps<Steps extends StepDefinitions> = {
 export type ManagedWorkflowCtx<Steps extends StepDefinitions = StepDefinitions> = WorkflowCtx & {
   readonly steps: BoundSteps<Steps>;
   /**
-   * Starts and joins a keyed group of declared activity/workflow operations.
+   * Runs declared activity and workflow steps concurrently and waits for all of
+   * them to finish.
    *
-   * Pass fresh `steps.*.run()` results directly in one object. The coordinator
-   * records every start before executing the group and preserves each result's
-   * inferred type by key. Operations are single-use, nested groups are
-   * rejected, and manual steps are excluded by the input type.
+   * Pass fresh `steps.*.run()` results in one object. The method preserves each
+   * result's type by key, accepts each operation only once, and rejects nested
+   * parallel groups.
    *
    * @see {@link activityStep}
    * @see {@link workflowStep}
-   * @see {@link manualWorkflowStep}
    */
   parallel<const Operations extends Readonly<Record<string, ManagedStepOperation<unknown>>>>(
     operations: Operations,
   ): Promise<{ [Key in keyof Operations]: ManagedOperationResult<Operations[Key]> }>;
   /**
-   * Starts and joins a keyed group while preserving each operation's outcome.
+   * Runs declared steps concurrently and returns every outcome.
    *
-   * Use this when required and optional durable branches should execute
-   * concurrently. Scheduling failures still reject the group; activity or
-   * workflow failures are returned as rejected results after every branch has
-   * reached a durable terminal state.
+   * Use this when some branches may fail but all branches must finish. A
+   * scheduling failure still rejects the group; activity and workflow failures
+   * appear as rejected results after each branch reaches a terminal state.
    */
-  parallelSettled<
-    const Operations extends Readonly<Record<string, ManagedStepOperation<unknown>>>,
-  >(
+  parallelSettled<const Operations extends Readonly<Record<string, ManagedStepOperation<unknown>>>>(
     operations: Operations,
   ): Promise<{
     [Key in keyof Operations]: ManagedOperationSettledResult<Operations[Key]>;
@@ -670,29 +542,26 @@ export class ManagedWorkflowManager {
   ) {}
 
   /**
-   * Captures a managed workflow's validators and consumer-visible step map.
+   * Defines a managed workflow with typed, named steps.
    *
-   * Declare the safe, reusable path with {@link activityStep} and
-   * {@link workflowStep}; reserve {@link manualWorkflowStep} for a small
-   * immediately-awaited escape hatch. Literal step keys and operation types
-   * flow into `handler`, while labels default from the key and ordering
-   * defaults to declaration order.
+   * Declare steps with {@link activityStep} and {@link workflowStep}. Their
+   * keys, operation types, and input/output types are available in `handler`.
+   * Labels default to readable versions of the keys, and order defaults to the
+   * declaration order.
    *
-   * The handler remains ordinary imperative TypeScript. At runtime all steps
-   * are registered before it runs; call `skip()` when an untaken branch needs
-   * an immediate reason, while steps never reached are finalized
-   * automatically. Structured operations must be awaited immediately or
-   * passed directly to `step.parallel()`; do not float, reuse, or manually join
-   * them.
+   * The handler is ordinary TypeScript. All steps are registered before it
+   * runs. Call `skip()` for a branch that is intentionally not taken; steps
+   * that the handler never reaches are finalized automatically. Await each
+   * operation immediately or pass it directly to `step.parallel()`.
    *
    * Changing only the workflow graph does not require an activity version
-   * bump. Bump an activity version for incompatible worker-facing changes and
-   * `protocolVersion` for incompatible backend-to-worker transport changes.
+   * bump. Increase the activity version for an incompatible worker-facing
+   * change, and increase `protocolVersion` for an incompatible backend-to-worker
+   * transport change.
    *
    * @see {@link ManagedWorkflowManager.start}
    * @see {@link activityStep}
    * @see {@link workflowStep}
-   * @see {@link manualWorkflowStep}
    */
   define<
     const Args extends PropertyValidators,
@@ -756,9 +625,7 @@ export class ManagedWorkflowManager {
               key,
               step.kind === "activity"
                 ? this.bindActivityStep(workflow, coordinator, key, step)
-                : step.kind === "workflow"
-                  ? this.bindWorkflowStep(workflow, coordinator, key, step)
-                  : this.bindManualWorkflowStep(workflow, coordinator, key),
+                : this.bindWorkflowStep(workflow, coordinator, key, step),
             ]),
           ) as BoundSteps<Steps>;
           return await fn(
@@ -766,8 +633,7 @@ export class ManagedWorkflowManager {
               ...workflow,
               steps: bound,
               parallel: async (operations) => await coordinator.parallel(operations),
-              parallelSettled: async (operations) =>
-                await coordinator.parallelSettled(operations),
+              parallelSettled: async (operations) => await coordinator.parallelSettled(operations),
             },
             args,
           );
@@ -790,8 +656,9 @@ export class ManagedWorkflowManager {
           let activityId: string | undefined;
           return {
             prepare: async () => {
+              coordinator.claim(key);
               await workflow.runMutation(
-                this.component.workflowSteps.startActivity,
+                this.component.workflowSteps.mark,
                 {
                   workflowId: workflow.workflowId,
                   key,
@@ -823,33 +690,11 @@ export class ManagedWorkflowManager {
                     inline: true,
                   }),
               };
-              try {
-                activityId = await this.activities.schedule(
-                  schedulingContext as never,
-                  workflow.workflowId,
-                  step.activity,
-                  input as ActivityInput<Definition>,
-                );
-              } catch (error) {
-                await workflow.runMutation(
-                  this.component.workflowSteps.failActivity,
-                  {
-                    workflowId: workflow.workflowId,
-                    key,
-                    error: error instanceof Error ? error.message : String(error),
-                  },
-                  { name: `${key}:fail`, inline: true },
-                );
-                throw error;
-              }
-              await workflow.runMutation(
-                this.component.workflowSteps.linkActivity,
-                {
-                  workflowId: workflow.workflowId,
-                  key,
-                  activityId,
-                },
-                { name: `${key}:link`, inline: true },
+              activityId = await this.activities.schedule(
+                schedulingContext as never,
+                workflow.workflowId,
+                step.activity,
+                input as ActivityInput<Definition>,
               );
             },
             execute: async () => {
@@ -863,7 +708,10 @@ export class ManagedWorkflowManager {
           };
         }),
       skip: async (message) =>
-        await coordinator.exclusive(() => this.skipStepPlan(workflow, key, message)),
+        await coordinator.exclusive(() => {
+          coordinator.claim(key);
+          return this.skipStepPlan(workflow, key, message);
+        }),
     };
   }
 
@@ -879,35 +727,24 @@ export class ManagedWorkflowManager {
     return {
       run: (args) =>
         coordinator.operation(() => ({
-          prepare: async () => await this.startWorkflowStep(workflow, key),
+          prepare: async () => {
+            coordinator.claim(key);
+            await this.startWorkflowStep(workflow, key);
+          },
           execute: async () => await this.runStructuredWorkflowStep(workflow, key, step, args),
           finalize: async (result) => await this.finishWorkflowStep(workflow, key, result),
         })),
       skip: async (message) =>
-        await coordinator.exclusive(() => this.skipStepPlan(workflow, key, message)),
-    };
-  }
-
-  private bindManualWorkflowStep(
-    workflow: WorkflowCtx,
-    coordinator: ManagedOperationCoordinator,
-    key: string,
-  ): BoundManualWorkflowStep {
-    return {
-      run: async <Result>(callback: () => Promise<Result>) =>
-        await coordinator.exclusive(() => ({
-          prepare: async () => await this.startWorkflowStep(workflow, key),
-          execute: callback,
-          finalize: async (result) => await this.finishWorkflowStep(workflow, key, result),
-        })),
-      skip: async (message) =>
-        await coordinator.exclusive(() => this.skipStepPlan(workflow, key, message)),
+        await coordinator.exclusive(() => {
+          coordinator.claim(key);
+          return this.skipStepPlan(workflow, key, message);
+        }),
     };
   }
 
   private async startWorkflowStep(workflow: WorkflowCtx, key: string) {
     await workflow.runMutation(
-      this.component.workflowSteps.start,
+      this.component.workflowSteps.mark,
       {
         workflowId: workflow.workflowId,
         key,
@@ -923,7 +760,7 @@ export class ManagedWorkflowManager {
   ) {
     const failed = result.status === "rejected";
     await workflow.runMutation(
-      this.component.workflowSteps.finish,
+      this.component.workflowSteps.mark,
       {
         workflowId: workflow.workflowId,
         key,
@@ -969,7 +806,7 @@ export class ManagedWorkflowManager {
       prepare: async () => {},
       execute: async () => {
         await workflow.runMutation(
-          this.component.workflowSteps.skip,
+          this.component.workflowSteps.mark,
           {
             workflowId: workflow.workflowId,
             key,
@@ -988,19 +825,95 @@ export class ManagedWorkflowManager {
       | Pick<GenericQueryCtx<GenericDataModel>, "runQuery">,
     workflowId: WorkflowId,
   ) {
-    return await ctx.runQuery(this.component.workflowSteps.list, { workflowId });
+    const definitions = await ctx.runQuery(this.component.workflowSteps.list, { workflowId });
+    const journal = [] as Awaited<ReturnType<WorkflowManager["listSteps"]>>["page"];
+    let cursor: string | null = null;
+    do {
+      const page = await this.workflows.listSteps(ctx, workflowId, {
+        paginationOpts: { cursor, numItems: 100 },
+      });
+      journal.push(...page.page);
+      cursor = page.isDone ? null : page.continueCursor;
+    } while (cursor);
+    const status = await this.workflows.status(ctx, workflowId);
+    return await Promise.all(
+      definitions
+        .sort((a, b) => a.position - b.position)
+        .map(async (definition) => {
+          const { key } = definition;
+          const entries = journal.filter(
+            (entry) => entry.name === key || entry.name.startsWith(`${key}:`),
+          );
+          const schedule = entries.find((entry) => entry.name === `${key}:schedule`);
+          const activityId =
+            schedule?.runResult?.kind === "success"
+              ? (schedule.runResult.returnValue as string)
+              : undefined;
+          const activity = activityId
+            ? await ctx.runQuery(this.component.activities.get, { activityId })
+            : null;
+          const event = activityId
+            ? journal.find((entry) => entry.kind === "event" && entry.name === activityId)
+            : undefined;
+          const failure = [...entries, ...(event ? [event] : [])].find(
+            (entry) => entry.runResult?.kind === "failed",
+          );
+          const skipped = entries.find((entry) => entry.name === `${key}:skip`);
+          const completed = entries.find((entry) => entry.name === `${key}:complete`);
+          const explicitFailure = entries.find((entry) => entry.name === `${key}:fail`);
+          const state =
+            activity?.state === "scheduled"
+              ? ("queued" as const)
+              : (activity?.state ??
+                (failure || explicitFailure
+                  ? ("failed" as const)
+                  : skipped
+                    ? ("skipped" as const)
+                    : completed || event?.runResult?.kind === "success"
+                      ? ("completed" as const)
+                      : status.type === "completed"
+                        ? ("skipped" as const)
+                        : status.type !== "inProgress"
+                          ? ("canceled" as const)
+                          : entries.length
+                            ? ("running" as const)
+                            : ("pending" as const)));
+          return {
+            ...definition,
+            state,
+            activityId,
+            attempt: activity?.attempt,
+            progress: ["completed", "failed", "canceled", "skipped"].includes(state)
+              ? 1
+              : (activity?.progress ?? 0),
+            message:
+              activity?.progressMessage ??
+              (skipped?.args as { message?: string } | undefined)?.message,
+            error:
+              activity?.result?.kind === "failed"
+                ? activity.result.errorMessage
+                : failure?.runResult?.kind === "failed"
+                  ? failure.runResult.error
+                  : (explicitFailure?.args as { error?: string } | undefined)?.error,
+            startedAt: activity?.startedAt ?? entries[0]?.startedAt,
+            completedAt:
+              activity?.completedAt ??
+              completed?.completedAt ??
+              failure?.completedAt ??
+              event?.completedAt,
+          };
+        }),
+    );
   }
 
   async cancelActivities(
     ctx: Pick<GenericMutationCtx<GenericDataModel>, "runQuery" | "runMutation">,
     workflowId: WorkflowId,
   ) {
-    const steps = await this.getProgress(ctx, workflowId);
-    await Promise.all(
-      steps
-        .filter((step) => step.activityId && (step.state === "queued" || step.state === "running"))
-        .map(async (step) => await this.activities.cancel(ctx, step.activityId as any)),
-    );
+    const scopeId = await ctx.runQuery(this.component.artifacts.getScopeForWorkflow, {
+      workflowId,
+    });
+    if (scopeId) await ctx.runMutation(this.component.activities.cancelScope, { scopeId });
   }
 
   /**
@@ -1055,10 +968,6 @@ export async function settleManagedWorkflow(
   } else {
     await abandonArtifactScope(activities, ctx, artifactScopeId);
   }
-  await ctx.runMutation(activities.workflowSteps.finalize, {
-    workflowId: args.workflowId,
-    succeeded: args.result.kind === "success",
-  });
 
   const completion = args.context.completion;
   if (completion) {

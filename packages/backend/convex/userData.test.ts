@@ -21,8 +21,6 @@ describe("anonymous user data migration", () => {
         sourceIv: "iv",
         requestedBy: "anonymous",
         state: "queued",
-        stage: "queued",
-        progress: 0,
         createdAt: now,
         updatedAt: now,
       });

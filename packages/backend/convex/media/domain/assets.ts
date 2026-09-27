@@ -26,6 +26,23 @@ export async function getMediaEnrichment(ctx: Pick<QueryCtx, "db">, assetId: Id<
 export async function cancelAssetEnrichment(ctx: MutationCtx, assetId: Id<"mediaAssets">) {
   const enrichment = await getMediaEnrichment(ctx, assetId);
   if (!enrichment || enrichment.state !== "processing") return enrichment;
+  const error = "Media enrichment was canceled";
+  await ctx.db.patch(enrichment._id, { state: "canceled", error, updatedAt: Date.now() });
+  const asset = await ctx.db.get(assetId);
+  if (asset)
+    await ctx.db.patch(assetId, {
+      melodyArtifactId: undefined,
+      ...(asset.annotationsState === "processing"
+        ? { annotationsState: "failed" as const, annotationsError: error }
+        : {}),
+    });
+  const tracks = await ctx.db
+    .query("mediaLyricTracks")
+    .withIndex("by_asset", (q) => q.eq("asset", assetId))
+    .take(100);
+  for (const track of tracks)
+    if (track.state === "processing")
+      await ctx.db.patch(track._id, { state: "failed", error, updatedAt: Date.now() });
   if (enrichment.workflowId) {
     try {
       await managedWorkflow.cancelActivities(ctx, enrichment.workflowId as WorkflowId);
@@ -33,9 +50,6 @@ export async function cancelAssetEnrichment(ctx: MutationCtx, assetId: Id<"media
     } catch (error) {
       console.warn(`Unable to cancel media enrichment ${enrichment.workflowId}`, error);
     }
-  }
-  for (const activity of enrichment.activeActivities ?? []) {
-    await activities.cancel(ctx, activity.activityId as any);
   }
   return enrichment;
 }
@@ -50,7 +64,7 @@ export async function deleteAssetArtifacts(ctx: MutationCtx, asset: Doc<"mediaAs
   for (const field of assetArtifactFields) {
     const artifactId = asset[field];
     if (!artifactId) continue;
-    if (await activities.deleteArtifact(ctx, artifactId as ArtifactId)) {
+    if (await activities.deleteArtifact(ctx, artifactId as ArtifactId, asset._id)) {
       deleted += 1;
     }
   }
@@ -65,7 +79,7 @@ export async function deleteLyricTracks(ctx: MutationCtx, assetId: Id<"mediaAsse
   let deletedArtifacts = 0;
   for (const track of tracks) {
     for (const artifactId of [track.textArtifactId, track.timedArtifactId]) {
-      if (artifactId && (await activities.deleteArtifact(ctx, artifactId as ArtifactId))) {
+      if (artifactId && (await activities.deleteArtifact(ctx, artifactId as ArtifactId, assetId))) {
         deletedArtifacts += 1;
       }
     }

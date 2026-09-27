@@ -1,414 +1,275 @@
 /// <reference types="vite/client" />
-
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { convexTest } from "convex-test";
 import { api, internal } from "./_generated/api";
 import schema from "./schema";
 import { protocolVersion } from "./validators";
+import { wire, type WireSchema } from "../src/wire";
 
 const modules = import.meta.glob("./**/*.{ts,js}");
+const claimArgs = {
+  protocolVersion,
+  taskQueue: "test",
+  workerId: "worker",
+  supportedActivities: [{ name: "test", version: 1 }],
+};
 
-function scheduleArgs(overrides: Record<string, unknown> = {}) {
-  return {
-    activityType: "media.separate",
+async function setup(outputSchema: WireSchema = wire.object({ value: wire.string })) {
+  const t = convexTest(schema, modules);
+  const scopeId = await t.mutation(api.artifacts.createScope, {});
+  await t.mutation(api.artifacts.attachWorkflow, { scopeId, workflowId: "workflow" });
+  const args = {
+    activityType: "test",
     activityVersion: 1,
-    taskQueue: "stems",
-    queue: { leaseDurationMs: 10_000, maxConcurrentActivities: 1 },
-    input: { audioStorageId: "storage-id" },
+    taskQueue: "test",
+    queue: { leaseDurationMs: 1000, maxConcurrentActivities: 1 },
+    input: {},
+    inputSchema: wire.object({}),
+    outputSchema,
+    artifactScopeId: scopeId,
     retryPolicy: {
       maximumAttempts: 3,
-      initialIntervalMs: 1_000,
-      backoffCoefficient: 2,
-      maximumIntervalMs: 30_000,
-      nonRetryableErrorTypes: ["UnsupportedMedia"],
+      initialIntervalMs: 1000,
+      maximumIntervalMs: 1000,
+      backoffCoefficient: 1,
+      nonRetryableErrorTypes: ["Permanent"],
     },
-    startToCloseTimeoutMs: 60_000,
-    scheduleToCloseTimeoutMs: 300_000,
-    ...overrides,
+    startToCloseTimeoutMs: 5000,
+    scheduleToCloseTimeoutMs: 30000,
   };
+  const activityId = await t.mutation(api.activities.schedule, args);
+  const lease = (await t.mutation(api.activities.claim, claimArgs))!;
+  return { t, scopeId, args, activityId, lease, attemptToken: lease.attemptToken };
+}
+async function upload(t: ReturnType<typeof convexTest>, attemptToken: string, slot: string) {
+  const storageId = await t.run((ctx) => ctx.storage.store(new Blob([slot])));
+  return await t.mutation(api.artifacts.registerUpload, { attemptToken, slot, storageId });
 }
 
-async function claim(t: ReturnType<typeof convexTest>, workerId = "worker-1") {
-  return await t.mutation(api.activities.claim, {
-    protocolVersion,
-    taskQueue: "stems",
-    workerId,
-    supportedActivities: [{ name: "media.separate", version: 1 }],
-  });
-}
-
-describe("activities component", () => {
+describe("attempt capabilities and publication", () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+    vi.setSystemTime(new Date("2026-01-01"));
   });
+  afterEach(() => vi.useRealTimers());
 
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  test("rejects claims from an incompatible worker protocol", async () => {
-    const t = convexTest(schema, modules);
+  test("rejects old workers and claims a compatible attempt exactly once", async () => {
+    const { t, lease, args } = await setup();
     await expect(
-      t.mutation(api.activities.claim, {
-        protocolVersion: 2,
-        taskQueue: "stems",
-        workerId: "old-worker",
-        supportedActivities: [{ name: "media.separate", version: 1 }],
-      } as never),
+      t.mutation(api.activities.claim, { ...claimArgs, protocolVersion: 1 } as never),
     ).rejects.toThrow();
+    expect(await t.mutation(api.activities.claim, claimArgs)).toEqual(lease);
+    await t.mutation(api.activities.schedule, args);
+    expect(await t.mutation(api.activities.claim, { ...claimArgs, workerId: "other" })).toBeNull();
   });
 
-  test("claims compatible work once and respects queue concurrency", async () => {
-    const t = convexTest(schema, modules);
-    const firstId = await t.mutation(api.activities.schedule, scheduleArgs());
-    await t.mutation(
-      api.activities.schedule,
-      scheduleArgs({ input: { audioStorageId: "second" } }),
-    );
-
-    const first = await claim(t);
-    expect(first).toMatchObject({
-      activityId: firstId,
-      activityType: "media.separate",
-      activityVersion: 1,
-      attempt: 1,
-      input: { audioStorageId: "storage-id" },
+  test("renews only a live capability", async () => {
+    const { t, attemptToken, lease } = await setup();
+    vi.setSystemTime(lease.leaseExpiresAt - 1);
+    expect(await t.mutation(api.activities.renew, { attemptToken, progress: 0.5 })).toMatchObject({
+      accepted: true,
     });
-    const repeated = await claim(t);
-    expect(repeated).toEqual(first);
-    expect(await claim(t, "worker-2")).toBeNull();
-
-    const stored = await t.query(api.activities.get, { activityId: firstId });
-    expect(stored).toMatchObject({
-      state: "running",
-      attempt: 1,
-      startedAt: expect.any(Number),
+    expect(await t.mutation(api.activities.renew, { attemptToken: "unknown" })).toMatchObject({
+      accepted: false,
+    });
+    vi.setSystemTime(lease.leaseExpiresAt + 1000);
+    expect(await t.mutation(api.activities.renew, { attemptToken })).toMatchObject({
+      accepted: false,
     });
   });
 
-  test("renews only the current fenced attempt", async () => {
-    const t = convexTest(schema, modules);
-    const activityId = await t.mutation(api.activities.schedule, scheduleArgs());
-    const leased = await claim(t);
-    if (!leased) throw new Error("Expected a claimed activity");
+  test.each(["leaseExpiresAt", "attemptDeadline", "scheduleDeadline"] as const)(
+    "rejects writes after %s even before the watchdog",
+    async (deadline) => {
+      const { t, lease, attemptToken } = await setup(
+        wire.object({ file: wire.artifact("retained") }),
+      );
+      vi.setSystemTime(lease[deadline] + 1);
+      expect(
+        await t.mutation(api.activities.complete, { attemptToken, value: { file: "invented" } }),
+      ).toMatchObject({ accepted: false });
+      expect(await t.mutation(api.activities.renew, { attemptToken })).toMatchObject({
+        accepted: false,
+      });
+      await expect(
+        t.mutation(api.artifacts.createUpload, { attemptToken, slot: "file" }),
+      ).rejects.toThrow("lease");
+      await expect(t.query(api.activities.getAttemptInput, { attemptToken })).rejects.toThrow(
+        "lease",
+      );
+    },
+  );
 
-    vi.advanceTimersByTime(5_000);
-    const renewed = await t.mutation(api.activities.renew, {
-      activityId,
-      attempt: leased.attempt,
-      leaseToken: leased.leaseToken,
-      progress: 0.25,
-      progressMessage: "Separating stems",
+  test("keeps retry receipts after another attempt starts and rejects conflicting outcomes", async () => {
+    const { t, activityId, attemptToken } = await setup();
+    const failure = { attemptToken, errorType: "Temporary", errorMessage: "retry" };
+    expect(await t.mutation(api.activities.fail, failure)).toMatchObject({
+      accepted: true,
+      retrying: true,
     });
-    expect(renewed).toMatchObject({ accepted: true, cancelRequested: false });
-    expect(renewed.leaseExpiresAt).toBeGreaterThan(leased.leaseExpiresAt);
-
-    const stale = await t.mutation(api.activities.renew, {
-      activityId,
-      attempt: leased.attempt,
-      leaseToken: "stale-token",
-    });
-    expect(stale.accepted).toBe(false);
-    expect(await t.query(api.activities.get, { activityId })).toMatchObject({
-      progress: 0.25,
-      progressMessage: "Separating stems",
-    });
-  });
-
-  test("retries failures and fences a stale completion", async () => {
-    const t = convexTest(schema, modules);
-    const activityId = await t.mutation(api.activities.schedule, scheduleArgs());
-    const first = await claim(t);
-    if (!first) throw new Error("Expected a claimed activity");
-
-    const failed = await t.mutation(api.activities.fail, {
-      activityId,
-      attempt: first.attempt,
-      leaseToken: first.leaseToken,
-      requestId: "failure-1",
-      errorType: "ModelUnavailable",
-      errorMessage: "temporary failure",
-    });
-    expect(failed).toEqual({ accepted: true, duplicate: false, retrying: true });
-    const duplicateFailure = await t.mutation(api.activities.fail, {
-      activityId,
-      attempt: first.attempt,
-      leaseToken: first.leaseToken,
-      requestId: "failure-1",
-      errorType: "ModelUnavailable",
-      errorMessage: "temporary failure",
-    });
-    expect(duplicateFailure).toEqual({ accepted: true, duplicate: true, retrying: true });
-
-    vi.advanceTimersByTime(1_000);
-    const second = await claim(t, "worker-2");
-    if (!second) throw new Error("Expected a retry claim");
+    vi.setSystemTime(Date.now() + 1001);
+    const second = (await t.mutation(api.activities.claim, claimArgs))!;
     expect(second.attempt).toBe(2);
-
-    const stale = await t.mutation(api.activities.complete, {
-      activityId,
-      attempt: first.attempt,
-      leaseToken: first.leaseToken,
-      requestId: "complete-stale",
-      value: { instrumentalStorageId: "stale" },
+    expect(await t.mutation(api.activities.fail, failure)).toMatchObject({
+      accepted: true,
+      duplicate: true,
+      retrying: true,
     });
-    expect(stale.accepted).toBe(false);
-
-    const completed = await t.mutation(api.activities.complete, {
-      activityId,
-      attempt: second.attempt,
-      leaseToken: second.leaseToken,
-      requestId: "complete-2",
-      value: { instrumentalStorageId: "instrumental" },
+    await expect(
+      t.mutation(api.activities.complete, { attemptToken, value: { value: "stale" } }),
+    ).rejects.toThrow("different result");
+    const success = { attemptToken: second.attemptToken, value: { value: "done" } };
+    expect(await t.mutation(api.activities.complete, success)).toMatchObject({
+      accepted: true,
+      duplicate: false,
     });
-    const duplicate = await t.mutation(api.activities.complete, {
-      activityId,
-      attempt: second.attempt,
-      leaseToken: second.leaseToken,
-      requestId: "complete-2",
-      value: { instrumentalStorageId: "instrumental" },
+    expect(await t.mutation(api.activities.complete, success)).toMatchObject({
+      accepted: true,
+      duplicate: true,
     });
-    expect(completed).toEqual({ accepted: true, duplicate: false });
-    expect(duplicate).toEqual({ accepted: true, duplicate: true });
+    await expect(
+      t.mutation(api.activities.complete, { ...success, value: { value: "different" } }),
+    ).rejects.toThrow("different result");
     expect(await t.query(api.activities.get, { activityId })).toMatchObject({
       state: "completed",
       attempt: 2,
-      startedAt: expect.any(Number),
-      completedAt: expect.any(Number),
-      result: {
-        kind: "success",
-        value: { instrumentalStorageId: "instrumental" },
-      },
     });
   });
 
-  test("lease expiry is durably retried by the watchdog", async () => {
-    const t = convexTest(schema, modules);
-    const activityId = await t.mutation(api.activities.schedule, scheduleArgs());
-    const first = await claim(t);
-    if (!first) throw new Error("Expected a claimed activity");
-
-    vi.setSystemTime(first.leaseExpiresAt + 1);
+  test("watchdog retries lost workers and permanent errors terminate", async () => {
+    const { t, activityId, lease } = await setup();
+    vi.setSystemTime(lease.leaseExpiresAt + 1);
     await t.mutation(internal.activities.watchdog, { activityId });
-
     expect(await t.query(api.activities.get, { activityId })).toMatchObject({
       state: "scheduled",
-      attempt: 1,
       lastErrorType: "WorkerLost",
     });
-  });
-
-  test("cancels queued and running activities", async () => {
-    const t = convexTest(schema, modules);
-    const queuedId = await t.mutation(api.activities.schedule, scheduleArgs());
-    await t.mutation(api.activities.requestCancel, { activityId: queuedId });
-    expect(await t.query(api.activities.get, { activityId: queuedId })).toMatchObject({
-      state: "canceled",
-    });
-
-    const runningId = await t.mutation(
-      api.activities.schedule,
-      scheduleArgs({ taskQueue: "other-stems" }),
-    );
-    const running = await t.mutation(api.activities.claim, {
-      protocolVersion,
-      taskQueue: "other-stems",
-      workerId: "worker",
-      supportedActivities: [{ name: "media.separate", version: 1 }],
-    });
-    if (!running) throw new Error("Expected a claimed activity");
-    await t.mutation(api.activities.requestCancel, { activityId: runningId });
-    const renewal = await t.mutation(api.activities.renew, {
-      activityId: runningId,
-      attempt: running.attempt,
-      leaseToken: running.leaseToken,
-    });
-    expect(renewal).toMatchObject({ accepted: true, cancelRequested: true });
-
-    await t.mutation(api.activities.acknowledgeCancellation, {
-      activityId: runningId,
-      attempt: running.attempt,
-      leaseToken: running.leaseToken,
-      requestId: "cancel-ack",
-    });
-    expect(await t.query(api.activities.get, { activityId: runningId })).toMatchObject({
-      state: "canceled",
-    });
-  });
-
-  test("marks configured application errors non-retryable", async () => {
-    const t = convexTest(schema, modules);
-    const activityId = await t.mutation(api.activities.schedule, scheduleArgs());
-    const leased = await claim(t);
-    if (!leased) throw new Error("Expected a claimed activity");
-
-    const result = await t.mutation(api.activities.fail, {
-      activityId,
-      attempt: leased.attempt,
-      leaseToken: leased.leaseToken,
-      requestId: "unsupported",
-      errorType: "UnsupportedMedia",
-      errorMessage: "No audio stream",
-    });
-    expect(result.retrying).toBe(false);
-    expect(await t.query(api.activities.get, { activityId })).toMatchObject({
-      state: "failed",
-      result: {
-        kind: "failed",
-        errorType: "UnsupportedMedia",
-      },
-    });
-  });
-
-  test("registers scoped artifacts and deletes intermediaries when the scope closes", async () => {
-    const t = convexTest(schema, modules);
-    const scopeId = await t.mutation(api.artifacts.createScope, {});
-    const activityId = await t.mutation(
-      api.activities.schedule,
-      scheduleArgs({
-        artifactScopeId: scopeId,
-        artifactSlots: ["intermediate", "final"],
-        artifactDefinitions: [
-          { slot: "intermediate", disposition: "intermediate" },
-          { slot: "final", disposition: "retained" },
-        ],
+    vi.setSystemTime(Date.now() + 1001);
+    const next = (await t.mutation(api.activities.claim, claimArgs))!;
+    expect(
+      await t.mutation(api.activities.fail, {
+        attemptToken: next.attemptToken,
+        errorType: "Permanent",
+        errorMessage: "stop",
       }),
-    );
-    const leased = await claim(t);
-    if (!leased) throw new Error("Expected a claimed activity");
-    const [intermediateStorageId, finalStorageId] = await t.run(async (ctx) => [
-      await ctx.storage.store(new Blob(["intermediate"])),
-      await ctx.storage.store(new Blob(["final"])),
-    ]);
-    const identity = {
-      activityId,
-      attempt: leased.attempt,
-      leaseToken: leased.leaseToken,
-    };
-    const intermediateId = await t.mutation(api.artifacts.registerUpload, {
-      ...identity,
-      slot: "intermediate",
-      storageId: intermediateStorageId,
-    });
-    const finalId = await t.mutation(api.artifacts.registerUpload, {
-      ...identity,
-      slot: "final",
-      storageId: finalStorageId,
-    });
+    ).toMatchObject({ retrying: false });
+    expect(await t.query(api.activities.get, { activityId })).toMatchObject({ state: "failed" });
+  });
 
-    await t.mutation(api.activities.complete, {
-      ...identity,
-      requestId: "complete-with-artifacts",
-      value: { artifactId: finalId },
-    });
-    await t.mutation(api.artifacts.closeScope, { scopeId });
+  test("canceling the scope fences queued and running work without progress records", async () => {
+    const { t, scopeId, args, activityId, attemptToken } = await setup();
+    const queued = await t.mutation(api.activities.schedule, args);
+    await t.mutation(api.artifacts.abandonScope, { scopeId });
+    for (const id of [activityId, queued])
+      expect(await t.query(api.activities.get, { activityId: id })).toMatchObject({
+        state: "canceled",
+      });
+    expect(
+      await t.mutation(api.activities.complete, { attemptToken, value: { value: "late" } }),
+    ).toMatchObject({ accepted: false });
+    await expect(t.mutation(api.activities.schedule, args)).rejects.toThrow("scope");
+  });
+
+  test("expires an expired scope and cleans its staged artifacts", async () => {
+    const { t, scopeId, activityId, attemptToken } = await setup(
+      wire.object({ file: wire.artifact("retained") }),
+    );
+    const file = await upload(t, attemptToken, "file");
+    await t.run((ctx) => ctx.db.patch(scopeId, { expiresAt: Date.now() - 1 }));
+
+    await t.mutation(internal.artifacts.expireScope, { scopeId });
+    expect(await t.query(api.activities.get, { activityId })).toMatchObject({ state: "canceled" });
+    expect(await t.run((ctx) => ctx.db.get(scopeId))).toMatchObject({ state: "abandoned" });
+
     await t.mutation(internal.artifacts.cleanupScope, { scopeId });
-
-    expect(await t.query(api.artifacts.getUrl, { artifactId: intermediateId })).toBeNull();
-    expect(await t.query(api.artifacts.getUrl, { artifactId: finalId })).not.toBeNull();
-    expect(
-      await t.run(async (ctx) => (await ctx.storage.get(intermediateStorageId)) !== null),
-    ).toBe(false);
-    expect(await t.run(async (ctx) => (await ctx.storage.get(finalStorageId)) !== null)).toBe(true);
+    expect(await t.query(api.artifacts.getUrl, { artifactId: file })).toBeNull();
   });
 
-  test("binds a scope to one workflow and exposes the binding by workflow id", async () => {
-    const t = convexTest(schema, modules);
-    const scopeId = await t.mutation(api.artifacts.createScope, {});
-
-    await t.mutation(api.artifacts.attachWorkflow, {
-      scopeId,
-      workflowId: "workflow-1",
-    });
-
-    expect(await t.query(api.artifacts.getScopeForWorkflow, { workflowId: "workflow-1" })).toBe(
-      scopeId,
+  test("rejects malformed outputs, missing uploads, and artifacts from another attempt", async () => {
+    const { t, args, activityId, attemptToken } = await setup(
+      wire.object({ file: wire.artifact("retained") }),
     );
     await expect(
-      t.mutation(api.artifacts.attachWorkflow, {
-        scopeId,
-        workflowId: "workflow-2",
-      }),
-    ).rejects.toThrow("already attached");
-  });
-
-  test("allows only one upload per activity attempt and artifact slot", async () => {
-    const t = convexTest(schema, modules);
-    const scopeId = await t.mutation(api.artifacts.createScope, {});
-    const activityId = await t.mutation(
-      api.activities.schedule,
-      scheduleArgs({
-        artifactScopeId: scopeId,
-        artifactSlots: ["final"],
-        artifactDefinitions: [{ slot: "final", disposition: "retained" }],
-      }),
-    );
-    const leased = await claim(t);
-    if (!leased) throw new Error("Expected a claimed activity");
-    const [firstStorageId, secondStorageId] = await t.run(async (ctx) => [
-      await ctx.storage.store(new Blob(["first"])),
-      await ctx.storage.store(new Blob(["second"])),
-    ]);
-    const identity = {
-      activityId,
-      attempt: leased.attempt,
-      leaseToken: leased.leaseToken,
-      slot: "final",
-    };
-    await t.mutation(api.artifacts.registerUpload, {
-      ...identity,
-      storageId: firstStorageId,
-    });
-
+      t.mutation(api.activities.complete, { attemptToken, value: {} }),
+    ).rejects.toThrow();
     await expect(
-      t.mutation(api.artifacts.registerUpload, {
-        ...identity,
-        storageId: secondStorageId,
-      }),
-    ).rejects.toThrow("already registered artifact slot");
+      t.mutation(api.activities.complete, { attemptToken, value: { file: "invented" } }),
+    ).rejects.toThrow();
+    const file = await upload(t, attemptToken, "file");
+    await t.mutation(api.activities.fail, {
+      attemptToken,
+      errorType: "Transient",
+      errorMessage: "retry",
+    });
+    vi.setSystemTime(Date.now() + 1001);
+    const next = (await t.mutation(api.activities.claim, claimArgs))!;
+    await expect(
+      t.mutation(api.activities.complete, { attemptToken: next.attemptToken, value: { file } }),
+    ).rejects.toThrow("Invalid output artifact");
+    expect(await t.query(api.activities.get, { activityId })).toMatchObject({ state: "running" });
+    await expect(
+      t.mutation(api.activities.schedule, { ...args, input: { extra: true } }),
+    ).rejects.toThrow();
   });
 
-  test("sweeps old uploads that were never registered from component storage", async () => {
-    const t = convexTest(schema, modules);
-    await t.run(async (ctx) => {
-      for (let index = 0; index < 101; index++) {
-        await ctx.storage.store(new Blob([`orphan-${index}`]));
-      }
-    });
-    vi.advanceTimersByTime(24 * 60 * 60_000 + 1);
+  test.each(["closeScope", "abandonScope"] as const)(
+    "%s preserves adopted outputs and deletes unowned outputs",
+    async (close) => {
+      const { t, scopeId, attemptToken } = await setup(
+        wire.object({
+          published: wire.artifact("retained"),
+          unowned: wire.artifact("retained"),
+          scratch: wire.artifact("intermediate"),
+        }),
+      );
+      const published = await upload(t, attemptToken, "published");
+      const unowned = await upload(t, attemptToken, "unowned");
+      const scratch = await upload(t, attemptToken, "scratch");
+      await t.mutation(api.activities.complete, {
+        attemptToken,
+        value: { published, unowned, scratch },
+      });
+      await expect(
+        t.mutation(api.artifacts.adopt, {
+          workflowId: "other",
+          owner: "asset",
+          artifacts: [{ artifactId: published, slot: "published" }],
+        }),
+      ).rejects.toThrow("another run");
+      await t.mutation(api.artifacts.adopt, {
+        workflowId: "workflow",
+        owner: "asset",
+        artifacts: [{ artifactId: published, slot: "published" }],
+      });
+      await expect(
+        t.mutation(api.artifacts.deleteArtifact, { artifactId: published, owner: "other" }),
+      ).rejects.toThrow("owned");
+      await t.mutation(api.artifacts[close], { scopeId });
+      await t.mutation(internal.artifacts.cleanupScope, { scopeId });
+      expect(await t.query(api.artifacts.getUrl, { artifactId: published })).not.toBeNull();
+      for (const artifactId of [unowned, scratch])
+        expect(await t.query(api.artifacts.getUrl, { artifactId })).toBeNull();
+      await t.mutation(api.artifacts.deleteArtifact, { artifactId: published, owner: "asset" });
+      expect(await t.query(api.artifacts.getUrl, { artifactId: published })).toBeNull();
+    },
+  );
 
-    const result = await t.mutation(internal.artifacts.runStorageSweep, {});
-
-    expect(result).toBeNull();
-    expect(
-      await t.run(async (ctx) => await ctx.db.system.query("_storage").take(200)),
-    ).toHaveLength(1);
-
-    vi.runOnlyPendingTimers();
-    await t.finishInProgressScheduledFunctions();
-
-    expect(
-      await t.run(async (ctx) => await ctx.db.system.query("_storage").take(200)),
-    ).toHaveLength(0);
+  test("registration is idempotent for the same upload, but does not replace a slot", async () => {
+    const { t, attemptToken } = await setup(wire.object({ file: wire.artifact("retained") }));
+    const storageId = await t.run((ctx) => ctx.storage.store(new Blob(["file"])));
+    const args = { attemptToken, slot: "file", storageId };
+    const id = await t.mutation(api.artifacts.registerUpload, args);
+    expect(await t.mutation(api.artifacts.registerUpload, args)).toBe(id);
+    await expect(upload(t, attemptToken, "file")).rejects.toThrow("already registered");
   });
 
-  test("removes terminal activity records after the retention window", async () => {
-    const t = convexTest(schema, modules);
-    const activityId = await t.mutation(api.activities.schedule, scheduleArgs());
-    const leased = await claim(t);
-    if (!leased) throw new Error("Expected a claimed activity");
-    await t.mutation(api.activities.complete, {
-      activityId,
-      attempt: leased.attempt,
-      leaseToken: leased.leaseToken,
-      requestId: "complete-for-retention",
-      value: {},
-    });
-    vi.advanceTimersByTime(7 * 24 * 60 * 60_000 + 1);
-
-    await t.mutation(internal.activities.deleteTerminal, { activityId });
-
-    expect(await t.query(api.activities.get, { activityId })).toBeNull();
+  test("schema rejects running activities without a lease and success without a result", async () => {
+    const { t, activityId } = await setup();
+    await expect(
+      t.run((ctx) => ctx.db.patch(activityId, { leaseToken: undefined })),
+    ).rejects.toThrow();
+    await expect(
+      t.run((ctx) => ctx.db.patch(activityId, { state: "completed", completedAt: Date.now() })),
+    ).rejects.toThrow();
   });
 });

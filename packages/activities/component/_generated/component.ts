@@ -27,20 +27,22 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
       acknowledgeCancellation: FunctionReference<
         "mutation",
         "internal",
-        {
-          activityId: string;
-          attempt: number;
-          leaseToken: string;
-          requestId: string;
-        },
+        { attemptToken: string },
         { accepted: boolean; duplicate: boolean },
+        Name
+      >;
+      cancelScope: FunctionReference<
+        "mutation",
+        "internal",
+        { scopeId: string },
+        null,
         Name
       >;
       claim: FunctionReference<
         "mutation",
         "internal",
         {
-          protocolVersion: 1;
+          protocolVersion: 2;
           supportedActivities: Array<{ name: string; version: number }>;
           taskQueue: string;
           workerId: string;
@@ -52,9 +54,9 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           artifactSlots: Array<string>;
           attempt: number;
           attemptDeadline: number;
+          attemptToken: string;
           input: any;
           leaseExpiresAt: number;
-          leaseToken: string;
           protocolVersion: number;
           scheduleDeadline: number;
           taskQueue: string;
@@ -64,27 +66,18 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
       complete: FunctionReference<
         "mutation",
         "internal",
-        {
-          activityId: string;
-          attempt: number;
-          leaseToken: string;
-          requestId: string;
-          value: any;
-        },
-        { accepted: boolean; duplicate: boolean },
+        { attemptToken: string; value: any },
+        { accepted: boolean; duplicate: boolean; retrying: boolean },
         Name
       >;
       fail: FunctionReference<
         "mutation",
         "internal",
         {
-          activityId: string;
-          attempt: number;
+          attemptToken: string;
           errorMessage: string;
           errorType: string;
-          leaseToken: string;
           nonRetryable?: boolean;
-          requestId: string;
         },
         { accepted: boolean; duplicate: boolean; retrying: boolean },
         Name
@@ -121,14 +114,19 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         },
         Name
       >;
+      getAttemptInput: FunctionReference<
+        "query",
+        "internal",
+        { attemptToken: string },
+        { activityType: string; input: any; workflowId: string },
+        Name
+      >;
       renew: FunctionReference<
         "mutation",
         "internal",
         {
-          activityId: string;
-          attempt: number;
+          attemptToken: string;
           heartbeatDetails?: any;
-          leaseToken: string;
           progress?: number;
           progressMessage?: string;
         },
@@ -152,14 +150,11 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         {
           activityType: string;
           activityVersion: number;
-          artifactDefinitions?: Array<{
-            disposition: "intermediate" | "retained";
-            slot: string;
-          }>;
-          artifactScopeId?: string;
-          artifactSlots?: Array<string>;
+          artifactScopeId: string;
           completion?: { context?: any; fnHandle: string };
           input: any;
+          inputSchema: any;
+          outputSchema: any;
           queue: { leaseDurationMs: number; maxConcurrentActivities?: number };
           retryPolicy: {
             backoffCoefficient: number;
@@ -181,6 +176,17 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         "mutation",
         "internal",
         { scopeId: string },
+        null,
+        Name
+      >;
+      adopt: FunctionReference<
+        "mutation",
+        "internal",
+        {
+          artifacts: Array<{ artifactId: string; slot: string }>;
+          owner: string;
+          workflowId: string;
+        },
         null,
         Name
       >;
@@ -208,19 +214,14 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
       createUpload: FunctionReference<
         "mutation",
         "internal",
-        {
-          activityId: string;
-          attempt: number;
-          leaseToken: string;
-          slot: string;
-        },
+        { attemptToken: string; slot: string },
         { uploadUrl: string },
         Name
       >;
       deleteArtifact: FunctionReference<
         "mutation",
         "internal",
-        { artifactId: string },
+        { artifactId: string; owner: string },
         boolean,
         Name
       >;
@@ -241,87 +242,156 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
       registerUpload: FunctionReference<
         "mutation",
         "internal",
-        {
-          activityId: string;
-          attempt: number;
-          leaseToken: string;
-          slot: string;
-          storageId: string;
-        },
+        { attemptToken: string; slot: string; storageId: string },
         string,
+        Name
+      >;
+      validateProduced: FunctionReference<
+        "query",
+        "internal",
+        { artifactId: string; slot: string; workflowId: string },
+        null,
+        Name
+      >;
+    };
+    drain: {
+      statusPage: FunctionReference<
+        "query",
+        "internal",
+        { cursor: string | null; limit: number },
+        {
+          active: Array<string>;
+          continueCursor: string;
+          isDone: boolean;
+          scanned: number;
+        },
+        Name
+      >;
+    };
+    maintenance: {
+      abandonScopes: FunctionReference<
+        "mutation",
+        "internal",
+        { dryRun: boolean; workflowIds: Array<string> },
+        { changed: number; issues: Array<{ id: string; reason: string }> },
+        Name
+      >;
+      adoptArtifacts: FunctionReference<
+        "mutation",
+        "internal",
+        {
+          dryRun: boolean;
+          references: Array<{
+            artifactId: string;
+            owner: string;
+            slot?: string;
+          }>;
+        },
+        { changed: number; issues: Array<{ id: string; reason: string }> },
+        Name
+      >;
+      finalizeWorkflow: FunctionReference<
+        "mutation",
+        "internal",
+        { dryRun: boolean; workflowId: string },
+        {
+          deletedActivities: number;
+          deletedArtifacts: number;
+          deletedAttempts: number;
+          deletedSteps: number;
+          done: boolean;
+          issues: Array<{ id: string; reason: string }>;
+        },
+        Name
+      >;
+      inspectArtifacts: FunctionReference<
+        "query",
+        "internal",
+        { artifactIds: Array<string> },
+        Array<{
+          activityId?: string;
+          artifactId: string;
+          attempt?: number;
+          disposition?: "intermediate" | "retained";
+          found: boolean;
+          owner?: string;
+          scopeId?: string;
+          slot?: string;
+          state?: "staged" | "adopted";
+          storageExists: boolean;
+          storageId?: string;
+          workflowId?: string;
+        }>,
+        Name
+      >;
+      migrateActivities: FunctionReference<
+        "mutation",
+        "internal",
+        { cursor: string | null; dryRun: boolean; limit: number },
+        {
+          changed: number;
+          continueCursor: string;
+          isDone: boolean;
+          issues: Array<{ id: string; reason: string }>;
+          scanned: number;
+        },
+        Name
+      >;
+      migrateWorkflowSteps: FunctionReference<
+        "mutation",
+        "internal",
+        { cursor: string | null; dryRun: boolean; limit: number },
+        {
+          changed: number;
+          continueCursor: string;
+          isDone: boolean;
+          issues: Array<{ id: string; reason: string }>;
+          scanned: number;
+        },
+        Name
+      >;
+      preflightActivities: FunctionReference<
+        "query",
+        "internal",
+        { cursor: string | null; limit: number },
+        {
+          active: Array<string>;
+          activeV1: Array<string>;
+          continueCursor: string;
+          isDone: boolean;
+          issues: Array<{ id: string; reason: string }>;
+          legacy: number;
+          pendingDeliveries: Array<string>;
+          scanned: number;
+          workflowIds: Array<string>;
+        },
         Name
       >;
     };
     workflowSteps: {
-      failActivity: FunctionReference<
-        "mutation",
-        "internal",
-        { error: string; key: string; workflowId: string },
-        null,
-        Name
-      >;
-      finalize: FunctionReference<
-        "mutation",
-        "internal",
-        { succeeded: boolean; workflowId: string },
-        null,
-        Name
-      >;
-      finish: FunctionReference<
-        "mutation",
-        "internal",
-        {
-          error?: string;
-          key: string;
-          state: "completed" | "failed";
-          workflowId: string;
-        },
-        null,
-        Name
-      >;
-      finishActivity: FunctionReference<
-        "mutation",
-        "internal",
-        {
-          activityId: string;
-          error?: string;
-          state: "completed" | "failed" | "canceled";
-        },
-        null,
-        Name
-      >;
-      linkActivity: FunctionReference<
-        "mutation",
-        "internal",
-        { activityId: string; key: string; workflowId: string },
-        null,
-        Name
-      >;
       list: FunctionReference<
         "query",
         "internal",
         { workflowId: string },
         Array<{
-          activityId?: string;
-          attempt?: number;
-          completedAt?: number;
-          error?: string;
           key: string;
           kind: "activity" | "workflow";
           label: string;
-          message?: string;
           position: number;
-          progress: number;
-          startedAt?: number;
-          state:
-            | "pending"
-            | "queued"
-            | "running"
-            | "completed"
-            | "failed"
-            | "canceled"
-            | "skipped";
         }>,
+        Name
+      >;
+      mark: FunctionReference<
+        "mutation",
+        "internal",
+        {
+          error?: string;
+          key: string;
+          message?: string;
+          state?: string;
+          workflowId: string;
+        },
+        null,
         Name
       >;
       register: FunctionReference<
@@ -336,27 +406,6 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           }>;
           workflowId: string;
         },
-        null,
-        Name
-      >;
-      skip: FunctionReference<
-        "mutation",
-        "internal",
-        { key: string; message?: string; workflowId: string },
-        null,
-        Name
-      >;
-      start: FunctionReference<
-        "mutation",
-        "internal",
-        { key: string; workflowId: string },
-        null,
-        Name
-      >;
-      startActivity: FunctionReference<
-        "mutation",
-        "internal",
-        { key: string; workflowId: string },
         null,
         Name
       >;

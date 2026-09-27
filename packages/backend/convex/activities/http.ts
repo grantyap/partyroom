@@ -7,7 +7,6 @@ import {
   failRequestSchema,
   renewRequestSchema,
 } from "@partyroom/activity-worker";
-import type { Id } from "../_generated/dataModel";
 import { components, internal } from "../_generated/api";
 import { env, httpAction, type ActionCtx } from "../_generated/server";
 import { decryptSourceUrl } from "../media/crypto";
@@ -116,20 +115,10 @@ export const artifactRegister = workerEndpoint({
   }),
 });
 
-export const mediaSource = httpAction(async (ctx, request) => {
-  if (!(await authenticate(request))) return unauthorized();
-  const value = await body(request);
-  if (
-    !value ||
-    typeof value !== "object" ||
-    typeof (value as { jobId?: unknown }).jobId !== "string"
-  ) {
-    return invalid("jobId is required");
-  }
-  const source = await ctx.runQuery(internal.media.jobs.getEncryptedSource, {
-    jobId: (value as { jobId: string }).jobId as Id<"mediaJobs">,
-  });
-  return Response.json({
-    sourceUrl: await decryptSourceUrl(source.encryptedSource, source.sourceIv),
-  });
+export const mediaSource = workerEndpoint({
+  parse: (value) => cancelRequestSchema.parse(value),
+  execute: async (ctx, input): Promise<{ sourceUrl: string }> => {
+    const source = await ctx.runQuery(internal.media.jobs.getEncryptedSource, input);
+    return { sourceUrl: await decryptSourceUrl(source.encryptedSource, source.sourceIv) };
+  },
 });

@@ -147,9 +147,7 @@ export function ytDlpDownloadProgress(line: string) {
 
 function parseYtDlpProgress(line: string) {
   if (!line.startsWith("download:")) return undefined;
-  const parsed = ytDlpProgressFieldsSchema.safeParse(
-    line.slice("download:".length).split("|"),
-  );
+  const parsed = ytDlpProgressFieldsSchema.safeParse(line.slice("download:".length).split("|"));
   return parsed.success ? parsed.data : undefined;
 }
 
@@ -196,27 +194,19 @@ export class YtDlpProgressAggregator {
     this.progressByFormat.set(formatId, Math.min(1, Math.max(0, downloaded / total)));
 
     const selected =
-      this.selectedFormats.length > 0
-        ? this.selectedFormats
-        : [{ id: formatId, size: total }];
+      this.selectedFormats.length > 0 ? this.selectedFormats : [{ id: formatId, size: total }];
     if (!selected.some((format) => format.id === formatId)) {
-      this.lastProgress = Math.max(
-        this.lastProgress,
-        Math.min(1, Math.max(0, downloaded / total)),
-      );
+      this.lastProgress = Math.max(this.lastProgress, Math.min(1, Math.max(0, downloaded / total)));
       return this.lastProgress;
     }
     const allSizesKnown = selected.every((format) => format.size !== undefined);
     const weightedProgress = allSizesKnown
       ? selected.reduce(
-          (sum, format) =>
-            sum + (format.size ?? 0) * (this.progressByFormat.get(format.id) ?? 0),
+          (sum, format) => sum + (format.size ?? 0) * (this.progressByFormat.get(format.id) ?? 0),
           0,
         ) / selected.reduce((sum, format) => sum + (format.size ?? 0), 0)
-      : selected.reduce(
-          (sum, format) => sum + (this.progressByFormat.get(format.id) ?? 0),
-          0,
-        ) / selected.length;
+      : selected.reduce((sum, format) => sum + (this.progressByFormat.get(format.id) ?? 0), 0) /
+        selected.length;
     this.lastProgress = Math.max(this.lastProgress, Math.min(1, weightedProgress));
     return this.lastProgress;
   }
@@ -524,7 +514,7 @@ async function processMux(
   };
 }
 
-async function sourceUrl(jobId: string) {
+async function sourceUrl(attemptToken: string) {
   const apiUrl = process.env.ACTIVITY_WORKER_API_URL;
   const token = process.env.ACTIVITY_WORKER_TOKEN;
   if (!apiUrl || !token) throw new Error("Activity worker API is not configured");
@@ -534,7 +524,7 @@ async function sourceUrl(jobId: string) {
       authorization: `Bearer ${token}`,
       "content-type": "application/json",
     },
-    body: JSON.stringify({ jobId }),
+    body: JSON.stringify({ attemptToken }),
   });
   if (!response.ok) throw new Error(`Media source request failed with HTTP ${response.status}`);
   const body = (await response.json()) as { sourceUrl?: string };
@@ -542,25 +532,25 @@ async function sourceUrl(jobId: string) {
   return body.sourceUrl;
 }
 
-export async function resolveActivity(jobId: string, reporter: MediaActivityReporter) {
+export async function resolveActivity(attemptToken: string, reporter: MediaActivityReporter) {
   return await processResolve(
     {
       kind: "resolve",
-      input: { sourceUrl: await sourceUrl(jobId) },
+      input: { sourceUrl: await sourceUrl(attemptToken) },
     } as Extract<OperationRequest, { kind: "resolve" }>,
     reporter,
   );
 }
 
 export async function downloadActivity(
-  jobId: string,
+  attemptToken: string,
   reporter: MediaActivityReporter,
   directory: string,
 ) {
   const result = await processDownload(
     {
       kind: "download",
-      input: { sourceUrl: await sourceUrl(jobId) },
+      input: { sourceUrl: await sourceUrl(attemptToken) },
     } as Extract<OperationRequest, { kind: "download" }>,
     reporter,
     directory,

@@ -1,13 +1,15 @@
 import { convexTest } from "convex-test";
 import type { WorkflowId } from "@convex-dev/workflow";
-import { describe, expect, test } from "vitest";
-import { internal } from "../_generated/api";
+import { afterEach, describe, expect, test, vi } from "vitest";
+import { components, internal } from "../_generated/api";
 import type { Id } from "../_generated/dataModel";
-import schema from "../schema";
-import { modules } from "../test.setup";
+import { mediaTest, completedArtifacts } from "../../test/media";
 import { removeFromRoomImpl } from "./jobs";
-import { recordActivityTerminal, requeueRoomMedia } from "./domain/jobs";
+import { requeueRoomMedia } from "./domain/jobs";
+import { enqueueRoomMedia } from "../playback";
 import { defaultRoomMemberPermissions } from "../rooms.schema";
+
+afterEach(() => vi.useRealTimers());
 
 async function seedRoom(t: ReturnType<typeof convexTest>) {
   return await t.run(async (ctx) => {
@@ -19,50 +21,195 @@ async function seedRoom(t: ReturnType<typeof convexTest>) {
   });
 }
 
+async function seedPlaybackRoom(t: ReturnType<typeof mediaTest>) {
+  return await t.run(async (ctx) => {
+    const roomId = await ctx.db.insert("rooms", {
+      owner: "owner",
+      name: crypto.randomUUID(),
+      memberPermissions: defaultRoomMemberPermissions,
+    });
+    const playbackId = await ctx.db.insert("roomPlayback", {
+      room: roomId,
+      state: {
+        kind: "empty" as const,
+        emptySince: Date.now(),
+        occupancyGeneration: 0,
+        transport: { kind: "idle" as const },
+        queue: [],
+      },
+      revision: 0,
+      queueRevision: 0,
+    });
+    return { roomId, playbackId };
+  });
+}
+
+async function createSharedPlaybackJob(t: ReturnType<typeof mediaTest>, count = 101) {
+  const first = await seedPlaybackRoom(t);
+  const requestKey = crypto.randomUUID();
+  const workflowId = "shared-workflow" as WorkflowId;
+  const owner = await t.mutation(internal.media.jobs.createOrJoin, {
+    roomId: first.roomId,
+    requestedBy: "user",
+    requestKey,
+    encryptedSource: "ciphertext",
+    sourceIv: "iv",
+  });
+  await t.mutation(internal.media.jobs.attachWorkflow, {
+    jobId: owner.jobId,
+    workflowId,
+  });
+  const associations = [
+    { roomId: first.roomId, playbackId: first.playbackId, roomMediaId: owner.roomMediaId },
+  ];
+  for (let index = 1; index < count; index++) {
+    const room = await seedPlaybackRoom(t);
+    const joined = await t.mutation(internal.media.jobs.createOrJoin, {
+      roomId: room.roomId,
+      requestedBy: "user",
+      requestKey,
+      encryptedSource: "ciphertext",
+      sourceIv: "iv",
+    });
+    associations.push({
+      roomId: room.roomId,
+      playbackId: room.playbackId,
+      roomMediaId: joined.roomMediaId,
+    });
+  }
+  await t.run(async (ctx) => {
+    for (const association of associations)
+      await enqueueRoomMedia(ctx, {
+        roomId: association.roomId,
+        roomMediaId: association.roomMediaId,
+        addedBy: "user",
+      });
+  });
+  return { jobId: owner.jobId, workflowId, associations };
+}
+
+async function queuedItems(
+  t: ReturnType<typeof mediaTest>,
+  playbackIds: Array<Id<"roomPlayback">>,
+) {
+  return await t.run(async (ctx) =>
+    (
+      await Promise.all(playbackIds.map(async (playbackId) => await ctx.db.get(playbackId)))
+    ).flatMap((playback) => playback?.state.queue ?? []),
+  );
+}
+
+async function finishScheduled(t: ReturnType<typeof mediaTest>) {
+  await t.finishAllScheduledFunctions(() => vi.runAllTimers());
+}
+
 async function createJob(
   t: ReturnType<typeof convexTest>,
   roomId: Id<"rooms">,
   requestKey: string = crypto.randomUUID(),
 ) {
-  return await t.mutation(internal.media.jobs.createOrJoin, {
+  const result = await t.mutation(internal.media.jobs.createOrJoin, {
     roomId,
     requestedBy: "user",
     requestKey,
     encryptedSource: "ciphertext",
     sourceIv: "iv",
   });
+  if (result.created)
+    await t.mutation(internal.media.jobs.attachWorkflow, {
+      jobId: result.jobId,
+      workflowId: "workflow" as WorkflowId,
+    });
+  return result;
 }
 
 describe("media jobs", () => {
-  test("removes only the terminal activity from the job projection", async () => {
-    const t = convexTest(schema, modules);
-    const roomId = await seedRoom(t);
-    const { jobId } = await createJob(t, roomId);
-    await t.run(async (ctx) => {
-      await ctx.db.patch("mediaJobs", jobId, {
-        activeActivities: [
-          { activityId: "finished", kind: "download" },
-          { activityId: "running", kind: "transcribe" },
-        ],
-      });
-      await recordActivityTerminal(ctx, jobId, "finished", {
-        startedAt: 10_000,
-        completedAt: 75_000,
-      });
+  test("finalization updates every shared playback queue", async () => {
+    vi.useFakeTimers();
+    const t = mediaTest();
+    const { jobId, workflowId, associations } = await createSharedPlaybackJob(t);
+    const claim = await t.mutation(internal.media.jobs.claimAsset, {
+      workflowId,
+      jobId,
+      extractor: "youtube",
+      sourceId: "shared-finalize",
     });
+    const { artifactId } = await completedArtifacts(t, workflowId, ["artifactId"]);
+    await t.mutation(internal.media.jobs.recordStageResult, {
+      workflowId,
+      jobId,
+      result: { kind: "mux", artifactId: artifactId! },
+    });
+    await t.mutation(internal.media.jobs.finalizeAsset, { jobId, workflowId });
+    await finishScheduled(t);
 
-    const job = await t.run(async (ctx) => await ctx.db.get("mediaJobs", jobId));
-    expect(job?.activeActivities).toEqual([{ activityId: "running", kind: "transcribe" }]);
-    expect(job?.stepTimings).toEqual([
-      { kind: "download", startedAt: 10_000, completedAt: 75_000 },
-    ]);
+    const items = await queuedItems(
+      t,
+      associations.map((association) => association.playbackId),
+    );
+    expect(items).toHaveLength(101);
+    expect(items.every((item) => item.kind === "ready" && item.asset === claim.assetId)).toBe(true);
   });
 
-  test("requeues terminal media and clears stale output references", async () => {
-    const t = convexTest(schema, modules);
+  test("cached completion updates every shared playback queue", async () => {
+    vi.useFakeTimers();
+    const t = mediaTest();
+    const { jobId, workflowId, associations } = await createSharedPlaybackJob(t);
+    const claim = await t.mutation(internal.media.jobs.claimAsset, {
+      workflowId,
+      jobId,
+      extractor: "youtube",
+      sourceId: "shared-complete",
+    });
+    await t.run(async (ctx) => {
+      await ctx.db.patch("mediaAssets", claim.assetId, {
+        state: "ready",
+        finalArtifactId: "ready-artifact",
+        activeJob: undefined,
+      });
+    });
+    await t.mutation(internal.media.jobs.completeFromAsset, {
+      jobId,
+      workflowId,
+      assetId: claim.assetId,
+    });
+    await finishScheduled(t);
+
+    const items = await queuedItems(
+      t,
+      associations.map((association) => association.playbackId),
+    );
+    expect(items).toHaveLength(101);
+    expect(items.every((item) => item.kind === "ready" && item.asset === claim.assetId)).toBe(true);
+  });
+
+  test("failure updates every shared playback queue", async () => {
+    vi.useFakeTimers();
+    const t = mediaTest();
+    const { jobId, workflowId, associations } = await createSharedPlaybackJob(t);
+    const message = "shared failure";
+    await t.mutation(internal.media.jobs.failJob, {
+      jobId,
+      workflowId,
+      errorCode: "MUX_FAILED",
+      errorMessage: message,
+    });
+    await finishScheduled(t);
+
+    const items = await queuedItems(
+      t,
+      associations.map((association) => association.playbackId),
+    );
+    expect(items).toHaveLength(101);
+    expect(items.every((item) => item.kind === "failed" && item.message === message)).toBe(true);
+  });
+
+  test("reprocessing creates a new run and preserves the published revision", async () => {
+    const t = mediaTest();
     const roomId = await seedRoom(t);
     const { jobId, roomMediaId } = await createJob(t, roomId);
     const claim = await t.mutation(internal.media.jobs.claimAsset, {
+      workflowId: "workflow" as WorkflowId,
       jobId,
       extractor: "youtube",
       sourceId: "reprocess",
@@ -75,8 +222,6 @@ describe("media jobs", () => {
       });
       await ctx.db.patch("mediaJobs", jobId, {
         state: "ready",
-        stage: "ready",
-        progress: 1,
         asset: claim.assetId,
         workflowId: "completed-workflow",
         errorCode: "OLD_ERROR",
@@ -91,39 +236,184 @@ describe("media jobs", () => {
       association: await ctx.db.get("roomMedia", roomMediaId),
       asset: await ctx.db.get("mediaAssets", claim.assetId),
     }));
-    expect(result.job).toMatchObject({
-      state: "queued",
-      stage: "queued",
-      progress: 0,
-      activeActivities: [],
+    expect(result.job).toMatchObject({ state: "ready", asset: claim.assetId });
+    expect(result.association?.job).not.toBe(jobId);
+    expect(result.association?.asset).toBe(claim.assetId);
+    expect(result.asset?.state).toBe("ready");
+    const newJob = await t.run((ctx) => ctx.db.get(result.association!.job));
+    expect(newJob).toMatchObject({ state: "queued", rebuild: true });
+    expect(newJob?.asset).toBeUndefined();
+    await t.mutation(internal.media.jobs.attachWorkflow, {
+      jobId: newJob!._id,
+      workflowId: "new-workflow" as WorkflowId,
     });
-    expect(result.job?.asset).toBeUndefined();
-    expect(result.job?.workflowId).toBeUndefined();
-    expect(result.job?.errorCode).toBeUndefined();
-    expect(result.job?.errorMessage).toBeUndefined();
-    expect(result.association?.asset).toBeUndefined();
-    expect(result.asset?.state).toBe("failed");
+    const fresh = await t.mutation(internal.media.jobs.claimAsset, {
+      jobId: newJob!._id,
+      workflowId: "new-workflow" as WorkflowId,
+      extractor: "youtube",
+      sourceId: "reprocess",
+    });
+    expect(fresh.mode).toBe("owner");
+    expect(fresh.assetId).not.toBe(claim.assetId);
+    await t.mutation(internal.media.jobs.failJob, {
+      jobId,
+      workflowId: "completed-workflow" as WorkflowId,
+      errorCode: "STALE",
+      errorMessage: "late callback",
+    });
+    expect((await t.run((ctx) => ctx.db.get(newJob!._id)))?.state).toBe("processing");
+  });
+
+  test("reprocessing collects an unreferenced failed revision", async () => {
+    const t = mediaTest();
+    const roomId = await seedRoom(t);
+    const { jobId, roomMediaId } = await createJob(t, roomId);
+    const claim = await t.mutation(internal.media.jobs.claimAsset, {
+      workflowId: "workflow" as WorkflowId,
+      jobId,
+      extractor: "youtube",
+      sourceId: "failed-revision",
+    });
+    const outputs = await completedArtifacts(t, "workflow", [
+      "instrumentalArtifactId",
+      "vocalsArtifactId",
+    ]);
+    await t.mutation(internal.media.jobs.recordStageResult, {
+      workflowId: "workflow" as WorkflowId,
+      jobId,
+      result: {
+        kind: "separate",
+        instrumentalArtifactId: outputs.instrumentalArtifactId!,
+        vocalsArtifactId: outputs.vocalsArtifactId!,
+      },
+    });
+    await t.mutation(internal.media.jobs.failJob, {
+      workflowId: "workflow" as WorkflowId,
+      jobId,
+      errorCode: "MUX_FAILED",
+      errorMessage: "mux failed",
+    });
+
+    const newJobId = await t.run(
+      async (ctx) => await requeueRoomMedia(ctx, { roomId, roomMediaId }),
+    );
+    const result = await t.run(async (ctx) => ({
+      oldJob: await ctx.db.get("mediaJobs", jobId),
+      oldAsset: await ctx.db.get("mediaAssets", claim.assetId),
+      newJob: await ctx.db.get("mediaJobs", newJobId),
+    }));
+    expect(result.oldJob).toBeNull();
+    expect(result.oldAsset).toBeNull();
+    expect(result.newJob).toMatchObject({ state: "queued", rebuild: true });
+    for (const artifactId of Object.values(outputs))
+      expect(await t.query(components.activities.artifacts.getUrl, { artifactId })).toBeNull();
+  });
+
+  test("collects a shared failed revision after the last room reprocesses", async () => {
+    const t = mediaTest();
+    const firstRoomId = await seedRoom(t);
+    const secondRoomId = await seedRoom(t);
+    const first = await createJob(t, firstRoomId, "shared-failed-first");
+    const second = await t.mutation(internal.media.jobs.createOrJoin, {
+      roomId: secondRoomId,
+      requestedBy: "user",
+      requestKey: "shared-failed-second",
+      encryptedSource: "ciphertext",
+      sourceIv: "iv",
+    });
+    const claim = await t.mutation(internal.media.jobs.claimAsset, {
+      workflowId: "workflow" as WorkflowId,
+      jobId: first.jobId,
+      extractor: "youtube",
+      sourceId: "shared-failed",
+    });
+    await t.mutation(internal.media.jobs.attachWorkflow, {
+      jobId: second.jobId,
+      workflowId: "workflow" as WorkflowId,
+    });
+    const waiting = await t.mutation(internal.media.jobs.claimAsset, {
+      workflowId: "workflow" as WorkflowId,
+      jobId: second.jobId,
+      extractor: "youtube",
+      sourceId: "shared-failed",
+    });
+    expect(waiting.mode).toBe("waiting");
+    await t.run(async (ctx) => {
+      await ctx.db.patch("mediaJobs", second.jobId, {
+        state: "failed",
+        errorCode: "MUX_FAILED",
+        errorMessage: "mux failed",
+      });
+    });
+    const outputs = await completedArtifacts(t, "workflow", [
+      "instrumentalArtifactId",
+      "vocalsArtifactId",
+    ]);
+    await t.mutation(internal.media.jobs.recordStageResult, {
+      workflowId: "workflow" as WorkflowId,
+      jobId: first.jobId,
+      result: {
+        kind: "separate",
+        instrumentalArtifactId: outputs.instrumentalArtifactId!,
+        vocalsArtifactId: outputs.vocalsArtifactId!,
+      },
+    });
+    await t.mutation(internal.media.jobs.failJob, {
+      workflowId: "workflow" as WorkflowId,
+      jobId: first.jobId,
+      errorCode: "MUX_FAILED",
+      errorMessage: "mux failed",
+    });
+    const firstRetry = await t.run(
+      async (ctx) =>
+        await requeueRoomMedia(ctx, { roomId: firstRoomId, roomMediaId: first.roomMediaId }),
+    );
+    const secondRetry = await t.run(
+      async (ctx) =>
+        await requeueRoomMedia(ctx, { roomId: secondRoomId, roomMediaId: second.roomMediaId }),
+    );
+    const result = await t.run(async (ctx) => ({
+      firstJob: await ctx.db.get("mediaJobs", first.jobId),
+      secondJob: await ctx.db.get("mediaJobs", second.jobId),
+      asset: await ctx.db.get("mediaAssets", claim.assetId),
+      firstRetry: await ctx.db.get("mediaJobs", firstRetry),
+      secondRetry: await ctx.db.get("mediaJobs", secondRetry),
+    }));
+    expect(result.firstJob).toBeNull();
+    expect(result.secondJob).toBeNull();
+    expect(result.asset).toBeNull();
+    expect(result.firstRetry).toMatchObject({ state: "queued", rebuild: true });
+    expect(result.secondRetry).toMatchObject({ state: "queued", rebuild: true });
+    for (const artifactId of Object.values(outputs))
+      expect(await t.query(components.activities.artifacts.getUrl, { artifactId })).toBeNull();
   });
 
   test("deletes every room association that directly references a completed asset", async () => {
-    const t = convexTest(schema, modules);
+    const t = mediaTest();
     const roomId = await seedRoom(t);
     const owner = await createJob(t, roomId);
     const claim = await t.mutation(internal.media.jobs.claimAsset, {
+      workflowId: "workflow" as WorkflowId,
       jobId: owner.jobId,
       extractor: "youtube",
       sourceId: "direct-room-reference",
     });
     const decoy = await createJob(t, roomId);
+    const { artifactId: finalArtifactId } = await completedArtifacts(t, "workflow", ["artifactId"]);
+    await t.mutation(components.activities.artifacts.adopt, {
+      workflowId: "workflow",
+      owner: claim.assetId,
+      artifacts: [{ artifactId: finalArtifactId!, slot: "artifactId" }],
+    });
     const directAssociation = await t.run(async (ctx) => {
       await ctx.db.patch("mediaAssets", claim.assetId, {
         state: "ready",
+        finalArtifactId: finalArtifactId!,
         activeJob: undefined,
         annotationsState: "failed",
       });
       await ctx.db.patch("mediaJobs", owner.jobId, {
         state: "ready",
-        stage: "ready",
       });
       return await ctx.db.insert("roomMedia", {
         room: roomId,
@@ -148,10 +438,11 @@ describe("media jobs", () => {
   });
 
   test("rejects stage writes from a job that no longer owns the asset", async () => {
-    const t = convexTest(schema, modules);
+    const t = mediaTest();
     const roomId = await seedRoom(t);
     const first = await createJob(t, roomId);
     const claim = await t.mutation(internal.media.jobs.claimAsset, {
+      workflowId: "workflow" as WorkflowId,
       jobId: first.jobId,
       extractor: "youtube",
       sourceId: "stale-owner",
@@ -165,18 +456,19 @@ describe("media jobs", () => {
 
     await expect(
       t.mutation(internal.media.jobs.recordStageResult, {
+        workflowId: "workflow" as WorkflowId,
         jobId: first.jobId,
-        kind: "download",
-        artifactId: "stale-artifact",
+        result: { kind: "download", artifactId: "stale-artifact" },
       }),
     ).rejects.toThrow("no longer owns");
   });
 
   test("lets only the current enrichment workflow write after playback is ready", async () => {
-    const t = convexTest(schema, modules);
+    const t = mediaTest();
     const roomId = await seedRoom(t);
     const { jobId } = await createJob(t, roomId);
     const claim = await t.mutation(internal.media.jobs.claimAsset, {
+      workflowId: "workflow" as WorkflowId,
       jobId,
       extractor: "youtube",
       sourceId: "detached-enrichment-owner",
@@ -187,6 +479,7 @@ describe("media jobs", () => {
       const now = Date.now();
       await ctx.db.patch("mediaAssets", claim.assetId, {
         state: "ready",
+        finalArtifactId: "missing-final",
         activeJob: undefined,
       });
       return await ctx.db.insert("mediaEnrichments", {
@@ -202,11 +495,15 @@ describe("media jobs", () => {
       enrichmentId,
       workflowId: currentWorkflowId,
     });
+    const published = await completedArtifacts(t, currentWorkflowId, [
+      "lyricsArtifactId",
+      "timedLyricsArtifactId",
+    ]);
     await t.mutation(internal.media.enrichment.recordGeneratedLyrics, {
       enrichmentId,
       workflowId: currentWorkflowId,
-      textArtifactId: "captions",
-      timedArtifactId: "timed-lyrics",
+      textArtifactId: published.lyricsArtifactId!,
+      timedArtifactId: published.timedLyricsArtifactId!,
     });
     await t.run(
       async (ctx) =>
@@ -232,31 +529,37 @@ describe("media jobs", () => {
     });
     expect(generated).toMatchObject({
       state: "ready",
-      textArtifactId: "captions",
-      timedArtifactId: "timed-lyrics",
+      textArtifactId: published.lyricsArtifactId!,
+      timedArtifactId: published.timedLyricsArtifactId!,
     });
   });
 
   test("deletes a completed asset and clears both media cache layers", async () => {
-    const t = convexTest(schema, modules);
+    const t = mediaTest();
     const roomId = await seedRoom(t);
     const requestKey = "debug-rerun-request";
     const first = await createJob(t, roomId, requestKey);
     const claim = await t.mutation(internal.media.jobs.claimAsset, {
+      workflowId: "workflow" as WorkflowId,
       jobId: first.jobId,
       extractor: "youtube",
       sourceId: "debug-rerun-source",
     });
+    const { artifactId: finalArtifactId } = await completedArtifacts(t, "workflow", ["artifactId"]);
+    await t.mutation(components.activities.artifacts.adopt, {
+      workflowId: "workflow",
+      owner: claim.assetId,
+      artifacts: [{ artifactId: finalArtifactId!, slot: "artifactId" }],
+    });
     await t.run(async (ctx) => {
       await ctx.db.patch("mediaAssets", claim.assetId, {
         state: "ready",
+        finalArtifactId: finalArtifactId!,
         activeJob: undefined,
         annotationsState: "failed",
       });
       await ctx.db.patch("mediaJobs", first.jobId, {
         state: "ready",
-        stage: "ready",
-        progress: 1,
         asset: claim.assetId,
       });
       await ctx.db.patch("roomMedia", first.roomMediaId, {
@@ -271,7 +574,7 @@ describe("media jobs", () => {
     expect(deleted).toEqual({
       deletedJobs: 1,
       deletedRoomMedia: 1,
-      deletedStorageObjects: 0,
+      deletedStorageObjects: 1,
     });
     const removed = await t.run(async (ctx) => ({
       asset: await ctx.db.get("mediaAssets", claim.assetId),
@@ -287,6 +590,7 @@ describe("media jobs", () => {
     const rerun = await createJob(t, roomId, requestKey);
     expect(rerun.created).toBe(true);
     const freshClaim = await t.mutation(internal.media.jobs.claimAsset, {
+      workflowId: "workflow" as WorkflowId,
       jobId: rerun.jobId,
       extractor: "youtube",
       sourceId: "debug-rerun-source",
@@ -296,10 +600,11 @@ describe("media jobs", () => {
   });
 
   test("refuses to delete an unfinished media asset", async () => {
-    const t = convexTest(schema, modules);
+    const t = mediaTest();
     const roomId = await seedRoom(t);
     const current = await createJob(t, roomId);
     const claim = await t.mutation(internal.media.jobs.claimAsset, {
+      workflowId: "workflow" as WorkflowId,
       jobId: current.jobId,
       extractor: "youtube",
       sourceId: "still-processing",
@@ -322,10 +627,11 @@ describe("media jobs", () => {
   });
 
   test("removes completed room media while retaining its cached asset", async () => {
-    const t = convexTest(schema, modules);
+    const t = mediaTest();
     const roomId = await seedRoom(t);
     const { jobId, roomMediaId } = await createJob(t, roomId);
     const claim = await t.mutation(internal.media.jobs.claimAsset, {
+      workflowId: "workflow" as WorkflowId,
       jobId,
       extractor: "youtube",
       sourceId: "cached-delete",
@@ -334,6 +640,7 @@ describe("media jobs", () => {
       await ctx.db.patch("mediaAssets", claim.assetId, {
         state: "ready",
         finalArtifactId: "final-artifact",
+        activeJob: undefined,
       });
       await ctx.db.patch("mediaJobs", jobId, {
         state: "ready",
@@ -355,10 +662,11 @@ describe("media jobs", () => {
   });
 
   test("removes an unshared in-progress job and its partial asset", async () => {
-    const t = convexTest(schema, modules);
+    const t = mediaTest();
     const roomId = await seedRoom(t);
     const { jobId, roomMediaId } = await createJob(t, roomId);
     const claim = await t.mutation(internal.media.jobs.claimAsset, {
+      workflowId: "workflow" as WorkflowId,
       jobId,
       extractor: "youtube",
       sourceId: "partial-delete",
@@ -378,7 +686,7 @@ describe("media jobs", () => {
   });
 
   test("keeps a processing job that is still attached to another room", async () => {
-    const t = convexTest(schema, modules);
+    const t = mediaTest();
     const firstRoom = await seedRoom(t);
     const secondRoom = await seedRoom(t);
     const first = await createJob(t, firstRoom, "shared-room-delete");
@@ -403,7 +711,7 @@ describe("media jobs", () => {
   });
 
   test("joins an active job for an identical request", async () => {
-    const t = convexTest(schema, modules);
+    const t = mediaTest();
     const roomId = await seedRoom(t);
     const first = await createJob(t, roomId, "same-request");
     const second = await createJob(t, roomId, "same-request");
@@ -418,13 +726,97 @@ describe("media jobs", () => {
     expect(rows).toHaveLength(1);
   });
 
+  test("finds an active request beyond terminal job history", async () => {
+    const t = mediaTest();
+    const ownerRoomId = await seedRoom(t);
+    const requestKey = "history-request";
+    const first = await createJob(t, ownerRoomId, requestKey);
+    const claim = await t.mutation(internal.media.jobs.claimAsset, {
+      workflowId: "workflow" as WorkflowId,
+      jobId: first.jobId,
+      extractor: "youtube",
+      sourceId: "history-request",
+    });
+    await t.run(async (ctx) => {
+      const now = Date.now();
+      await ctx.db.patch("mediaAssets", claim.assetId, {
+        state: "ready",
+        activeJob: undefined,
+        finalArtifactId: "ready-output",
+      });
+      await ctx.db.patch("mediaJobs", first.jobId, { state: "ready" });
+      for (let index = 0; index < 100; index++)
+        await ctx.db.insert("mediaJobs", {
+          requestKey,
+          encryptedSource: `failed-${index}`,
+          sourceIv: "iv",
+          requestedBy: "user",
+          state: "failed",
+          errorCode: "FAILED",
+          errorMessage: "failed",
+          createdAt: now,
+          updatedAt: now,
+        });
+    });
+
+    const roomId = await seedRoom(t);
+    const joined = await t.mutation(internal.media.jobs.createOrJoin, {
+      roomId,
+      requestedBy: "user",
+      requestKey,
+      encryptedSource: "ciphertext",
+      sourceIv: "iv",
+    });
+    expect(joined).toMatchObject({ created: false, jobId: first.jobId });
+  });
+
+  test("finds a cached asset beyond failed revision history", async () => {
+    const t = mediaTest();
+    const ownerRoomId = await seedRoom(t);
+    const first = await createJob(t, ownerRoomId, "cache-history-owner");
+    const claim = await t.mutation(internal.media.jobs.claimAsset, {
+      workflowId: "workflow" as WorkflowId,
+      jobId: first.jobId,
+      extractor: "youtube",
+      sourceId: "cache-history",
+    });
+    await t.run(async (ctx) => {
+      const now = Date.now();
+      await ctx.db.patch("mediaAssets", claim.assetId, {
+        state: "ready",
+        activeJob: undefined,
+        finalArtifactId: "ready-output",
+      });
+      await ctx.db.patch("mediaJobs", first.jobId, { state: "ready" });
+      for (let index = 0; index < 100; index++)
+        await ctx.db.insert("mediaAssets", {
+          cacheKey: `v5:youtube:cache-history`,
+          extractor: "youtube",
+          sourceId: `failed-${index}`,
+          state: "failed",
+          createdAt: now,
+          updatedAt: now,
+        });
+    });
+
+    const second = await createJob(t, ownerRoomId, "cache-history-new");
+    const cached = await t.mutation(internal.media.jobs.claimAsset, {
+      workflowId: "workflow" as WorkflowId,
+      jobId: second.jobId,
+      extractor: "youtube",
+      sourceId: "cache-history",
+    });
+    expect(cached).toEqual({ mode: "cached", assetId: claim.assetId });
+  });
+
   test("deduplicates different request URLs after resolving extractor identity", async () => {
-    const t = convexTest(schema, modules);
+    const t = mediaTest();
     const roomId = await seedRoom(t);
     const first = await createJob(t, roomId, "signed-url-one");
     const second = await createJob(t, roomId, "signed-url-two");
 
     const owner = await t.mutation(internal.media.jobs.claimAsset, {
+      workflowId: "workflow" as WorkflowId,
       jobId: first.jobId,
       extractor: "Youtube",
       sourceId: "abc123",
@@ -432,6 +824,7 @@ describe("media jobs", () => {
       duration: 120,
     });
     const waiter = await t.mutation(internal.media.jobs.claimAsset, {
+      workflowId: "workflow" as WorkflowId,
       jobId: second.jobId,
       extractor: "youtube",
       sourceId: "abc123",
@@ -443,102 +836,59 @@ describe("media jobs", () => {
     expect(waiter).toMatchObject({ mode: "waiting", assetId: owner.assetId });
   });
 
-  test("records stems, structured lyrics, and annotation exports", async () => {
-    const t = convexTest(schema, modules);
+  test("publishes stems atomically and rejects unregistered output IDs", async () => {
+    const t = mediaTest();
     const roomId = await seedRoom(t);
     const { jobId } = await createJob(t, roomId);
-    await t.mutation(internal.media.jobs.claimAsset, {
+    const workflowId = "workflow" as WorkflowId;
+    const { assetId } = await t.mutation(internal.media.jobs.claimAsset, {
       jobId,
+      workflowId,
       extractor: "youtube",
-      sourceId: "stems-and-lyrics",
+      sourceId: "stems",
     });
-    const [instrumental, vocals, lyrics, timedLyrics, melody, annotations, midi, musicXml] =
-      await t.run(async (ctx) =>
-        Promise.all([
-          ctx.storage.store(new Blob(["instrumental"])),
-          ctx.storage.store(new Blob(["vocals"])),
-          ctx.storage.store(new Blob(["WEBVTT"])),
-          ctx.storage.store(new Blob(["timed lyrics"])),
-          ctx.storage.store(new Blob(["melody"])),
-          ctx.storage.store(new Blob(["JAMS"])),
-          ctx.storage.store(new Blob(["MIDI"])),
-          ctx.storage.store(new Blob(["MusicXML"])),
-        ]),
-      );
-
+    await expect(
+      t.mutation(internal.media.jobs.recordStageResult, {
+        jobId,
+        workflowId,
+        result: {
+          kind: "separate",
+          instrumentalArtifactId: "invented",
+          vocalsArtifactId: "invented",
+        },
+      }),
+    ).rejects.toThrow();
+    const outputs = await completedArtifacts(t, workflowId, [
+      "instrumentalArtifactId",
+      "vocalsArtifactId",
+    ]);
     await t.mutation(internal.media.jobs.recordStageResult, {
       jobId,
-      kind: "separate",
-      artifactId: instrumental,
-      secondaryArtifactId: vocals,
+      workflowId,
+      result: {
+        kind: "separate",
+        instrumentalArtifactId: outputs.instrumentalArtifactId!,
+        vocalsArtifactId: outputs.vocalsArtifactId!,
+      },
     });
-    await t.mutation(internal.media.jobs.recordLyricTrack, {
-      jobId,
-      source: "generated",
-      label: "Generated",
-      timing: "word",
-      state: "ready",
-      textArtifactId: lyrics,
-      timedArtifactId: timedLyrics,
-    });
-    await t.mutation(internal.media.jobs.recordStageResult, {
-      jobId,
-      kind: "analyzeMelody",
-      artifactId: melody,
-    });
-    await t.mutation(internal.media.jobs.recordStageResult, {
-      jobId,
-      kind: "assembleAnnotations",
-      artifactId: annotations,
-      secondaryArtifactId: midi,
-      tertiaryArtifactId: musicXml,
-    });
-
-    const { asset, generatedLyrics } = await t.run(async (ctx) => {
-      const job = await ctx.db.get("mediaJobs", jobId);
-      const asset = job?.asset ? await ctx.db.get("mediaAssets", job.asset) : null;
-      const generatedLyrics = asset
-        ? await ctx.db
-            .query("mediaLyricTracks")
-            .withIndex("by_asset_and_source", (q) =>
-              q.eq("asset", asset._id).eq("source", "generated"),
-            )
-            .unique()
-        : null;
-      return { asset, generatedLyrics };
-    });
-    expect(asset).toMatchObject({
-      instrumentalArtifactId: instrumental,
-      vocalsArtifactId: vocals,
-      melodyArtifactId: melody,
-      annotationsArtifactId: annotations,
-      midiArtifactId: midi,
-      musicXmlArtifactId: musicXml,
-      annotationsState: "ready",
-    });
-    expect(generatedLyrics).toMatchObject({
-      source: "generated",
-      textArtifactId: lyrics,
-      timedArtifactId: timedLyrics,
-      timing: "word",
-      state: "ready",
-    });
+    expect(await t.run((ctx) => ctx.db.get(assetId))).toMatchObject(outputs);
   });
 
   test("marks playback ready while durable enrichment is still processing", async () => {
-    const t = convexTest(schema, modules);
+    const t = mediaTest();
     const roomId = await seedRoom(t);
     const { jobId } = await createJob(t, roomId);
     const claim = await t.mutation(internal.media.jobs.claimAsset, {
+      workflowId: "workflow" as WorkflowId,
       jobId,
       extractor: "youtube",
       sourceId: "durable-enrichment",
     });
-    const finalVideo = await t.run(async (ctx) => await ctx.storage.store(new Blob(["video"])));
+    const { artifactId: finalVideo } = await completedArtifacts(t, "workflow", ["artifactId"]);
     await t.mutation(internal.media.jobs.recordStageResult, {
+      workflowId: "workflow" as WorkflowId,
       jobId,
-      kind: "mux",
-      artifactId: finalVideo,
+      result: { kind: "mux", artifactId: finalVideo! },
     });
     await t.run(async (ctx) => {
       const now = Date.now();
@@ -559,7 +909,10 @@ describe("media jobs", () => {
         updatedAt: now,
       });
     });
-    await t.mutation(internal.media.jobs.finalizeAsset, { jobId });
+    await t.mutation(internal.media.jobs.finalizeAsset, {
+      jobId,
+      workflowId: "workflow" as WorkflowId,
+    });
 
     const result = await t.run(async (ctx) => {
       const job = await ctx.db.get("mediaJobs", jobId);
@@ -572,7 +925,6 @@ describe("media jobs", () => {
           .unique(),
       };
     });
-    expect(result.job).toMatchObject({ state: "ready", stage: "ready" });
     expect(result.asset).toMatchObject({
       state: "ready",
       finalArtifactId: finalVideo,
@@ -583,25 +935,30 @@ describe("media jobs", () => {
   });
 
   test("reuses a cache entry as soon as playback is ready", async () => {
-    const t = convexTest(schema, modules);
+    const t = mediaTest();
     const roomId = await seedRoom(t);
     const first = await createJob(t, roomId, "cache-owner");
     const claim = await t.mutation(internal.media.jobs.claimAsset, {
+      workflowId: "workflow" as WorkflowId,
       jobId: first.jobId,
       extractor: "youtube",
       sourceId: "complete-cache-entry",
     });
     expect(claim.mode).toBe("owner");
-    const finalVideo = await t.run(async (ctx) => await ctx.storage.store(new Blob(["video"])));
+    const { artifactId: finalVideo } = await completedArtifacts(t, "workflow", ["artifactId"]);
     await t.mutation(internal.media.jobs.recordStageResult, {
+      workflowId: "workflow" as WorkflowId,
       jobId: first.jobId,
-      kind: "mux",
-      artifactId: finalVideo,
+      result: { kind: "mux", artifactId: finalVideo! },
     });
-    await t.mutation(internal.media.jobs.finalizeAsset, { jobId: first.jobId });
+    await t.mutation(internal.media.jobs.finalizeAsset, {
+      jobId: first.jobId,
+      workflowId: "workflow" as WorkflowId,
+    });
 
     const second = await createJob(t, roomId, "another-signed-url");
     const cached = await t.mutation(internal.media.jobs.claimAsset, {
+      workflowId: "workflow" as WorkflowId,
       jobId: second.jobId,
       extractor: "youtube",
       sourceId: "complete-cache-entry",

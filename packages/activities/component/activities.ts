@@ -1,11 +1,12 @@
 import type { FunctionHandle } from "convex/server";
-import { v } from "convex/values";
+import { v, compareValues, type Value } from "convex/values";
+import { parseWire, wireArtifactDefinitions, type WireSchema } from "../src/wire";
+import { currentLease, attemptForToken } from "./leases";
 import { api, internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internalMutation, mutation, query, type MutationCtx } from "./_generated/server";
 import {
   activityDefinition,
-  artifactDefinition,
   artifactSlot,
   completion,
   completionResult,
@@ -33,9 +34,9 @@ const scheduleArgs = {
     maxConcurrentActivities: v.optional(v.number()),
   }),
   input: v.any(),
-  artifactScopeId: v.optional(v.id("artifactScopes")),
-  artifactSlots: v.optional(v.array(artifactSlot)),
-  artifactDefinitions: v.optional(v.array(artifactDefinition)),
+  inputSchema: v.any(),
+  outputSchema: v.any(),
+  artifactScopeId: v.id("artifactScopes"),
   completion: v.optional(completion),
   retryPolicy,
   startToCloseTimeoutMs: v.number(),
@@ -123,6 +124,10 @@ export const schedule = mutation({
   returns: v.id("activities"),
   handler: async (ctx, args) => {
     validateSchedule(args);
+    parseWire(args.inputSchema as WireSchema, args.input);
+    const scope = args.artifactScopeId ? await ctx.db.get(args.artifactScopeId) : null;
+    if (!scope || scope.state !== "open" || scope.expiresAt <= Date.now())
+      throw new Error("Artifact scope is not open");
     await ensureQueue(ctx, { name: args.taskQueue, ...args.queue });
     const now = Date.now();
     const scheduleDeadline = now + args.scheduleToCloseTimeoutMs;
@@ -133,9 +138,15 @@ export const schedule = mutation({
       taskQueue: args.taskQueue,
       state: "scheduled",
       input: args.input,
+      outputSchema: args.outputSchema,
       artifactScopeId: args.artifactScopeId,
-      artifactSlots: args.artifactSlots,
-      artifactDefinitions: args.artifactDefinitions,
+      artifactSlots: Object.keys(wireArtifactDefinitions(args.outputSchema)),
+      artifactDefinitions: Object.entries(
+        wireArtifactDefinitions(args.outputSchema) as Record<
+          string,
+          { disposition: "retained" | "intermediate" }
+        >,
+      ).map(([slot, definition]) => ({ slot, ...definition })),
       completion: args.completion,
       retryPolicy: args.retryPolicy,
       startToCloseTimeoutMs: args.startToCloseTimeoutMs,
@@ -160,7 +171,7 @@ const claimResult = v.union(
     activityVersion: v.number(),
     taskQueue: v.string(),
     attempt: v.number(),
-    leaseToken: v.string(),
+    attemptToken: v.string(),
     leaseExpiresAt: v.number(),
     attemptDeadline: v.number(),
     scheduleDeadline: v.number(),
@@ -196,6 +207,7 @@ export const claim = mutation({
       existingLease?.leaseToken &&
       existingLease.leaseExpiresAt &&
       existingLease.attemptDeadline &&
+      existingLease.taskQueue === args.taskQueue &&
       existingLease.leaseExpiresAt > Date.now() &&
       supported.has(`${existingLease.activityType}:${existingLease.activityVersion}`)
     ) {
@@ -239,20 +251,15 @@ export const claim = mutation({
     if (!activity) return null;
 
     if (activity.cancelRequested) {
-      await finish(ctx, activity, { kind: "canceled" }, `cancel:${activity._id}`);
+      await finish(ctx, activity, { kind: "canceled" });
       return null;
     }
     if (now >= activity.scheduleDeadline) {
-      await finish(
-        ctx,
-        activity,
-        {
-          kind: "failed",
-          errorType: "ScheduleToCloseTimeout",
-          errorMessage: "Activity exceeded its schedule-to-close timeout",
-        },
-        `schedule-timeout:${activity._id}`,
-      );
+      await finish(ctx, activity, {
+        kind: "failed",
+        errorType: "ScheduleToCloseTimeout",
+        errorMessage: "Activity exceeded its schedule-to-close timeout",
+      });
       return null;
     }
 
@@ -263,6 +270,7 @@ export const claim = mutation({
       activity.scheduleDeadline,
     );
     const leaseExpiresAt = Math.min(now + queue.leaseDurationMs, attemptDeadline);
+    await ctx.db.insert("attempts", { token: leaseToken, activityId: activity._id, attempt });
     await ctx.db.patch(activity._id, {
       state: "running",
       attempt,
@@ -305,7 +313,7 @@ function claimedActivity(
     activityVersion: activity.activityVersion,
     taskQueue: activity.taskQueue,
     attempt: activity.attempt,
-    leaseToken: lease.leaseToken,
+    attemptToken: lease.leaseToken,
     leaseExpiresAt: lease.leaseExpiresAt,
     attemptDeadline: lease.attemptDeadline,
     scheduleDeadline: activity.scheduleDeadline,
@@ -314,27 +322,9 @@ function claimedActivity(
   };
 }
 
-async function requireCurrentLease(
-  ctx: MutationCtx,
-  args: { activityId: Id<"activities">; attempt: number; leaseToken: string },
-) {
-  const activity = await ctx.db.get(args.activityId);
-  if (!activity) throw new Error("Activity not found");
-  if (
-    activity.state !== "running" ||
-    activity.attempt !== args.attempt ||
-    activity.leaseToken !== args.leaseToken
-  ) {
-    return { activity, current: false as const };
-  }
-  return { activity, current: true as const };
-}
-
 export const renew = mutation({
   args: {
-    activityId: v.id("activities"),
-    attempt: v.number(),
-    leaseToken: v.string(),
+    attemptToken: v.string(),
     progress: v.optional(v.number()),
     progressMessage: v.optional(v.string()),
     heartbeatDetails: v.optional(v.any()),
@@ -345,109 +335,117 @@ export const renew = mutation({
     leaseExpiresAt: v.optional(v.number()),
   }),
   handler: async (ctx, args) => {
-    const leased = await requireCurrentLease(ctx, args);
-    if (!leased.current) {
-      return { accepted: false, cancelRequested: !!leased.activity.cancelRequested };
-    }
+    const activity = await currentLease(ctx, args.attemptToken);
+    if (!activity) return { accepted: false, cancelRequested: true };
     const queue = await ctx.db
       .query("queues")
-      .withIndex("by_name", (q) => q.eq("name", leased.activity.taskQueue))
+      .withIndex("by_name", (q) => q.eq("name", activity.taskQueue))
       .unique();
     if (!queue) throw new Error("Activity queue not found");
     const now = Date.now();
     const leaseExpiresAt = Math.min(
       now + queue.leaseDurationMs,
-      leased.activity.attemptDeadline ?? now,
-      leased.activity.scheduleDeadline,
+      activity.attemptDeadline ?? now,
+      activity.scheduleDeadline,
     );
-    await ctx.db.patch(args.activityId, {
+    await ctx.db.patch(activity._id, {
       leaseExpiresAt,
       progress:
-        args.progress === undefined
-          ? leased.activity.progress
-          : Math.min(1, Math.max(0, args.progress)),
+        args.progress === undefined ? activity.progress : Math.min(1, Math.max(0, args.progress)),
       progressMessage:
         args.progressMessage === undefined
-          ? leased.activity.progressMessage
+          ? activity.progressMessage
           : args.progressMessage.slice(0, 2_000),
       heartbeatDetails:
-        args.heartbeatDetails === undefined
-          ? leased.activity.heartbeatDetails
-          : args.heartbeatDetails,
+        args.heartbeatDetails === undefined ? activity.heartbeatDetails : args.heartbeatDetails,
       updatedAt: now,
     });
     return {
       accepted: true,
-      cancelRequested: !!leased.activity.cancelRequested,
+      cancelRequested: !!activity.cancelRequested,
       leaseExpiresAt,
     };
   },
 });
 
+// A receipt belongs to an attempt, not an HTTP request. Lost responses and retries
+// return the same decision even after the next attempt has started.
+async function commitAttempt(
+  ctx: MutationCtx,
+  token: string,
+  request: Value,
+  commit: (activity: Activity) => Promise<boolean>,
+) {
+  const attempt = await attemptForToken(ctx, token);
+  if (attempt?.receipt) {
+    if (compareValues(attempt.receipt.request, request) !== 0)
+      throw new Error("Attempt already settled with a different result");
+    return { accepted: true, duplicate: true, retrying: attempt.receipt.retrying };
+  }
+  const activity = await currentLease(ctx, token);
+  if (!activity || !attempt) return { accepted: false, duplicate: false, retrying: false };
+  if (activity.cancelRequested) {
+    await finish(ctx, activity, { kind: "canceled" });
+    return { accepted: false, duplicate: false, retrying: false };
+  }
+  const retrying = await commit(activity);
+  await ctx.db.patch(attempt._id, { receipt: { request, retrying } });
+  return { accepted: true, duplicate: false, retrying };
+}
+
 export const complete = mutation({
-  args: {
-    activityId: v.id("activities"),
-    attempt: v.number(),
-    leaseToken: v.string(),
-    requestId: v.string(),
-    value: v.any(),
-  },
-  returns: v.object({ accepted: v.boolean(), duplicate: v.boolean() }),
-  handler: async (ctx, args) => {
-    const activity = await ctx.db.get(args.activityId);
-    if (!activity) throw new Error("Activity not found");
-    if (
-      activity.state === "completed" &&
-      activity.attempt === args.attempt &&
-      activity.terminalRequestId === args.requestId
-    ) {
-      return { accepted: true, duplicate: true };
-    }
-    const leased = await requireCurrentLease(ctx, args);
-    if (!leased.current) return { accepted: false, duplicate: false };
-    await finish(ctx, leased.activity, { kind: "success", value: args.value }, args.requestId);
-    return { accepted: true, duplicate: false };
-  },
+  args: { attemptToken: v.string(), value: v.any() },
+  returns: v.object({ accepted: v.boolean(), duplicate: v.boolean(), retrying: v.boolean() }),
+  handler: async (ctx, args) =>
+    await commitAttempt(
+      ctx,
+      args.attemptToken,
+      { kind: "success", value: args.value },
+      async (activity) => {
+        if (!("outputSchema" in activity)) throw new Error("Legacy activity cannot complete");
+        parseWire(activity.outputSchema as WireSchema, args.value);
+        for (const slot of activity.artifactSlots ?? []) {
+          const artifactId = ctx.db.normalizeId("artifacts", args.value[slot]);
+          const artifact = artifactId ? await ctx.db.get(artifactId) : null;
+          if (
+            !artifact ||
+            artifact.activityId !== activity._id ||
+            artifact.attempt !== activity.attempt ||
+            artifact.slot !== slot ||
+            artifact.scopeId !== activity.artifactScopeId ||
+            artifact.state !== "staged"
+          ) {
+            throw new Error(`Invalid output artifact for slot ${slot}`);
+          }
+          if (!(await ctx.db.system.get("_storage", artifact.storageId)))
+            throw new Error("Output storage is missing");
+        }
+        await finish(ctx, activity, { kind: "success", value: args.value });
+        return false;
+      },
+    ),
 });
 
 export const fail = mutation({
   args: {
-    activityId: v.id("activities"),
-    attempt: v.number(),
-    leaseToken: v.string(),
-    requestId: v.string(),
+    attemptToken: v.string(),
     errorType: v.string(),
     errorMessage: v.string(),
     nonRetryable: v.optional(v.boolean()),
   },
   returns: v.object({ accepted: v.boolean(), duplicate: v.boolean(), retrying: v.boolean() }),
-  handler: async (ctx, args) => {
-    const activity = await ctx.db.get(args.activityId);
-    if (!activity) throw new Error("Activity not found");
-    if (
-      activity.state === "scheduled" &&
-      activity.lastRequestId === args.requestId &&
-      activity.lastRequestAttempt === args.attempt
-    ) {
-      return { accepted: true, duplicate: true, retrying: true };
-    }
-    if (
-      activity.state === "failed" &&
-      activity.attempt === args.attempt &&
-      activity.terminalRequestId === args.requestId
-    ) {
-      return { accepted: true, duplicate: true, retrying: false };
-    }
-    const leased = await requireCurrentLease(ctx, args);
-    if (!leased.current) return { accepted: false, duplicate: false, retrying: false };
-    const retrying = await retryOrFinish(ctx, leased.activity, {
-      errorType: args.errorType,
-      errorMessage: args.errorMessage,
-      nonRetryable: args.nonRetryable,
-      requestId: args.requestId,
-    });
-    return { accepted: true, duplicate: false, retrying };
-  },
+  handler: async (ctx, args) =>
+    await commitAttempt(
+      ctx,
+      args.attemptToken,
+      {
+        kind: "failed",
+        errorType: args.errorType,
+        errorMessage: args.errorMessage,
+        nonRetryable: args.nonRetryable ?? false,
+      },
+      async (activity) => await retryOrFinish(ctx, activity, args),
+    ),
 });
 
 export const requestCancel = mutation({
@@ -457,7 +455,7 @@ export const requestCancel = mutation({
     const activity = await ctx.db.get(activityId);
     if (!activity || isTerminal(activity)) return null;
     if (activity.state === "scheduled") {
-      await finish(ctx, activity, { kind: "canceled" }, `cancel:${activity._id}`);
+      await finish(ctx, activity, { kind: "canceled" });
     } else {
       await ctx.db.patch(activityId, { cancelRequested: true, updatedAt: Date.now() });
     }
@@ -466,28 +464,15 @@ export const requestCancel = mutation({
 });
 
 export const acknowledgeCancellation = mutation({
-  args: {
-    activityId: v.id("activities"),
-    attempt: v.number(),
-    leaseToken: v.string(),
-    requestId: v.string(),
-  },
+  args: { attemptToken: v.string() },
   returns: v.object({ accepted: v.boolean(), duplicate: v.boolean() }),
-  handler: async (ctx, args) => {
-    const activity = await ctx.db.get(args.activityId);
-    if (!activity) throw new Error("Activity not found");
-    if (
-      activity.state === "canceled" &&
-      activity.attempt === args.attempt &&
-      activity.terminalRequestId === args.requestId
-    ) {
-      return { accepted: true, duplicate: true };
-    }
-    const leased = await requireCurrentLease(ctx, args);
-    if (!leased.current || !leased.activity.cancelRequested) {
-      return { accepted: false, duplicate: false };
-    }
-    await finish(ctx, leased.activity, { kind: "canceled" }, args.requestId);
+  handler: async (ctx, { attemptToken }) => {
+    const attempt = await attemptForToken(ctx, attemptToken);
+    const activity = attempt ? await ctx.db.get(attempt.activityId) : null;
+    if (activity?.state === "canceled") return { accepted: true, duplicate: true };
+    const leased = await currentLease(ctx, attemptToken);
+    if (!leased?.cancelRequested) return { accepted: false, duplicate: false };
+    await finish(ctx, leased, { kind: "canceled" });
     return { accepted: true, duplicate: false };
   },
 });
@@ -500,16 +485,11 @@ export const watchdog = internalMutation({
     if (!activity || isTerminal(activity)) return null;
     const now = Date.now();
     if (now >= activity.scheduleDeadline) {
-      await finish(
-        ctx,
-        activity,
-        {
-          kind: "failed",
-          errorType: "ScheduleToCloseTimeout",
-          errorMessage: "Activity exceeded its schedule-to-close timeout",
-        },
-        `schedule-timeout:${activity._id}:${activity.attempt}`,
-      );
+      await finish(ctx, activity, {
+        kind: "failed",
+        errorType: "ScheduleToCloseTimeout",
+        errorMessage: "Activity exceeded its schedule-to-close timeout",
+      });
       return null;
     }
     if (activity.state === "scheduled") {
@@ -519,19 +499,13 @@ export const watchdog = internalMutation({
       return null;
     }
     if (activity.cancelRequested && now >= (activity.leaseExpiresAt ?? now)) {
-      await finish(
-        ctx,
-        activity,
-        { kind: "canceled" },
-        `cancel:${activity._id}:${activity.attempt}`,
-      );
+      await finish(ctx, activity, { kind: "canceled" });
       return null;
     }
     if (now >= (activity.attemptDeadline ?? now)) {
       await retryOrFinish(ctx, activity, {
         errorType: "StartToCloseTimeout",
         errorMessage: "Activity attempt exceeded its start-to-close timeout",
-        requestId: `attempt-timeout:${activity._id}:${activity.attempt}`,
       });
       return null;
     }
@@ -539,14 +513,13 @@ export const watchdog = internalMutation({
       await retryOrFinish(ctx, activity, {
         errorType: "WorkerLost",
         errorMessage: "Activity worker lease expired",
-        requestId: `lease-timeout:${activity._id}:${activity.attempt}`,
       });
       return null;
     }
     await ctx.scheduler.runAt(
       Math.min(
-        activity.leaseExpiresAt ?? activity.scheduleDeadline,
-        activity.attemptDeadline ?? activity.scheduleDeadline,
+        activity.leaseExpiresAt ?? now,
+        activity.attemptDeadline ?? now,
         activity.scheduleDeadline,
       ),
       internal.activities.watchdog,
@@ -576,7 +549,6 @@ async function retryOrFinish(
   error: {
     errorType: string;
     errorMessage: string;
-    requestId: string;
     nonRetryable?: boolean;
   },
 ) {
@@ -588,16 +560,11 @@ async function retryOrFinish(
     activity.attempt < activity.retryPolicy.maximumAttempts &&
     now + delay < activity.scheduleDeadline;
   if (!retryable) {
-    await finish(
-      ctx,
-      activity,
-      {
-        kind: "failed",
-        errorType: error.errorType,
-        errorMessage: error.errorMessage.slice(0, 2_000),
-      },
-      error.requestId,
-    );
+    await finish(ctx, activity, {
+      kind: "failed",
+      errorType: error.errorType,
+      errorMessage: error.errorMessage.slice(0, 2_000),
+    });
     return false;
   }
   await ctx.db.patch(activity._id, {
@@ -612,26 +579,21 @@ async function retryOrFinish(
     heartbeatDetails: undefined,
     lastErrorType: error.errorType,
     lastErrorMessage: error.errorMessage.slice(0, 2_000),
-    lastRequestId: error.requestId,
-    lastRequestAttempt: activity.attempt,
     updatedAt: now,
   });
   return true;
 }
 
-async function finish(
-  ctx: MutationCtx,
-  activity: Activity,
-  result: TerminalResult,
-  requestId: string,
-) {
+async function finish(ctx: MutationCtx, activity: Activity, result: TerminalResult) {
   const now = Date.now();
-  const state =
-    result.kind === "success" ? "completed" : result.kind === "canceled" ? "canceled" : "failed";
+  const terminal =
+    result.kind === "success"
+      ? { state: "completed" as const, result }
+      : result.kind === "canceled"
+        ? { state: "canceled" as const, result }
+        : { state: "failed" as const, result };
   await ctx.db.patch(activity._id, {
-    state,
-    result,
-    terminalRequestId: requestId,
+    ...terminal,
     workerId: undefined,
     leaseToken: undefined,
     leaseExpiresAt: undefined,
@@ -720,6 +682,11 @@ export const deleteTerminal = internalMutation({
       });
       return null;
     }
+    for (const attempt of await ctx.db
+      .query("attempts")
+      .withIndex("by_activity", (q) => q.eq("activityId", activityId))
+      .collect())
+      await ctx.db.delete(attempt._id);
     await ctx.db.delete(activityId);
     return null;
   },
@@ -772,12 +739,12 @@ export const get = query({
       attempt: activity.attempt,
       nextAttemptAt: activity.nextAttemptAt,
       scheduleDeadline: activity.scheduleDeadline,
-      leaseExpiresAt: activity.leaseExpiresAt,
-      attemptDeadline: activity.attemptDeadline,
+      leaseExpiresAt: activity.leaseExpiresAt ?? undefined,
+      attemptDeadline: activity.attemptDeadline ?? undefined,
       cancelRequested: !!activity.cancelRequested,
       progress: activity.progress,
       progressMessage: activity.progressMessage,
-      result: activity.result,
+      result: activity.result ?? undefined,
       lastErrorType: activity.lastErrorType,
       lastErrorMessage: activity.lastErrorMessage,
       deliveryState: activity.deliveryState,
@@ -790,3 +757,36 @@ export const get = query({
 
 // Keep a public reference in the generated API even when only internal helpers use it.
 void api;
+
+export const cancelScope = mutation({
+  args: { scopeId: v.id("artifactScopes") },
+  returns: v.null(),
+  handler: async (ctx, { scopeId }) => {
+    const activities = await ctx.db
+      .query("activities")
+      .withIndex("by_scope", (q) => q.eq("artifactScopeId", scopeId))
+      .collect();
+    for (const activity of activities)
+      if (!isTerminal(activity)) await finish(ctx, activity, { kind: "canceled" });
+    return null;
+  },
+});
+
+// Application resource reads can use the same capability as worker writes.
+export const getAttemptInput = query({
+  args: { attemptToken: v.string() },
+  returns: v.object({ activityType: v.string(), workflowId: v.string(), input: v.any() }),
+  handler: async (ctx, { attemptToken }) => {
+    const activity = await currentLease(ctx, attemptToken);
+    if (!activity || activity.cancelRequested) throw new Error("Activity lease is not current");
+    if (!activity.artifactScopeId) throw new Error("Legacy activity has no artifact scope");
+    const scope = await ctx.db.get(activity.artifactScopeId);
+    if (!scope?.workflowId || scope.state !== "open" || scope.expiresAt <= Date.now())
+      throw new Error("Artifact scope is not open");
+    return {
+      activityType: activity.activityType,
+      workflowId: scope.workflowId,
+      input: activity.input,
+    };
+  },
+});

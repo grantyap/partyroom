@@ -412,9 +412,7 @@ class Worker:
                 body = await self._request(
                     "renew",
                     {
-                        "activityId": claimed.activity_id,
-                        "attempt": claimed.attempt,
-                        "leaseToken": claimed.lease_token,
+                        "attemptToken": claimed.attempt_token,
                         **_without_none(values),
                     },
                 )
@@ -451,9 +449,7 @@ class Worker:
             if self._client is None:
                 raise RuntimeError("Worker is not started")
             identity = {
-                "activityId": claimed.activity_id,
-                "attempt": claimed.attempt,
-                "leaseToken": claimed.lease_token,
+                "attemptToken": claimed.attempt_token,
                 "slot": slot,
             }
             prepared = await self._request("artifact-upload-url", identity)
@@ -512,13 +508,13 @@ class Worker:
             cancellation,
             upload_artifact,
         )
-        renewal_task = asyncio.create_task(renew_loop())
-        handler_task = asyncio.create_task(
-            handler(context, definition.input_model.model_validate(claimed.input))
-        )
-        cancellation_task = asyncio.create_task(cancellation.wait())
-        lease_lost_task = asyncio.create_task(lease_lost.wait())
+        renewal_task = handler_task = cancellation_task = lease_lost_task = None
         try:
+            validated_input = definition.input_model.model_validate(claimed.input)
+            handler_task = asyncio.create_task(handler(context, validated_input))
+            renewal_task = asyncio.create_task(renew_loop())
+            cancellation_task = asyncio.create_task(cancellation.wait())
+            lease_lost_task = asyncio.create_task(lease_lost.wait())
             done, _pending = await asyncio.wait(
                 {handler_task, cancellation_task, lease_lost_task},
                 return_when=asyncio.FIRST_COMPLETED,
@@ -537,10 +533,12 @@ class Worker:
             await self._send_terminal(
                 "complete",
                 claimed,
-                {"value": validated.model_dump(mode="json", by_alias=True)},
+                {"value": validated.model_dump(mode="json", by_alias=True, exclude_none=True)},
             )
         except asyncio.CancelledError:
-            handler_task.cancel()
+            if handler_task is not None:
+                handler_task.cancel()
+                await asyncio.gather(handler_task, return_exceptions=True)
             raise
         except Exception as error:  # noqa: BLE001 - handler errors become durable failures
             application_error = (
@@ -559,14 +557,14 @@ class Worker:
                 FailureResponse,
             )
         finally:
-            for task in (renewal_task, cancellation_task, lease_lost_task):
+            tasks = [
+                task
+                for task in (renewal_task, cancellation_task, lease_lost_task)
+                if task is not None
+            ]
+            for task in tasks:
                 task.cancel()
-            await asyncio.gather(
-                renewal_task,
-                cancellation_task,
-                lease_lost_task,
-                return_exceptions=True,
-            )
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _send_terminal(
         self,
@@ -575,17 +573,13 @@ class Worker:
         values: dict[str, object],
         response_model: type[TerminalResponse] = TerminalResponse,
     ) -> TerminalResponse | None:
-        request_id = str(uuid.uuid4())
         delay = 0.25
         while _now_ms() < claimed.schedule_deadline and not self._stopping.is_set():
             try:
                 body = await self._request(
                     path,
                     {
-                        "activityId": claimed.activity_id,
-                        "attempt": claimed.attempt,
-                        "leaseToken": claimed.lease_token,
-                        "requestId": request_id,
+                        "attemptToken": claimed.attempt_token,
                         **values,
                     },
                 )

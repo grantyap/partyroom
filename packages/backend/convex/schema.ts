@@ -37,4 +37,34 @@ export default defineSchema({
     revision: v.number(),
     queueRevision: v.number(),
   }).index("by_room", ["room"]),
+  migrationRuns: defineTable({
+    migrationId: v.string(),
+    phase: v.union(
+      v.literal("preflight"),
+      v.literal("apply"),
+      v.literal("verify"),
+      v.literal("finalize"),
+      v.literal("complete"),
+    ),
+    activityCursor: v.optional(v.string()),
+    workflowStepCursor: v.optional(v.string()),
+    routingVersion: v.optional(v.union(v.literal(1), v.literal(2))),
+    updatedAt: v.number(),
+  }).index("by_migration_id", ["migrationId"]),
+  migrationVerifications: defineTable({
+    migrationId: v.string(),
+    generation: v.string(),
+    completedAt: v.number(),
+    clean: v.boolean(),
+    invariantCounts: v.object({
+      blockers: v.number(),
+      legacy: v.number(),
+      activeV1Workflows: v.number(),
+      activeV1Activities: v.number(),
+      pendingAdoptions: v.number(),
+    }),
+    dataWatermark: v.string(),
+  })
+    .index("by_migration_id", ["migrationId"])
+    .index("by_generation", ["generation"]),
 });

@@ -21,6 +21,7 @@ import {
 import { activities, cancelWorkflow, managedWorkflow } from "../activities/workflowManager";
 import { getLyricTrack } from "./domain/lyrics";
 import { lyricObservation } from "./validators";
+import { rowWorkflowVersion } from "../migration/workflowRouting";
 
 async function requireCurrentEnrichment(
   ctx: Pick<QueryCtx, "db">,
@@ -28,7 +29,7 @@ async function requireCurrentEnrichment(
   workflowId: string,
 ) {
   const enrichment = await ctx.db.get("mediaEnrichments", enrichmentId);
-  if (!enrichment || enrichment.workflowId !== workflowId) {
+  if (!enrichment || enrichment.workflowId !== workflowId || enrichment.state !== "processing") {
     throw new Error("Media enrichment workflow is no longer current");
   }
   const asset = await ctx.db.get("mediaAssets", enrichment.asset);
@@ -48,9 +49,11 @@ async function failCurrentEnrichment(
   errorMessage: string,
 ) {
   const enrichment = await ctx.db.get("mediaEnrichments", enrichmentId);
-  if (!enrichment || enrichment.workflowId !== workflowId) return;
+  if (!enrichment || enrichment.workflowId !== workflowId || enrichment.state !== "processing")
+    return;
   const asset = await ctx.db.get("mediaAssets", enrichment.asset);
   if (!asset) return;
+  await ctx.db.patch(asset._id, { melodyArtifactId: undefined });
   const generated = await getLyricTrack(ctx, asset._id, "generated");
   const now = Date.now();
   if (!generated || generated.state === "processing") {
@@ -81,11 +84,12 @@ async function failCurrentEnrichment(
 }
 
 export const start = internalMutation({
-  args: { jobId: v.id("mediaJobs") },
+  args: { jobId: v.id("mediaJobs"), workflowId: vWorkflowId },
   returns: v.null(),
-  handler: async (ctx, { jobId }) => {
+  handler: async (ctx, { jobId, workflowId: parentWorkflowId }) => {
     const job = await ctx.db.get("mediaJobs", jobId);
-    if (!job?.asset) throw new Error("Media job has no claimed asset");
+    if (!job?.asset || job.workflowId !== parentWorkflowId || job.state !== "processing")
+      throw new Error("Media job has no claimed asset");
     const asset = await ctx.db.get("mediaAssets", job.asset);
     if (!asset || asset.activeJob !== jobId) {
       throw new Error("Media job no longer owns its claimed asset");
@@ -95,36 +99,20 @@ export const start = internalMutation({
       .query("mediaEnrichments")
       .withIndex("by_asset", (q) => q.eq("asset", asset._id))
       .unique();
-    if (existing?.workflowId && existing.state === "processing") {
-      await managedWorkflow.cancelActivities(ctx, existing.workflowId as any);
-      await cancelWorkflow(ctx, existing.workflowId as any);
-    }
-    for (const activity of existing?.activeActivities ?? []) {
-      await activities.cancel(ctx, activity.activityId as any);
-    }
-
+    if (existing) return null;
     const now = Date.now();
-    const enrichmentId =
-      existing?._id ??
-      (await ctx.db.insert("mediaEnrichments", {
-        asset: asset._id,
-        state: "processing",
-        createdAt: now,
-        updatedAt: now,
-      }));
-    if (existing) {
-      await ctx.db.patch("mediaEnrichments", existing._id, {
-        workflowId: undefined,
-        state: "processing",
-        activeActivities: [],
-        stepTimings: [],
-        error: undefined,
-        updatedAt: now,
-      });
-    }
+    const enrichmentId = await ctx.db.insert("mediaEnrichments", {
+      workflowVersion: rowWorkflowVersion(job),
+      asset: asset._id,
+      state: "queued",
+      createdAt: now,
+      updatedAt: now,
+    });
     const workflowId = await managedWorkflow.start(
       ctx,
-      internal.media.enrichment.mediaEnrichment,
+      rowWorkflowVersion(job) === 2
+        ? internal.media.enrichment.mediaEnrichmentV2
+        : internal.media.enrichment.mediaEnrichment,
       { enrichmentId },
       {
         onComplete: internal.media.enrichment.onComplete,
@@ -133,6 +121,7 @@ export const start = internalMutation({
     );
     await ctx.db.patch("mediaEnrichments", enrichmentId, {
       workflowId,
+      state: "processing",
       updatedAt: Date.now(),
     });
     return null;
@@ -148,6 +137,7 @@ export const markGeneratedLyricsProcessing = internalMutation({
   handler: async (ctx, { enrichmentId, workflowId }) => {
     const { asset } = await requireCurrentEnrichment(ctx, enrichmentId, workflowId);
     const existing = await getLyricTrack(ctx, asset._id, "generated");
+    if (existing) return null;
     const now = Date.now();
     const value = {
       asset: asset._id,
@@ -163,8 +153,7 @@ export const markGeneratedLyricsProcessing = internalMutation({
       error: undefined,
       updatedAt: now,
     };
-    if (existing) await ctx.db.patch("mediaLyricTracks", existing._id, value);
-    else await ctx.db.insert("mediaLyricTracks", { ...value, createdAt: now });
+    await ctx.db.insert("mediaLyricTracks", { ...value, createdAt: now });
     return null;
   },
 });
@@ -181,6 +170,19 @@ export const recordGeneratedLyrics = internalMutation({
     const { asset } = await requireCurrentEnrichment(ctx, args.enrichmentId, args.workflowId);
     const track = await getLyricTrack(ctx, asset._id, "generated");
     if (!track) throw new Error("Generated lyric track was not initialized");
+    if (track.state !== "processing") {
+      if (
+        track.state === "ready" &&
+        track.textArtifactId === args.textArtifactId &&
+        track.timedArtifactId === args.timedArtifactId
+      )
+        return null;
+      throw new Error("Generated lyrics are already settled");
+    }
+    await activities.publishArtifacts(ctx, args.workflowId, asset._id, {
+      lyricsArtifactId: args.textArtifactId,
+      timedLyricsArtifactId: args.timedArtifactId,
+    });
     await ctx.db.patch("mediaLyricTracks", track._id, {
       state: "ready",
       textArtifactId: args.textArtifactId,
@@ -222,6 +224,9 @@ export const recordAlignedLrclibLyrics = internalMutation({
     const { asset } = await requireCurrentEnrichment(ctx, args.enrichmentId, args.workflowId);
     const track = await getLyricTrack(ctx, asset._id, "lrclib");
     if (!track || track.state !== "ready" || track.timing !== "line") return null;
+    await activities.publishArtifacts(ctx, args.workflowId, asset._id, {
+      timedLyricsArtifactId: args.timedArtifactId,
+    });
     await ctx.db.patch("mediaLyricTracks", track._id, {
       timing: "word",
       timedArtifactId: args.timedArtifactId,
@@ -243,6 +248,9 @@ export const recordMelody = internalMutation({
   returns: v.null(),
   handler: async (ctx, args) => {
     const { asset } = await requireCurrentEnrichment(ctx, args.enrichmentId, args.workflowId);
+    await activities.validateProduced(ctx, args.workflowId, args.artifactId, "artifactId");
+    if (asset.melodyArtifactId && asset.melodyArtifactId !== args.artifactId)
+      throw new Error("Melody is already recorded");
     await ctx.db.patch("mediaAssets", asset._id, {
       melodyArtifactId: args.artifactId,
       updatedAt: Date.now(),
@@ -262,6 +270,21 @@ export const recordAnnotations = internalMutation({
   returns: v.null(),
   handler: async (ctx, args) => {
     const { asset } = await requireCurrentEnrichment(ctx, args.enrichmentId, args.workflowId);
+    if (asset.annotationsState !== "processing") {
+      if (
+        asset.annotationsState === "ready" &&
+        asset.annotationsArtifactId === args.annotationsArtifactId &&
+        asset.midiArtifactId === args.midiArtifactId &&
+        asset.musicXmlArtifactId === args.musicXmlArtifactId
+      )
+        return null;
+      throw new Error("Annotations are already settled");
+    }
+    await activities.publishArtifacts(ctx, args.workflowId, asset._id, {
+      annotationsArtifactId: args.annotationsArtifactId,
+      midiArtifactId: args.midiArtifactId,
+      musicXmlArtifactId: args.musicXmlArtifactId,
+    });
     await ctx.db.patch("mediaAssets", asset._id, {
       annotationsArtifactId: args.annotationsArtifactId,
       midiArtifactId: args.midiArtifactId,
@@ -283,6 +306,7 @@ export const markAnnotationsFailed = internalMutation({
   returns: v.null(),
   handler: async (ctx, args) => {
     const { asset } = await requireCurrentEnrichment(ctx, args.enrichmentId, args.workflowId);
+    if (asset.annotationsState !== "processing") return null;
     await ctx.db.patch("mediaAssets", asset._id, {
       annotationsState: "failed",
       annotationsError: args.errorMessage.slice(0, 2_000),
@@ -357,7 +381,8 @@ export const complete = internalMutation({
   },
   returns: v.null(),
   handler: async (ctx, { enrichmentId, workflowId }) => {
-    await requireCurrentEnrichment(ctx, enrichmentId, workflowId);
+    const { asset } = await requireCurrentEnrichment(ctx, enrichmentId, workflowId);
+    await ctx.db.patch(asset._id, { melodyArtifactId: undefined });
     await ctx.db.patch("mediaEnrichments", enrichmentId, {
       state: "ready",
       error: undefined,
@@ -424,7 +449,7 @@ const mediaEnrichmentDefinition = managedWorkflow.define({
   },
 });
 
-export const mediaEnrichment = mediaEnrichmentDefinition.handler(async (step, { enrichmentId }) => {
+const mediaEnrichmentHandler = mediaEnrichmentDefinition.handler(async (step, { enrichmentId }) => {
   await step.runMutation(
     internal.media.enrichment.markGeneratedLyricsProcessing,
     { enrichmentId, workflowId: step.workflowId },
@@ -568,6 +593,11 @@ export const mediaEnrichment = mediaEnrichmentDefinition.handler(async (step, { 
     { name: "complete-enrichment", inline: true },
   );
 });
+
+// Keep the original export forever while v1 journals can still reference it.
+export const mediaEnrichment = mediaEnrichmentHandler;
+export const mediaEnrichmentV1 = mediaEnrichmentHandler;
+export const mediaEnrichmentV2 = mediaEnrichmentHandler;
 
 export const onComplete = internalMutation({
   args: {

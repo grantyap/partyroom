@@ -24,7 +24,7 @@ async function requireCurrentEnrichment(
   workflowId: WorkflowId,
 ) {
   const enrichment = await ctx.db.get("mediaEnrichments", enrichmentId);
-  if (!enrichment || enrichment.workflowId !== workflowId) {
+  if (!enrichment || enrichment.workflowId !== workflowId || enrichment.state !== "processing") {
     throw new Error("Media enrichment workflow is no longer current");
   }
   const asset = await ctx.db.get("mediaAssets", enrichment.asset);

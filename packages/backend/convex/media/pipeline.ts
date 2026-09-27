@@ -2,7 +2,6 @@ import { vResultValidator } from "@convex-dev/workpool";
 import { vWorkflowId, type WorkflowId } from "@convex-dev/workflow";
 import { mediaActivities } from "@partyroom/media-activities";
 import {
-  actionOptions,
   activityStep,
   type ActivityDefinition,
   type ActivityInput,
@@ -73,16 +72,12 @@ const mediaPipelineDefinition = managedWorkflow.define({
       label: "Resolve source",
       order: 0,
     }),
-    fetchLyrics: workflowStep(
-      actionOptions({
-        action: workflowOperations.fetchLyrics,
-        retry: { maxAttempts: 3, initialBackoffMs: 1_000, base: 2 },
-      }),
-      {
-        label: "Fetch synced lyrics",
-        order: 1,
-      },
-    ),
+    fetchLyrics: workflowStep({
+      action: workflowOperations.fetchLyrics,
+      retry: { maxAttempts: 3, initialBackoffMs: 1_000, base: 2 },
+      label: "Fetch synced lyrics",
+      order: 1,
+    }),
     download: activityStep(mediaActivities.download, {
       input: inputBuilders.download,
       label: "Download source",
@@ -106,12 +101,13 @@ const mediaPipelineDefinition = managedWorkflow.define({
   },
 });
 
-export const mediaPipeline = mediaPipelineDefinition.handler(async (step, { jobId }) => {
+const mediaPipelineHandler = mediaPipelineDefinition.handler(async (step, { jobId }) => {
   try {
     const resolved = await step.steps.resolve.run({ jobId });
     const claim = await step.runMutation(
       internal.media.jobs.claimAsset,
       {
+        workflowId: step.workflowId,
         jobId,
         extractor: resolved.extractor,
         sourceId: resolved.sourceId,
@@ -124,7 +120,7 @@ export const mediaPipeline = mediaPipelineDefinition.handler(async (step, { jobI
     if (claim.mode === "cached") {
       await step.runMutation(
         internal.media.jobs.completeFromAsset,
-        { jobId, assetId: claim.assetId },
+        { workflowId: step.workflowId, jobId, assetId: claim.assetId },
         { inline: true },
       );
       return;
@@ -136,21 +132,15 @@ export const mediaPipeline = mediaPipelineDefinition.handler(async (step, { jobI
       });
       await step.runMutation(
         internal.media.jobs.completeFromAsset,
-        { jobId, assetId },
+        { workflowId: step.workflowId, jobId, assetId },
         { inline: true },
       );
       return;
     }
 
     await step.runMutation(
-      internal.media.jobs.recordLyricTrack,
-      {
-        jobId,
-        source: "lrclib",
-        label: "LRCLIB",
-        timing: "line",
-        state: "processing",
-      },
+      internal.media.jobs.recordLrclib,
+      { workflowId: step.workflowId, jobId, result: { state: "processing" } },
       { name: "mark-lrclib-processing", inline: true },
     );
     try {
@@ -163,34 +153,38 @@ export const mediaPipeline = mediaPipelineDefinition.handler(async (step, { jobI
         albumName: resolved.album,
       });
       await step.runMutation(
-        internal.media.jobs.recordLyricTrack,
+        internal.media.jobs.recordLrclib,
         {
+          workflowId: step.workflowId,
           jobId,
-          source: "lrclib",
-          label: "LRCLIB",
-          timing: result.timing,
-          state: result.state,
-          observations: result.observations,
-          metadata: {
-            providerId: result.id === undefined ? undefined : String(result.id),
-            trackName: result.trackName,
-            artistName: result.artistName,
-            albumName: result.albumName,
-            format: result.format,
-          },
+          result:
+            result.state === "not_found"
+              ? { state: "not_found" }
+              : {
+                  state: "ready",
+                  timing: result.timing,
+                  observations: result.observations,
+                  metadata: {
+                    providerId: result.id === undefined ? undefined : String(result.id),
+                    trackName: result.trackName,
+                    artistName: result.artistName,
+                    albumName: result.albumName,
+                    format: result.format,
+                  },
+                },
         },
         { name: "record-lrclib", inline: true },
       );
     } catch (error) {
       await step.runMutation(
-        internal.media.jobs.recordLyricTrack,
+        internal.media.jobs.recordLrclib,
         {
+          workflowId: step.workflowId,
           jobId,
-          source: "lrclib",
-          label: "LRCLIB",
-          timing: "line",
-          state: "failed",
-          errorMessage: error instanceof Error ? error.message : String(error),
+          result: {
+            state: "failed",
+            error: error instanceof Error ? error.message : String(error),
+          },
         },
         { name: "mark-lrclib-failed", inline: true },
       );
@@ -200,9 +194,9 @@ export const mediaPipeline = mediaPipelineDefinition.handler(async (step, { jobI
     await step.runMutation(
       internal.media.jobs.recordStageResult,
       {
+        workflowId: step.workflowId,
         jobId,
-        kind: "download",
-        artifactId: download.artifactId,
+        result: { kind: "download", artifactId: download.artifactId },
       },
       { name: "record-download", inline: true },
     );
@@ -210,9 +204,9 @@ export const mediaPipeline = mediaPipelineDefinition.handler(async (step, { jobI
     await step.runMutation(
       internal.media.jobs.recordStageResult,
       {
+        workflowId: step.workflowId,
         jobId,
-        kind: "extractAudio",
-        artifactId: extracted.artifactId,
+        result: { kind: "extractAudio", artifactId: extracted.artifactId },
       },
       { name: "record-extractAudio", inline: true },
     );
@@ -220,31 +214,30 @@ export const mediaPipeline = mediaPipelineDefinition.handler(async (step, { jobI
     await step.runMutation(
       internal.media.jobs.recordStageResult,
       {
+        workflowId: step.workflowId,
         jobId,
-        kind: "separate",
-        artifactId: separated.instrumentalArtifactId,
-        secondaryArtifactId: separated.vocalsArtifactId,
+        result: {
+          kind: "separate",
+          instrumentalArtifactId: separated.instrumentalArtifactId,
+          vocalsArtifactId: separated.vocalsArtifactId,
+        },
       },
       { name: "record-separate", inline: true },
     );
     await step.runMutation(
       internal.media.enrichment.start,
-      { jobId },
+      { workflowId: step.workflowId, jobId },
       { name: "start-enrichment", inline: true },
     );
     const muxed = await step.steps.mux.run({ jobId });
     await step.runMutation(
       internal.media.jobs.recordStageResult,
-      {
-        jobId,
-        kind: "mux",
-        artifactId: muxed.artifactId,
-      },
+      { workflowId: step.workflowId, jobId, result: { kind: "mux", artifactId: muxed.artifactId } },
       { name: "record-mux", inline: true },
     );
     await step.runMutation(
       internal.media.jobs.finalizeAsset,
-      { jobId },
+      { workflowId: step.workflowId, jobId },
       { name: "finalize-asset", inline: true },
     );
     return;
@@ -252,12 +245,22 @@ export const mediaPipeline = mediaPipelineDefinition.handler(async (step, { jobI
     const message = error instanceof Error ? error.message : String(error);
     await step.runMutation(
       internal.media.jobs.failJob,
-      { jobId, errorCode: "MEDIA_PIPELINE_FAILED", errorMessage: message },
+      {
+        workflowId: step.workflowId,
+        jobId,
+        errorCode: "MEDIA_PIPELINE_FAILED",
+        errorMessage: message,
+      },
       { name: "fail-job", inline: true },
     );
     throw error;
   }
 });
+
+// Keep the original export forever while v1 journals can still reference it.
+export const mediaPipeline = mediaPipelineHandler;
+export const mediaPipelineV1 = mediaPipelineHandler;
+export const mediaPipelineV2 = mediaPipelineHandler;
 
 export const onPipelineComplete = internalMutation({
   args: {
@@ -266,11 +269,12 @@ export const onPipelineComplete = internalMutation({
     context: v.object({ jobId: v.id("mediaJobs") }),
   },
   returns: v.null(),
-  handler: async (ctx, { result, context }) => {
+  handler: async (ctx, { workflowId, result, context }) => {
     if (result.kind === "success") return null;
     const errorMessage = result.kind === "failed" ? result.error : "Media processing was canceled";
     await ctx.runMutation(internal.media.jobs.failJob, {
       jobId: context.jobId,
+      workflowId,
       errorCode: result.kind === "canceled" ? "MEDIA_PIPELINE_CANCELED" : "MEDIA_PIPELINE_FAILED",
       errorMessage,
     });

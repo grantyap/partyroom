@@ -26,13 +26,13 @@ const artifactActivity = defineActivity({
 function claimBody(leaseDurationMs = 30_000) {
   const now = Date.now();
   return {
-    protocolVersion: 1,
+    protocolVersion: 2,
     activityId: "activity-1",
     activityType: "test.echo",
     activityVersion: 1,
     taskQueue: "test",
     attempt: 1,
-    leaseToken: "lease-token",
+    attemptToken: "lease-token",
     leaseExpiresAt: now + leaseDurationMs,
     attemptDeadline: now + 60_000,
     scheduleDeadline: now + 300_000,
@@ -49,10 +49,10 @@ describe("ActivityWorker", () => {
       supportedActivities: [{ name: "test.echo", version: 1 }],
     };
     expect(() => claimRequestSchema.parse(claim)).toThrow();
-    expect(() => claimRequestSchema.parse({ ...claim, protocolVersion: 2 })).toThrow();
-    expect(claimRequestSchema.parse({ ...claim, protocolVersion: 1 })).toEqual({
+    expect(() => claimRequestSchema.parse({ ...claim, protocolVersion: 1 })).toThrow();
+    expect(claimRequestSchema.parse({ ...claim, protocolVersion: 2 })).toEqual({
       ...claim,
-      protocolVersion: 1,
+      protocolVersion: 2,
     });
   });
 
@@ -184,7 +184,7 @@ describe("ActivityWorker", () => {
       const path = new URL(input instanceof Request ? input.url : input).pathname;
       const body = JSON.parse(String(init?.body ?? "{}"));
       if (path === "/workers/claim") {
-        expect(body.protocolVersion).toBe(1);
+        expect(body.protocolVersion).toBe(2);
         if (claimed) return Response.json(null);
         claimed = true;
         return Response.json(claimBody());
@@ -214,12 +214,10 @@ describe("ActivityWorker", () => {
     await worker.stop();
 
     expect(completed).toMatchObject({
-      activityId: "activity-1",
-      attempt: 1,
-      leaseToken: "lease-token",
+      attemptToken: "lease-token",
       value: { echoed: "hello" },
     });
-    expect(completed?.requestId).toBeString();
+    expect(completed).not.toHaveProperty("requestId");
   });
 
   test("reports typed application failures", async () => {
@@ -264,6 +262,44 @@ describe("ActivityWorker", () => {
       errorMessage: "bad input",
       nonRetryable: true,
     });
+  });
+
+  test("stops promptly while terminal delivery is retrying", async () => {
+    let claimed = false;
+    let resolveTerminalAttempt!: () => void;
+    const terminalAttempt = new Promise<void>((resolve) => (resolveTerminalAttempt = resolve));
+    const fetch = async (input: string | URL | Request) => {
+      const path = new URL(input instanceof Request ? input.url : input).pathname;
+      if (path === "/workers/claim") {
+        if (claimed) return Response.json(null);
+        claimed = true;
+        return Response.json({
+          ...claimBody(),
+          scheduleDeadline: Date.now() + 2_000,
+        });
+      }
+      if (path === "/workers/complete") {
+        resolveTerminalAttempt();
+        return Response.json({ error: "temporary" }, { status: 503 });
+      }
+      throw new Error(`Unexpected path ${path}`);
+    };
+    const worker = new ActivityWorker({
+      apiUrl: "http://activities.test/workers/",
+      token: "token",
+      workerId: "worker",
+      taskQueue: "test",
+      activities: [defineHandler(activity, async () => ({ echoed: "done" }))],
+      idlePollIntervalMs: 100,
+      fetch: fetch as typeof globalThis.fetch,
+    });
+
+    worker.start();
+    await terminalAttempt;
+    const startedAt = performance.now();
+    await worker.stop();
+
+    expect(performance.now() - startedAt).toBeLessThan(500);
   });
 
   test("uploads and registers declared artifacts before completing", async () => {
@@ -320,9 +356,7 @@ describe("ActivityWorker", () => {
     await worker.stop();
 
     expect(registered).toMatchObject({
-      activityId: "activity-1",
-      attempt: 1,
-      leaseToken: "lease-token",
+      attemptToken: "lease-token",
       slot: "file",
       storageId: "storage-1",
     });

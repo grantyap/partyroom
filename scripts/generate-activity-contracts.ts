@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import type { WireSchema } from "../packages/activities/src/wire";
+import { wireArtifactDefinitions, type WireSchema } from "../packages/activities/src/wire";
 import { mediaActivities } from "../packages/media-activities/src/registry";
 
 const root = resolve(import.meta.dir, "..");
@@ -79,7 +79,7 @@ function generatePython(keys: readonly (keyof typeof mediaActivities)[]) {
       `    task_queue=${JSON.stringify(activity.queue.name)},`,
       `    input_model=${className}Input,`,
       `    output_model=${className}Output,`,
-      `    artifact_slots=${JSON.stringify(activity.artifactSlots)},`,
+      `    artifact_slots=${JSON.stringify(Object.keys(wireArtifactDefinitions(activity.outputSchema)))},`,
       ")",
       "",
     ].join("\n");
@@ -109,7 +109,7 @@ await Bun.write(
           taskQueue: activity.queue.name,
           input: activity.inputSchema,
           output: activity.outputSchema,
-          artifacts: activity.artifacts,
+          artifacts: wireArtifactDefinitions(activity.outputSchema),
         },
       ]),
     ),

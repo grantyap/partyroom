@@ -13,11 +13,8 @@ import { protocolVersion } from "../protocol";
 import { artifactScopeForWorkflow, type ArtifactScopeId } from "./artifactLifecycle";
 import type { ActivityWorkflowCompletionArgs } from "./activityCompletion";
 import {
-  wireArtifactDefinitions,
   wireValidator,
-  type ArtifactDisposition,
   type ArtifactId,
-  type WireArtifactDefinitions,
   type WireInfer,
   type WireSchema,
 } from "./wire";
@@ -56,16 +53,11 @@ export type QueueDefinition<Name extends string = string> = {
 
 type AnyValidator = Validator<any, any, any>;
 
-export type ArtifactDefinitions = Readonly<
-  Record<string, { readonly disposition: ArtifactDisposition }>
->;
-
 /**
- * Frozen worker-facing contract produced by {@link defineActivity}.
+ * Immutable activity definition returned by {@link defineActivity}.
  *
- * Pass the definition itself to consumers such as `activityStep`; its generic
- * parameters preserve the relationship between queue, input, output, and
- * artifacts without callers supplying type arguments.
+ * Pass the definition directly to `activityStep`. Its type parameters keep the
+ * queue, input, and output types connected without manual type arguments.
  *
  * @see {@link defineActivity}
  */
@@ -75,18 +67,17 @@ export type ActivityDefinition<
   InputValidator extends AnyValidator = AnyValidator,
   OutputValidator extends AnyValidator = AnyValidator,
   Queue extends QueueDefinition = QueueDefinition,
-  Artifacts extends ArtifactDefinitions = any,
 > = {
   readonly name: Name;
   readonly version: Version;
   readonly queue: Queue;
   readonly input: InputValidator;
+  readonly inputSchema: WireSchema;
+  readonly outputSchema: WireSchema;
   readonly output: OutputValidator;
   readonly startToCloseTimeoutMs: number;
   readonly scheduleToCloseTimeoutMs: number;
   readonly retryPolicy: RetryPolicy;
-  readonly artifacts: Artifacts;
-  readonly artifactSlots: readonly (keyof Artifacts & string)[];
 };
 
 export type ActivityInput<Definition extends ActivityDefinition> = Infer<Definition["input"]>;
@@ -101,7 +92,8 @@ const defaultRetryPolicy: RetryPolicy = {
 };
 
 /**
- * Creates a reusable queue definition while preserving the queue name literal.
+ * Creates an immutable queue definition and preserves its name as a literal
+ * type.
  *
  * @see {@link QueueDefinition}
  * @see {@link defineActivity}
@@ -114,20 +106,18 @@ export function defineQueue<const Name extends string>(
 }
 
 /**
- * Defines and validates an external activity's complete worker contract.
+ * Creates an immutable activity definition and validates its wire schemas.
  *
- * Prefer this inference boundary over annotating an {@link ActivityDefinition}
- * object directly: the input/output wire schemas remain available, literal
- * names and versions stay narrow, and artifact metadata is derived once for
- * every scheduler and worker consumer. The returned definition is frozen.
+ * Use this function instead of annotating an {@link ActivityDefinition} object.
+ * It preserves literal names and versions and keeps input/output types inferred
+ * from the schemas.
  *
- * Timeouts are intentionally explicit. Retries default to three attempts with
- * exponential backoff from 1 second to 60 seconds; override only the fields
- * whose behavior differs. Bump `version` for incompatible worker-observable
- * changes, not for workflow-only orchestration changes.
+ * Timeouts are required. Retries default to three attempts with exponential
+ * backoff from 1 second to 60 seconds; override only the values that differ.
+ * Increase `version` for an incompatible worker-facing change, not for a
+ * workflow-only orchestration change.
  *
  * @see {@link defineQueue}
- * @see {@link defineActivityRegistry}
  * @see {@link activityStep}
  */
 export function defineActivity<
@@ -155,22 +145,17 @@ export function defineActivity<
   Version,
   Validator<WireInfer<InputSchema>, "required", any>,
   Validator<WireInfer<OutputSchema>, "required", any>,
-  Queue,
-  WireArtifactDefinitions<OutputSchema>
+  Queue
 > & {
   readonly inputSchema: InputSchema;
   readonly outputSchema: OutputSchema;
 } {
-  const artifacts = wireArtifactDefinitions(config.output);
   return Object.freeze({
     ...config,
     inputSchema: config.input,
     outputSchema: config.output,
     input: wireValidator(config.input),
     output: wireValidator(config.output),
-    artifacts,
-    artifactSlots: Object.keys(artifacts) as (keyof WireArtifactDefinitions<OutputSchema> &
-      string)[],
     retryPolicy: {
       ...defaultRetryPolicy,
       ...config.retryPolicy,
@@ -178,22 +163,6 @@ export function defineActivity<
         config.retryPolicy?.nonRetryableErrorTypes ?? defaultRetryPolicy.nonRetryableErrorTypes,
     },
   });
-}
-
-/**
- * Groups queue and activity definitions without widening their inferred keys.
- *
- * The registry is a discoverability and type-preservation boundary, not a
- * second source of configuration; define policy on each queue or activity.
- *
- * @see {@link defineQueue}
- * @see {@link defineActivity}
- */
-export function defineActivityRegistry<
-  const Queues extends Record<string, QueueDefinition>,
-  const Activities extends Record<string, ActivityDefinition>,
->(registry: { queues: Queues; activities: Activities }) {
-  return Object.freeze(registry);
 }
 
 export type ActivityCompletionResult<Output = Value> =
@@ -278,14 +247,9 @@ export class ActivityManager {
         maxConcurrentActivities: definition.queue.maxConcurrentActivities,
       },
       input,
+      inputSchema: definition.inputSchema,
+      outputSchema: definition.outputSchema,
       artifactScopeId,
-      artifactSlots: [...definition.artifactSlots],
-      artifactDefinitions: Object.entries(definition.artifacts as ArtifactDefinitions).map(
-        ([slot, artifact]) => ({
-          slot,
-          disposition: artifact.disposition,
-        }),
-      ),
       completion,
       retryPolicy: definition.retryPolicy,
       startToCloseTimeoutMs: definition.startToCloseTimeoutMs,
@@ -294,9 +258,33 @@ export class ActivityManager {
     return activityId as ActivityId;
   }
 
-  async deleteArtifact(ctx: MutationCtx, artifactId: ArtifactId) {
+  async validateProduced(ctx: QueryCtx, workflowId: string, artifactId: string, slot: string) {
+    await ctx.runQuery(this.component.artifacts.validateProduced, {
+      workflowId,
+      artifactId: artifactId as any,
+      slot,
+    });
+  }
+
+  async publishArtifacts(
+    ctx: MutationCtx,
+    workflowId: string,
+    owner: string,
+    artifacts: Readonly<Record<string, string>>,
+  ) {
+    await ctx.runMutation(this.component.artifacts.adopt, {
+      workflowId,
+      owner,
+      artifacts: Object.entries(artifacts).map(
+        ([slot, artifactId]) => ({ artifactId, slot }),
+      ) as any,
+    });
+  }
+
+  async deleteArtifact(ctx: MutationCtx, artifactId: ArtifactId, owner: string) {
     return await ctx.runMutation(this.component.artifacts.deleteArtifact, {
       artifactId: artifactId as any,
+      owner,
     });
   }
 
@@ -305,85 +293,12 @@ export class ActivityManager {
       artifactId: artifactId as any,
     });
   }
-
-  async cancel(ctx: MutationCtx, activityId: ActivityId) {
-    await ctx.runMutation(this.component.activities.requestCancel, {
-      activityId,
-    });
-  }
 }
-
-export type WorkerActivityDefinition = { name: string; version: number };
-
-export type ClaimRequest = {
-  protocolVersion: typeof protocolVersion;
-  taskQueue: string;
-  workerId: string;
-  supportedActivities: WorkerActivityDefinition[];
-};
-
-export type ClaimedActivity = {
-  protocolVersion: typeof protocolVersion;
-  activityId: string;
-  activityType: string;
-  activityVersion: number;
-  taskQueue: string;
-  attempt: number;
-  leaseToken: string;
-  leaseExpiresAt: number;
-  attemptDeadline: number;
-  scheduleDeadline: number;
-  input: Value;
-};
-
-export type RenewRequest = {
-  activityId: string;
-  attempt: number;
-  leaseToken: string;
-  progress?: number;
-  progressMessage?: string;
-  heartbeatDetails?: Value;
-};
-
-export type CompleteRequest = {
-  activityId: string;
-  attempt: number;
-  leaseToken: string;
-  requestId: string;
-  value: Value;
-};
-
-export type FailRequest = {
-  activityId: string;
-  attempt: number;
-  leaseToken: string;
-  requestId: string;
-  errorType: string;
-  errorMessage: string;
-  nonRetryable?: boolean;
-};
-
-export type CancelRequest = {
-  activityId: string;
-  attempt: number;
-  leaseToken: string;
-  requestId: string;
-};
-
-export type ActivityWorkflowContext = {
-  workflowId: WorkflowId;
-  eventName: string;
-};
 
 export { protocolVersion };
 export {
-  actionOptions,
   activityStep,
   ManagedWorkflowManager,
-  manualWorkflowStep,
-  mutationOptions,
-  queryOptions,
-  workflowOptions,
   workflowStep,
   type ManagedWorkflowCtx,
   type ManagedStepOperation,

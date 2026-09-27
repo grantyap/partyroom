@@ -31,14 +31,9 @@ import {
 } from "./domain/jobs";
 import { getLyricTrack } from "./domain/lyrics";
 import { isDraining } from "../migration/drain";
-import { mediaPipelineStepStatuses, workflowPipelineStepStatuses } from "./progress/model";
-import {
-  lyricTrackMetadata,
-  lyricTrackState,
-  lyricObservation,
-  mediaOperationKind,
-  type OperationKind,
-} from "./validators";
+import { workflowVersion } from "../migration/workflowRouting";
+import { workflowPipelineStepStatuses } from "./progress/model";
+import { stageResult, lrclibResult } from "./validators";
 
 async function mediaArtifactUrl(ctx: QueryCtx, artifactId: string | undefined) {
   return artifactId ? await activities.getArtifactUrl(ctx, artifactId as ArtifactId) : null;
@@ -46,35 +41,13 @@ async function mediaArtifactUrl(ctx: QueryCtx, artifactId: string | undefined) {
 
 export { removeRoomMedia as removeFromRoomImpl } from "./domain/jobs";
 
-async function activityStatuses(
-  ctx: Pick<QueryCtx, "runQuery">,
-  activities: Array<{ activityId: string; kind: OperationKind }> | undefined,
-) {
-  return await Promise.all(
-    (activities ?? []).map(async (entry) => {
-      const status = await ctx.runQuery(components.activities.activities.get, {
-        activityId: entry.activityId as any,
-      });
-      return {
-        ...entry,
-        state: status?.state ?? "scheduled",
-        attempt: status?.attempt ?? 0,
-        progress: status?.progress,
-        message: status?.progressMessage,
-        startedAt: status?.startedAt,
-        completedAt: status?.completedAt,
-      };
-    }),
-  );
-}
-
 async function workflowProgressSteps(
   ctx: Pick<QueryCtx, "runQuery">,
-  workflowIds: Array<string | undefined>,
+  workflowIds: Array<string | null | undefined>,
 ) {
   const workflows = await Promise.all(
     workflowIds
-      .filter((workflowId): workflowId is string => workflowId !== undefined)
+      .filter((workflowId): workflowId is string => typeof workflowId === "string")
       .map(async (workflowId) => await managedWorkflow.getProgress(ctx, workflowId as WorkflowId)),
   );
   return workflowPipelineStepStatuses(...workflows);
@@ -95,10 +68,15 @@ export const authorizeRequest = internalQuery({
 });
 
 export const getEncryptedSource = internalQuery({
-  args: { jobId: v.id("mediaJobs") },
-  handler: async (ctx, { jobId }) => {
-    const job = await ctx.db.get("mediaJobs", jobId);
-    if (!job) throw new Error("Media job not found");
+  args: { attemptToken: v.string() },
+  returns: v.object({ encryptedSource: v.string(), sourceIv: v.string() }),
+  handler: async (ctx, args) => {
+    const attempt = await ctx.runQuery(components.activities.activities.getAttemptInput, args);
+    if (attempt.activityType !== "media.resolve" && attempt.activityType !== "media.download")
+      throw new Error("Activity cannot read media sources");
+    const jobId = ctx.db.normalizeId("mediaJobs", attempt.input.jobId);
+    if (!jobId) throw new Error("Invalid source job");
+    const job = await requireRun(ctx, jobId, attempt.workflowId);
     return { encryptedSource: job.encryptedSource, sourceIv: job.sourceIv };
   },
 });
@@ -126,13 +104,16 @@ export const request = internalMutation({
     jobId: v.id("mediaJobs"),
     roomMediaId: v.id("roomMedia"),
     created: v.boolean(),
+    workflowVersion: v.union(v.literal(1), v.literal(2)),
   }),
   handler: async (ctx, args) => {
     const result = await createOrJoinMedia(ctx, args);
     if (result.created && !isDraining()) {
       const workflowId = await managedWorkflow.start(
         ctx,
-        internal.media.pipeline.mediaPipeline,
+        result.workflowVersion === 2
+          ? internal.media.pipeline.mediaPipelineV2
+          : internal.media.pipeline.mediaPipeline,
         { jobId: result.jobId },
         {
           onComplete: internal.media.pipeline.onPipelineComplete,
@@ -192,9 +173,13 @@ export const reprocess = mutation({
       ? await queueReprocessDuringDrain(ctx, args)
       : await requeueRoomMedia(ctx, args);
     if (draining) return null;
+    const job = await ctx.db.get(jobId);
+    if (!job) throw new Error("Media job not found");
     const workflowId = await managedWorkflow.start(
       ctx,
-      internal.media.pipeline.mediaPipeline,
+      job.workflowVersion === 2
+        ? internal.media.pipeline.mediaPipelineV2
+        : internal.media.pipeline.mediaPipeline,
       { jobId },
       {
         onComplete: internal.media.pipeline.onPipelineComplete,
@@ -206,32 +191,23 @@ export const reprocess = mutation({
   },
 });
 
-export const resumeQueuedV1 = internalMutation({
+export const releaseQueuedV2 = internalMutation({
   args: {},
   returns: v.boolean(),
   handler: async (ctx: MutationCtx) => {
+    if ((await workflowVersion(ctx)) !== 2)
+      throw new Error("route v2 before releasing queued work");
     const queued = await ctx.db
       .query("mediaJobs")
       .withIndex("by_state", (q) => q.eq("state", "queued"))
       .first();
     if (!queued) return false;
-    let jobId = queued._id;
-    if (queued.rebuildOf) {
-      const association = await ctx.db
-        .query("roomMedia")
-        .withIndex("by_job", (q) => q.eq("job", queued._id))
-        .unique();
-      if (!association) throw new Error(`Queued reprocess ${queued._id} has no room association`);
-      await ctx.db.patch(association._id, { job: queued.rebuildOf });
-      await ctx.db.delete(queued._id);
-      jobId = await requeueRoomMedia(ctx, {
-        roomId: association.room,
-        roomMediaId: association._id,
-      });
-    }
+    if (queued.workflowId) throw new Error(`Queued job ${queued._id} already has a workflow`);
+    const jobId = queued._id;
+    await ctx.db.patch(jobId, { workflowVersion: 2 });
     const workflowId = await managedWorkflow.start(
       ctx,
-      internal.media.pipeline.mediaPipeline,
+      internal.media.pipeline.mediaPipelineV2,
       { jobId },
       {
         onComplete: internal.media.pipeline.onPipelineComplete,
@@ -253,112 +229,188 @@ export const deleteCompletedAsset = internalMutation({
   handler: async (ctx, { assetId }) => await deleteCompletedMediaAsset(ctx, assetId),
 });
 
+async function requireRun(ctx: { db: QueryCtx["db"] }, jobId: Id<"mediaJobs">, workflowId: string) {
+  const job = await ctx.db.get(jobId);
+  if (!job || job.workflowId !== workflowId || job.state !== "processing")
+    throw new Error("Media run is no longer current");
+  return job;
+}
+
 export const claimAsset = internalMutation({
   args: {
     jobId: v.id("mediaJobs"),
+    workflowId: vWorkflowId,
     extractor: v.string(),
     sourceId: v.string(),
     title: v.optional(v.string()),
     duration: v.optional(v.number()),
   },
-  handler: claimAssetForJob,
+  handler: async (ctx, args) => {
+    await requireRun(ctx, args.jobId, args.workflowId);
+    return await claimAssetForJob(ctx, args);
+  },
 });
 
 export const recordStageResult = internalMutation({
-  args: {
-    jobId: v.id("mediaJobs"),
-    kind: mediaOperationKind,
-    artifactId: v.string(),
-    secondaryArtifactId: v.optional(v.string()),
-    tertiaryArtifactId: v.optional(v.string()),
+  args: { jobId: v.id("mediaJobs"), workflowId: vWorkflowId, result: stageResult },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await requireRun(ctx, args.jobId, args.workflowId);
+    await recordStageResultForJob(ctx, args);
+    return null;
   },
-  handler: async (ctx, args) =>
-    await recordStageResultForJob(ctx, {
-      ...args,
-      artifactId: args.artifactId as ArtifactId,
-      secondaryArtifactId: args.secondaryArtifactId as ArtifactId | undefined,
-      tertiaryArtifactId: args.tertiaryArtifactId as ArtifactId | undefined,
-    }),
 });
 
-export const recordLyricTrack = internalMutation({
+export const recordLrclib = internalMutation({
+  args: { jobId: v.id("mediaJobs"), workflowId: vWorkflowId, result: lrclibResult },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const job = await requireRun(ctx, args.jobId, args.workflowId);
+    if (!job.asset) throw new Error("Run has no claimed asset");
+    const asset = await ctx.db.get(job.asset);
+    if (asset?.activeJob !== job._id) throw new Error("Run does not own asset");
+    const existing = await getLyricTrack(ctx, asset._id, "lrclib");
+    if (existing && existing.state !== "processing") return null;
+    const value = {
+      asset: asset._id,
+      source: "lrclib",
+      label: "LRCLIB",
+      timing: "line" as const,
+      createdAt: existing?.createdAt ?? Date.now(),
+      updatedAt: Date.now(),
+      ...args.result,
+    };
+    if (existing) await ctx.db.replace(existing._id, value);
+    else await ctx.db.insert("mediaLyricTracks", value);
+    return null;
+  },
+});
+
+type RoomMediaNotification =
+  | { kind: "ready"; assetId: Id<"mediaAssets"> }
+  | { kind: "failed"; jobId: Id<"mediaJobs">; message: string };
+type RoomMediaNotificationBatch = {
+  sourceJobId: Id<"mediaJobs"> | null;
+  sourceAssetId: Id<"mediaAssets"> | null;
+  readyAssetId: Id<"mediaAssets"> | null;
+  kind: "ready" | "failed";
+  message: string | null;
+  cursor: string | null;
+};
+
+const ROOM_MEDIA_NOTIFICATION_BATCH_SIZE = 100;
+
+async function scheduleRoomMediaNotifications(
+  ctx: MutationCtx,
+  associations: Array<Doc<"roomMedia">>,
+  notification: RoomMediaNotification,
+) {
+  await Promise.all(
+    associations.map((association) =>
+      notification.kind === "ready"
+        ? ctx.scheduler.runAfter(0, internal.playback.onRoomMediaReady, {
+            roomMediaId: association._id,
+            jobId: association.job,
+            assetId: notification.assetId,
+          })
+        : ctx.scheduler.runAfter(0, internal.playback.onRoomMediaFailed, {
+            roomMediaId: association._id,
+            jobId: notification.jobId,
+            message: notification.message,
+          }),
+    ),
+  );
+}
+
+async function dispatchRoomMediaNotificationBatch(
+  ctx: MutationCtx,
+  args: RoomMediaNotificationBatch,
+) {
+  if ((args.sourceJobId === null) === (args.sourceAssetId === null))
+    throw new Error("Exactly one room media notification source is required");
+
+  const page =
+    args.sourceJobId !== null
+      ? await ctx.db
+          .query("roomMedia")
+          .withIndex("by_job", (q) => q.eq("job", args.sourceJobId!))
+          .paginate({ cursor: args.cursor, numItems: ROOM_MEDIA_NOTIFICATION_BATCH_SIZE })
+      : await ctx.db
+          .query("roomMedia")
+          .withIndex("by_asset", (q) => q.eq("asset", args.sourceAssetId!))
+          .paginate({ cursor: args.cursor, numItems: ROOM_MEDIA_NOTIFICATION_BATCH_SIZE });
+
+  if (args.kind === "ready") {
+    if (args.readyAssetId === null) throw new Error("Ready notification asset is required");
+    await scheduleRoomMediaNotifications(ctx, page.page, {
+      kind: "ready",
+      assetId: args.readyAssetId,
+    });
+  } else {
+    if (args.sourceJobId === null || args.message === null)
+      throw new Error("Failed notification job and message are required");
+    await scheduleRoomMediaNotifications(ctx, page.page, {
+      kind: "failed",
+      jobId: args.sourceJobId,
+      message: args.message,
+    });
+  }
+
+  if (!page.isDone)
+    await ctx.scheduler.runAfter(0, internal.media.jobs.continueRoomMediaNotifications, {
+      ...args,
+      cursor: page.continueCursor,
+    });
+}
+
+export const continueRoomMediaNotifications = internalMutation({
   args: {
-    jobId: v.id("mediaJobs"),
-    source: v.string(),
-    label: v.string(),
-    timing: v.union(v.literal("word"), v.literal("line")),
-    state: lyricTrackState,
-    textArtifactId: v.optional(v.string()),
-    timedArtifactId: v.optional(v.string()),
-    observations: v.optional(v.array(lyricObservation)),
-    metadata: v.optional(lyricTrackMetadata),
-    errorMessage: v.optional(v.string()),
+    sourceJobId: v.union(v.id("mediaJobs"), v.null()),
+    sourceAssetId: v.union(v.id("mediaAssets"), v.null()),
+    readyAssetId: v.union(v.id("mediaAssets"), v.null()),
+    kind: v.union(v.literal("ready"), v.literal("failed")),
+    message: v.union(v.string(), v.null()),
+    cursor: v.union(v.string(), v.null()),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
-    const job = await ctx.db.get("mediaJobs", args.jobId);
-    if (!job?.asset) throw new Error("Media job has no claimed asset");
-    const asset = await ctx.db.get("mediaAssets", job.asset);
-    if (!asset || asset.activeJob !== job._id) {
-      throw new Error("Media job no longer owns its claimed asset");
-    }
-    const existing = await getLyricTrack(ctx, asset._id, args.source);
-    const now = Date.now();
-    const value = {
-      asset: asset._id,
-      source: args.source,
-      label: args.label,
-      timing: args.timing,
-      state: args.state,
-      textArtifactId: args.textArtifactId,
-      timedArtifactId: args.timedArtifactId,
-      observations: args.observations,
-      metadata: args.metadata,
-      error: args.errorMessage?.slice(0, 2_000),
-      updatedAt: now,
-    };
-    if (existing) await ctx.db.patch("mediaLyricTracks", existing._id, value);
-    else await ctx.db.insert("mediaLyricTracks", { ...value, createdAt: now });
+    await dispatchRoomMediaNotificationBatch(ctx, args);
     return null;
   },
 });
 
 export const completeFromAsset = internalMutation({
-  args: { jobId: v.id("mediaJobs"), assetId: v.id("mediaAssets") },
+  args: { jobId: v.id("mediaJobs"), workflowId: vWorkflowId, assetId: v.id("mediaAssets") },
   returns: v.null(),
-  handler: async (ctx, { jobId, assetId }) => {
+  handler: async (ctx, { jobId, assetId, workflowId }) => {
+    await requireRun(ctx, jobId, workflowId);
     await completeJobFromAsset(ctx, jobId, assetId);
-    const associations = await ctx.db
-      .query("roomMedia")
-      .withIndex("by_job", (q) => q.eq("job", jobId))
-      .take(100);
-    await Promise.all(
-      associations.map((association) =>
-        ctx.scheduler.runAfter(0, internal.playback.onRoomMediaReady, {
-          roomMediaId: association._id,
-        }),
-      ),
-    );
+    await dispatchRoomMediaNotificationBatch(ctx, {
+      sourceJobId: jobId,
+      sourceAssetId: null,
+      readyAssetId: assetId,
+      kind: "ready",
+      message: null,
+      cursor: null,
+    });
     return null;
   },
 });
 
 export const finalizeAsset = internalMutation({
-  args: { jobId: v.id("mediaJobs") },
+  args: { jobId: v.id("mediaJobs"), workflowId: vWorkflowId },
   returns: v.id("mediaAssets"),
-  handler: async (ctx, { jobId }) => {
+  handler: async (ctx, { jobId, workflowId }) => {
+    await requireRun(ctx, jobId, workflowId);
     const assetId = await finalizeAssetForJob(ctx, jobId);
-    const associations = await ctx.db
-      .query("roomMedia")
-      .withIndex("by_asset", (q) => q.eq("asset", assetId))
-      .take(100);
-    await Promise.all(
-      associations.map((association) =>
-        ctx.scheduler.runAfter(0, internal.playback.onRoomMediaReady, {
-          roomMediaId: association._id,
-        }),
-      ),
-    );
+    await dispatchRoomMediaNotificationBatch(ctx, {
+      sourceJobId: null,
+      sourceAssetId: assetId,
+      readyAssetId: assetId,
+      kind: "ready",
+      message: null,
+      cursor: null,
+    });
     return assetId;
   },
 });
@@ -366,24 +418,23 @@ export const finalizeAsset = internalMutation({
 export const failJob = internalMutation({
   args: {
     jobId: v.id("mediaJobs"),
+    workflowId: vWorkflowId,
     errorCode: v.string(),
     errorMessage: v.string(),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
+    const job = await ctx.db.get(args.jobId);
+    if (!job || job.workflowId !== args.workflowId || job.state !== "processing") return null;
     await failMediaJob(ctx, args);
-    const associations = await ctx.db
-      .query("roomMedia")
-      .withIndex("by_job", (q) => q.eq("job", args.jobId))
-      .take(100);
-    await Promise.all(
-      associations.map((association) =>
-        ctx.scheduler.runAfter(0, internal.playback.onRoomMediaFailed, {
-          roomMediaId: association._id,
-          message: args.errorMessage,
-        }),
-      ),
-    );
+    await dispatchRoomMediaNotificationBatch(ctx, {
+      sourceJobId: args.jobId,
+      sourceAssetId: null,
+      readyAssetId: null,
+      kind: "failed",
+      message: args.errorMessage,
+      cursor: null,
+    });
     return null;
   },
 });
@@ -399,54 +450,14 @@ export const getJob = query({
     if (!association) throw new Error("Media job is not attached to this room");
     const job = await ctx.db.get("mediaJobs", jobId);
     if (!job) throw new Error("Media job not found");
-    const asset = job.asset ? await ctx.db.get("mediaAssets", job.asset) : null;
-    const lyricTracks = asset
-      ? await ctx.db
-          .query("mediaLyricTracks")
-          .withIndex("by_asset", (q) => q.eq("asset", asset._id))
-          .take(20)
-      : [];
-    const generatedLyrics = lyricTracks.find(({ source }) => source === "generated");
-    const lrclibLyrics = lyricTracks.find(({ source }) => source === "lrclib");
+    const assetId = association.asset ?? job.asset;
+    const asset = assetId ? await ctx.db.get("mediaAssets", assetId) : null;
     const enrichment = asset ? await getMediaEnrichment(ctx, asset._id) : null;
     const managedSteps = await workflowProgressSteps(ctx, [job.workflowId, enrichment?.workflowId]);
-    const activityRows = await activityStatuses(ctx, [
-      ...(job.activeActivities ?? []),
-      ...(enrichment?.activeActivities ?? []),
-    ]);
     return {
       _id: job._id,
       state: job.state,
-      steps:
-        managedSteps.length > 0
-          ? managedSteps
-          : mediaPipelineStepStatuses({
-              hasAsset: !!job.asset,
-              hasGeneratedLyrics: !!generatedLyrics?.timedArtifactId,
-              generatedLyricsState: generatedLyrics?.state,
-              generatedLyricsTiming: generatedLyrics
-                ? {
-                    startedAt: generatedLyrics.createdAt,
-                    ...(generatedLyrics.state === "processing"
-                      ? {}
-                      : { completedAt: generatedLyrics.updatedAt }),
-                  }
-                : undefined,
-              lrclibLyricsState: lrclibLyrics?.state,
-              lrclibLyricsTimingKind: lrclibLyrics?.timing,
-              lrclibLyricsTiming: lrclibLyrics
-                ? {
-                    startedAt: lrclibLyrics.createdAt,
-                    ...(lrclibLyrics.state === "processing"
-                      ? {}
-                      : { completedAt: lrclibLyrics.updatedAt }),
-                  }
-                : undefined,
-              enrichmentState: enrichment?.state,
-              asset,
-              activities: activityRows,
-              timings: [...(job.stepTimings ?? []), ...(enrichment?.stepTimings ?? [])],
-            }),
+      steps: managedSteps,
       errorCode: job.errorCode,
       errorMessage: job.errorMessage,
       asset: asset
@@ -518,16 +529,10 @@ export const listRoomMedia = query({
               .withIndex("by_asset", (q) => q.eq("asset", asset._id))
               .take(20)
           : [];
-        const generatedLyrics = lyricTracks.find(({ source }) => source === "generated");
-        const lrclibLyrics = lyricTracks.find(({ source }) => source === "lrclib");
         const enrichment = asset ? await getMediaEnrichment(ctx, asset._id) : null;
         const managedSteps = await workflowProgressSteps(ctx, [
           job?.workflowId,
           enrichment?.workflowId,
-        ]);
-        const activityRows = await activityStatuses(ctx, [
-          ...(job?.activeActivities ?? []),
-          ...(enrichment?.activeActivities ?? []),
         ]);
         const annotationsUrl = asset
           ? await mediaArtifactUrl(ctx, asset.annotationsArtifactId)
@@ -564,36 +569,7 @@ export const listRoomMedia = query({
           lyricsOffsetMs: association.lyricsOffsetMs ?? 0,
           jobId: association.job,
           state: job?.state ?? "failed",
-          steps:
-            managedSteps.length > 0
-              ? managedSteps
-              : mediaPipelineStepStatuses({
-                  hasAsset: !!job?.asset,
-                  hasGeneratedLyrics: !!generatedLyrics?.timedArtifactId,
-                  generatedLyricsState: generatedLyrics?.state,
-                  generatedLyricsTiming: generatedLyrics
-                    ? {
-                        startedAt: generatedLyrics.createdAt,
-                        ...(generatedLyrics.state === "processing"
-                          ? {}
-                          : { completedAt: generatedLyrics.updatedAt }),
-                      }
-                    : undefined,
-                  lrclibLyricsState: lrclibLyrics?.state,
-                  lrclibLyricsTimingKind: lrclibLyrics?.timing,
-                  lrclibLyricsTiming: lrclibLyrics
-                    ? {
-                        startedAt: lrclibLyrics.createdAt,
-                        ...(lrclibLyrics.state === "processing"
-                          ? {}
-                          : { completedAt: lrclibLyrics.updatedAt }),
-                      }
-                    : undefined,
-                  enrichmentState: enrichment?.state,
-                  asset,
-                  activities: activityRows,
-                  timings: [...(job?.stepTimings ?? []), ...(enrichment?.stepTimings ?? [])],
-                }),
+          steps: managedSteps,
           title: asset?.title,
           duration: asset?.duration,
           errorMessage: job?.errorMessage,

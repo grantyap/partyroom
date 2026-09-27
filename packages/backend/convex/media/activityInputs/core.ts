@@ -25,7 +25,7 @@ async function requireCurrentJob(
   kind: CoreMediaOperationKind,
 ) {
   const state = await getActivityJobState(ctx, jobId, kind);
-  if (state.job.workflowId !== workflowId) {
+  if (state.job.workflowId !== workflowId || state.job.state !== "processing") {
     throw new Error("Media workflow is no longer current");
   }
   return state;

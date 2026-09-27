@@ -4,14 +4,9 @@ import type { FunctionReference } from "convex/server";
 import { v } from "convex/values";
 import { defineActivity, defineQueue, wire } from "./client";
 import {
-  actionOptions,
   activityStep,
   ManagedWorkflowManager,
-  manualWorkflowStep,
-  mutationOptions,
-  queryOptions,
   settleManagedWorkflow,
-  workflowOptions,
   workflowStep,
 } from "./managedWorkflow";
 
@@ -88,11 +83,7 @@ describe("managed artifact workflows", () => {
     });
 
     expect(runMutation).toHaveBeenNthCalledWith(1, "close-scope", { scopeId });
-    expect(runMutation).toHaveBeenNthCalledWith(2, "finalize-workflow-steps", {
-      workflowId,
-      succeeded: true,
-    });
-    expect(runMutation).toHaveBeenNthCalledWith(3, "domain-completion", {
+    expect(runMutation).toHaveBeenNthCalledWith(2, "domain-completion", {
       workflowId,
       result: { kind: "success", returnValue: null },
       context: { jobId: "job-1" },
@@ -109,10 +100,6 @@ describe("managed artifact workflows", () => {
     });
 
     expect(runMutation).toHaveBeenNthCalledWith(1, "abandon-scope", { scopeId });
-    expect(runMutation).toHaveBeenNthCalledWith(2, "finalize-workflow-steps", {
-      workflowId,
-      succeeded: false,
-    });
   });
 
   test("builds typed activity input with the current workflow ID", async () => {
@@ -148,7 +135,7 @@ describe("managed artifact workflows", () => {
       {
         workflowSteps: {
           register: "register-steps",
-          startActivity: "start-activity",
+          mark: "mark-step",
           failActivity: "fail-activity",
           linkActivity: "link-activity",
         },
@@ -189,13 +176,13 @@ describe("managed artifact workflows", () => {
       value: "prepared",
     });
     expect(runMutation).toHaveBeenCalledWith(
-      "start-activity",
+      "mark-step",
       { workflowId, key: "echo" },
       { name: "echo:start", inline: true },
     );
   });
 
-  test("constructs reusable typed options for every Convex operation kind", () => {
+  test("constructs typed workflow steps for every Convex operation kind", () => {
     const query = "query" as unknown as FunctionReference<"query", "internal", {}, string>;
     const mutation = "mutation" as unknown as FunctionReference<"mutation", "internal", {}, null>;
     const action = "action" as unknown as FunctionReference<"action", "internal", {}, number>;
@@ -206,33 +193,23 @@ describe("managed artifact workflows", () => {
       WorkflowId
     >;
 
-    const queryDefinition = queryOptions({ query, inline: true });
-    const mutationDefinition = mutationOptions({ mutation, inline: true });
-    const actionDefinition = actionOptions({ action, retry: true });
-    const workflowDefinition = workflowOptions({ workflow: childWorkflow });
-
-    expect(queryDefinition).toEqual({
-      kind: "workflowOperation",
+    expect(workflowStep({ query, inline: true })).toMatchObject({
       operation: "query",
       target: query,
       runOptions: { inline: true },
     });
-    expect(mutationDefinition.operation).toBe("mutation");
-    expect(actionDefinition.runOptions).toEqual({ retry: true });
-    expect(workflowDefinition.target).toBe(childWorkflow);
-    expect(Object.isFrozen(queryDefinition)).toBe(true);
+    expect(workflowStep({ mutation, inline: true }).operation).toBe("mutation");
     expect(
-      workflowStep(actionDefinition, {
-        label: "Reusable action",
-        order: 2,
-      }),
+      workflowStep({ action, retry: true, label: "Action", order: 2 }),
     ).toMatchObject({
       operation: "action",
       target: action,
       runOptions: { retry: true },
-      label: "Reusable action",
+      label: "Action",
       order: 2,
     });
+    expect(workflowStep({ workflow: childWorkflow }).target).toBe(childWorkflow);
+    expect(Object.isFrozen(workflowStep({ query }))).toBe(true);
   });
 
   test("runs a structured workflow step with inferred arguments and result", async () => {
@@ -258,8 +235,8 @@ describe("managed artifact workflows", () => {
       {
         workflowSteps: {
           register: "register-steps",
-          start: "start-step",
-          finish: "finish-step",
+          mark: "mark-step",
+          finish: "mark-step",
         },
       } as never,
       "lifecycle-completion" as never,
@@ -269,7 +246,7 @@ describe("managed artifact workflows", () => {
       .define({
         args: { value: v.string() },
         steps: {
-          uppercase: workflowStep(queryOptions({ query, inline: true })),
+          uppercase: workflowStep({ query, inline: true }),
         },
       })
       .handler(async (step, { value }) => await step.steps.uppercase.run({ value }));
@@ -284,7 +261,7 @@ describe("managed artifact workflows", () => {
     ).resolves.toBe("HELLO");
 
     expect(runMutation).toHaveBeenCalledWith(
-      "start-step",
+      "mark-step",
       { workflowId, key: "uppercase" },
       { name: "uppercase:start", inline: true },
     );
@@ -294,7 +271,7 @@ describe("managed artifact workflows", () => {
       { inline: true, name: "uppercase" },
     );
     expect(runMutation).toHaveBeenCalledWith(
-      "finish-step",
+      "mark-step",
       { workflowId, key: "uppercase", state: "completed" },
       { name: "uppercase:complete", inline: true },
     );
@@ -323,8 +300,8 @@ describe("managed artifact workflows", () => {
       {
         workflowSteps: {
           register: "register-steps",
-          start: "start-step",
-          finish: "finish-step",
+          mark: "mark-step",
+          finish: "mark-step",
         },
       } as never,
       "lifecycle-completion" as never,
@@ -334,8 +311,8 @@ describe("managed artifact workflows", () => {
       .define({
         args: {},
         steps: {
-          first: workflowStep(queryOptions({ query: first, inline: true })),
-          second: workflowStep(queryOptions({ query: second, inline: true })),
+          first: workflowStep({ query: first, inline: true }),
+          second: workflowStep({ query: second, inline: true }),
         },
       })
       .handler(
@@ -409,7 +386,7 @@ describe("managed artifact workflows", () => {
       {
         workflowSteps: {
           register: "register-steps",
-          startActivity: "start-activity",
+          mark: "mark-step",
           failActivity: "fail-activity",
           linkActivity: "link-activity",
         },
@@ -458,10 +435,8 @@ describe("managed artifact workflows", () => {
       "workflow-steps:register",
       "first:start",
       "example.first:schedule",
-      "first:link",
       "second:start",
       "example.second:schedule",
-      "second:link",
       "example.first:id:execute",
       "example.second:id:execute",
     ]);
@@ -496,8 +471,8 @@ describe("managed artifact workflows", () => {
       {
         workflowSteps: {
           register: "register-steps",
-          start: "start-step",
-          finish: "finish-step",
+          mark: "mark-step",
+          finish: "mark-step",
         },
       } as never,
       "lifecycle-completion" as never,
@@ -507,8 +482,8 @@ describe("managed artifact workflows", () => {
       .define({
         args: {},
         steps: {
-          required: workflowStep(queryOptions({ query: required, inline: true })),
-          optional: workflowStep(queryOptions({ query: optional, inline: true })),
+          required: workflowStep({ query: required, inline: true }),
+          optional: workflowStep({ query: optional, inline: true }),
         },
       })
       .handler(
@@ -537,62 +512,4 @@ describe("managed artifact workflows", () => {
     });
   });
 
-  test("rejects a managed step started while a manual step is unawaited", async () => {
-    let registeredHandler:
-      | ((workflow: Record<string, any>, args: {}) => Promise<unknown>)
-      | undefined;
-    const workflows = {
-      define: vi.fn(() => ({
-        handler: vi.fn((handler) => {
-          registeredHandler = handler;
-          return "registered-workflow";
-        }),
-      })),
-    };
-    const query = "read" as unknown as FunctionReference<"query", "internal", {}, null>;
-    const callback = deferred<void>();
-    const manager = new ManagedWorkflowManager(
-      workflows as never,
-      {
-        workflowSteps: {
-          register: "register-steps",
-          start: "start-step",
-          finish: "finish-step",
-        },
-      } as never,
-      "lifecycle-completion" as never,
-      {} as never,
-    );
-    manager
-      .define({
-        args: {},
-        steps: {
-          manual: manualWorkflowStep(),
-          read: workflowStep(queryOptions({ query, inline: true })),
-        },
-      })
-      .handler(async (step) => {
-        const unawaited = step.steps.manual.run(async () => await callback.promise);
-        let message = "";
-        try {
-          await step.steps.read.run({});
-        } catch (error) {
-          message = error instanceof Error ? error.message : String(error);
-        }
-        callback.resolve();
-        await unawaited;
-        return message;
-      });
-
-    await expect(
-      registeredHandler?.(
-        {
-          workflowId,
-          runMutation: vi.fn(async () => null),
-          runQuery: vi.fn(async () => null),
-        },
-        {},
-      ),
-    ).resolves.toContain("Await it immediately");
-  });
 });

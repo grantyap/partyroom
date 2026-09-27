@@ -23,6 +23,7 @@ class EchoInput(BaseModel):
 
 class EchoOutput(BaseModel):
     echoed: str
+    optional_note: str | None = None
 
 
 def claimed(lease_duration_ms: int = 30_000) -> dict[str, Any]:
@@ -30,13 +31,13 @@ def claimed(lease_duration_ms: int = 30_000) -> dict[str, Any]:
 
     now = time.time() * 1000
     return {
-        "protocolVersion": 1,
+        "protocolVersion": 2,
         "activityId": "activity-1",
         "activityType": "test.echo",
         "activityVersion": 1,
         "taskQueue": "test",
         "attempt": 1,
-        "leaseToken": "lease-token",
+        "attemptToken": "lease-token",
         "leaseExpiresAt": now + lease_duration_ms,
         "attemptDeadline": now + 60_000,
         "scheduleDeadline": now + 300_000,
@@ -306,7 +307,7 @@ class WorkerTests(unittest.IsolatedAsyncioTestCase):
             if request.url.path.endswith("/claim"):
                 import json
 
-                self.assertEqual(json.loads(request.content)["protocolVersion"], 1)
+                self.assertEqual(json.loads(request.content)["protocolVersion"], 2)
                 if claimed_once:
                     return httpx.Response(200, json=None)
                 claimed_once = True
@@ -346,8 +347,34 @@ class WorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(completion)
         assert completion is not None
         self.assertEqual(completion["value"], {"echoed": "hello"})
-        self.assertEqual(completion["leaseToken"], "lease-token")
-        self.assertIsInstance(completion["requestId"], str)
+        self.assertEqual(completion["attemptToken"], "lease-token")
+        self.assertNotIn("requestId", completion)
+
+    async def test_invalid_input_fails_without_leaking_tasks(self) -> None:
+        import json
+        from partyroom_activity_worker.protocol import ClaimedActivity
+
+        requests = []
+        async def handle(request: httpx.Request) -> httpx.Response:
+            requests.append((request.url.path, json.loads(request.content)))
+            return httpx.Response(200, json={"accepted": True, "duplicate": False, "retrying": False})
+
+        worker = Worker(api_url="http://activities.test/workers", token="token", worker_id="worker", task_queue="test", transport=httpx.MockTransport(handle))
+        definition = ActivityDefinition(name="test.echo", version=1, task_queue="test", input_model=EchoInput, output_model=EchoOutput)
+        @worker.activity(definition)
+        async def echo(_context: object, request: EchoInput) -> EchoOutput:
+            self.fail("Invalid input must never reach the handler")
+
+        worker._client = httpx.AsyncClient(transport=httpx.MockTransport(handle))
+        before = asyncio.all_tasks()
+        try:
+            await worker._execute(ClaimedActivity.model_validate({**claimed(), "input": {}}))
+            self.assertEqual(asyncio.all_tasks(), before)
+            self.assertEqual(len(requests), 1)
+            self.assertTrue(requests[0][0].endswith("/fail"))
+            self.assertEqual(requests[0][1]["attemptToken"], "lease-token")
+        finally:
+            await worker.stop()
 
     async def test_reports_non_retryable_application_error(self) -> None:
         claimed_once = False

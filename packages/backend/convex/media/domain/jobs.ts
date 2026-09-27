@@ -1,5 +1,4 @@
 import type { WorkflowId } from "@convex-dev/workflow";
-import { type ArtifactId } from "@partyroom/activities";
 import type { Doc, Id } from "../../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../../_generated/server";
 import {
@@ -15,7 +14,11 @@ import {
   deleteIncompleteAsset,
   deleteLyricTracks,
 } from "./assets";
-import type { CoreMediaOperationKind, OperationKind } from "../validators";
+import type { CoreMediaOperationKind } from "../validators";
+import type { stageResult } from "../validators";
+import type { Infer } from "convex/values";
+import { workflowVersion } from "../../migration/workflowRouting";
+import { isDraining } from "../../migration/drain";
 
 // v5 emits browser-friendly H.264/AAC MP4s instead of preserving the source
 // video codec. Keep prior assets on their original cache version.
@@ -29,6 +32,7 @@ async function requireJob(ctx: Pick<QueryCtx, "db">, jobId: Id<"mediaJobs">) {
 
 async function requireOwnedAsset(ctx: Pick<QueryCtx, "db">, jobId: Id<"mediaJobs">) {
   const job = await requireJob(ctx, jobId);
+  if (job.state !== "processing") throw new Error("Run is not processing");
   if (!job.asset) throw new Error("Media job has no claimed asset");
   const asset = await ctx.db.get("mediaAssets", job.asset);
   if (!asset) throw new Error("Media job references a missing asset");
@@ -49,68 +53,6 @@ export async function getActivityJobState(
   return await requireOwnedAsset(ctx, jobId);
 }
 
-export async function recordScheduledActivity(
-  ctx: MutationCtx,
-  {
-    jobId,
-    activityId,
-    kind,
-  }: {
-    jobId: Id<"mediaJobs">;
-    activityId: string;
-    kind: CoreMediaOperationKind;
-  },
-) {
-  const { job } = await getActivityJobState(ctx, jobId, kind);
-  if (job.activeActivities?.some((activity) => activity.activityId === activityId)) return;
-  await ctx.db.patch("mediaJobs", jobId, {
-    state: "processing",
-    stage:
-      kind === "resolve"
-        ? "resolving"
-        : kind === "download"
-          ? "downloading"
-          : kind === "extractAudio"
-            ? "extracting"
-            : kind === "separate"
-              ? "separating"
-              : "muxing",
-    activeActivities: [...(job.activeActivities ?? []), { activityId, kind }],
-    updatedAt: Date.now(),
-  });
-}
-
-export async function recordActivityTerminal(
-  ctx: MutationCtx,
-  jobId: Id<"mediaJobs">,
-  activityId: string,
-  timing?: { startedAt: number; completedAt: number },
-) {
-  const job = await ctx.db.get("mediaJobs", jobId);
-  if (!job?.activeActivities) return;
-  const terminalActivity = job.activeActivities.find(
-    (activity) => activity.activityId === activityId,
-  );
-  const activeActivities = job.activeActivities.filter(
-    (activity) => activity.activityId !== activityId,
-  );
-  if (activeActivities.length === job.activeActivities.length) return;
-  const stepTimings =
-    timing && terminalActivity
-      ? [
-          ...(job.stepTimings ?? []).filter(
-            (stepTiming) => stepTiming.kind !== terminalActivity.kind,
-          ),
-          { kind: terminalActivity.kind, ...timing },
-        ]
-      : job.stepTimings;
-  await ctx.db.patch("mediaJobs", jobId, {
-    activeActivities,
-    stepTimings,
-    updatedAt: Date.now(),
-  });
-}
-
 export async function createOrJoinMedia(
   ctx: MutationCtx,
   args: {
@@ -121,10 +63,22 @@ export async function createOrJoinMedia(
     sourceIv: string;
   },
 ) {
-  const candidates = await ctx.db
-    .query("mediaJobs")
-    .withIndex("by_request_key", (q) => q.eq("requestKey", args.requestKey))
-    .collect();
+  const candidates = (
+    await Promise.all(
+      (["queued", "processing", "ready"] as const).map(
+        async (state) =>
+          await ctx.db
+            .query("mediaJobs")
+            .withIndex("by_request_key_and_state", (q) =>
+              q.eq("requestKey", args.requestKey).eq("state", state),
+            )
+            .order("desc")
+            .first(),
+      ),
+    )
+  )
+    .filter((candidate): candidate is Doc<"mediaJobs"> => candidate !== null)
+    .sort((left, right) => right._creationTime - left._creationTime);
 
   let existing: Doc<"mediaJobs"> | null = null;
   let existingAsset: Doc<"mediaAssets"> | null = null;
@@ -165,18 +119,24 @@ export async function createOrJoinMedia(
         requestedBy: args.requestedBy,
         createdAt: Date.now(),
       }));
-    return { jobId: existing._id, roomMediaId, created: false };
+    return {
+      jobId: existing._id,
+      roomMediaId,
+      created: false,
+      workflowVersion: existing.workflowVersion ?? 1,
+    };
   }
 
   const now = Date.now();
+  const version = await workflowVersion(ctx);
   const jobId = await ctx.db.insert("mediaJobs", {
+    workflowVersion: version,
     requestKey: args.requestKey,
     encryptedSource: args.encryptedSource,
     sourceIv: args.sourceIv,
     requestedBy: args.requestedBy,
     state: "queued",
-    stage: "queued",
-    progress: 0,
+    ...(isDraining() ? { stage: "queued", progress: 0 } : {}),
     createdAt: now,
     updatedAt: now,
   });
@@ -186,7 +146,7 @@ export async function createOrJoinMedia(
     requestedBy: args.requestedBy,
     createdAt: now,
   });
-  return { jobId, roomMediaId, created: true };
+  return { jobId, roomMediaId, created: true, workflowVersion: version };
 }
 
 export async function attachWorkflowToJob(
@@ -194,7 +154,8 @@ export async function attachWorkflowToJob(
   jobId: Id<"mediaJobs">,
   workflowId: string,
 ) {
-  await requireJob(ctx, jobId);
+  const job = await requireJob(ctx, jobId);
+  if (job.state !== "queued" || job.workflowId) throw new Error("Run already started");
   await ctx.db.patch("mediaJobs", jobId, {
     workflowId,
     state: "processing",
@@ -221,68 +182,65 @@ export async function requeueRoomMedia(
     throw new Error("Media is already being processed");
   }
 
-  if (job.asset) {
-    const asset = await ctx.db.get("mediaAssets", job.asset);
-    if (asset?.activeJob && asset.activeJob !== job._id) {
-      throw new Error("Media is already being processed");
-    }
-    if (asset) {
-      await cancelAssetEnrichment(ctx, asset._id);
-      await ctx.db.patch("mediaAssets", asset._id, {
-        state: "failed",
-        activeJob: undefined,
-        updatedAt: Date.now(),
-      });
-    }
-  }
-
-  const associations = await ctx.db
-    .query("roomMedia")
-    .withIndex("by_job", (q) => q.eq("job", job._id))
-    .collect();
-  await Promise.all(
-    associations.map((row) => ctx.db.patch("roomMedia", row._id, { asset: undefined })),
-  );
-  await ctx.db.patch("mediaJobs", job._id, {
+  // A room selects a new run. Other rooms and published revisions are untouched.
+  const now = Date.now();
+  const version = await workflowVersion(ctx);
+  const jobId = await ctx.db.insert("mediaJobs", {
+    workflowVersion: version,
+    requestKey: job.requestKey,
+    encryptedSource: job.encryptedSource,
+    sourceIv: job.sourceIv,
+    requestedBy: job.requestedBy,
+    rebuild: true,
+    ...(isDraining() ? { rebuildOf: job._id, stage: "queued", progress: 0 } : {}),
     state: "queued",
-    stage: "queued",
-    progress: 0,
-    asset: undefined,
-    workflowId: undefined,
-    activeActivities: [],
-    stepTimings: [],
-    errorCode: undefined,
-    errorMessage: undefined,
-    updatedAt: Date.now(),
+    createdAt: now,
+    updatedAt: now,
   });
-  return job._id;
+  await ctx.db.patch("roomMedia", association._id, { job: jobId });
+  await deleteUnreferencedFailedRevision(ctx, job);
+  return jobId;
+}
+
+async function deleteUnreferencedFailedRevision(ctx: MutationCtx, job: Doc<"mediaJobs">) {
+  if (job.state !== "failed" && job.state !== "canceled") return;
+  if (
+    await ctx.db
+      .query("roomMedia")
+      .withIndex("by_job", (q) => q.eq("job", job._id))
+      .first()
+  )
+    return;
+  if (!job.asset) {
+    await ctx.db.delete("mediaJobs", job._id);
+    return;
+  }
+  const asset = await ctx.db.get("mediaAssets", job.asset);
+  if (!asset || asset.state !== "failed") return;
+  const assetJobs = await ctx.db
+    .query("mediaJobs")
+    .withIndex("by_asset", (q) => q.eq("asset", asset._id))
+    .collect();
+  if (assetJobs.some((related) => related.state !== "failed" && related.state !== "canceled"))
+    return;
+  for (const related of assetJobs) {
+    if (
+      await ctx.db
+        .query("roomMedia")
+        .withIndex("by_job", (q) => q.eq("job", related._id))
+        .first()
+    )
+      return;
+  }
+  await deleteIncompleteAsset(ctx, asset);
+  for (const related of assetJobs) await ctx.db.delete("mediaJobs", related._id);
 }
 
 export async function queueReprocessDuringDrain(
   ctx: MutationCtx,
   { roomId, roomMediaId }: { roomId: Id<"rooms">; roomMediaId: Id<"roomMedia"> },
 ) {
-  const association = await ctx.db.get("roomMedia", roomMediaId);
-  if (!association || association.room !== roomId) throw new Error("Room media item not found");
-  const job = await requireJob(ctx, association.job);
-  if (job.state === "queued" || job.state === "processing")
-    throw new Error("Media is already being processed");
-  const now = Date.now();
-  const queued = await ctx.db.insert("mediaJobs", {
-    requestKey: job.requestKey,
-    encryptedSource: job.encryptedSource,
-    sourceIv: job.sourceIv,
-    requestedBy: job.requestedBy,
-    rebuild: true,
-    rebuildOf: job._id,
-    state: "queued",
-    stage: "queued",
-    progress: 0,
-    createdAt: now,
-    updatedAt: now,
-  });
-  await ctx.db.patch("roomMedia", roomMediaId, { job: queued });
-  return queued;
+  return await requeueRoomMedia(ctx, { roomId, roomMediaId });
 }
 
 export async function removeRoomMedia(
@@ -336,10 +294,14 @@ export async function removeRoomMedia(
       console.warn(`Unable to cancel media workflow ${job.workflowId}`, error);
     }
   }
-  for (const activity of job.activeActivities ?? []) {
-    await activities.cancel(ctx, activity.activityId as any);
-  }
 
+  if (asset?.activeJob === job._id && relatedJobs.length > 0) {
+    await failMediaJob(ctx, {
+      jobId: job._id,
+      errorCode: "CANCELED",
+      errorMessage: "Media was removed",
+    });
+  }
   if (asset && asset.state !== "ready" && relatedJobs.length === 0) {
     await deleteIncompleteAsset(ctx, asset);
   }
@@ -388,7 +350,7 @@ export async function deleteCompletedMediaAsset(ctx: MutationCtx, assetId: Id<"m
   }
   for (const job of deletedJobs) await ctx.db.delete("mediaJobs", job._id);
   for (const job of jobs) {
-    if (job.state === "failed") {
+    if (job.state === "failed" || job.state === "canceled") {
       await ctx.db.patch("mediaJobs", job._id, { asset: undefined });
     }
   }
@@ -414,12 +376,31 @@ export async function claimAssetForJob(
     duration?: number;
   },
 ) {
-  await requireJob(ctx, args.jobId);
+  const job = await requireJob(ctx, args.jobId);
+  if (job.state !== "processing") throw new Error("Run is not processing");
+  if (job.asset) {
+    const asset = await ctx.db.get(job.asset);
+    if (asset?.activeJob === job._id) return { mode: "owner" as const, assetId: asset._id };
+    throw new Error("Run already claimed an asset");
+  }
   const cacheKey = `v${mediaPipelineVersion}:${args.extractor.toLowerCase()}:${args.sourceId}`;
-  const existing = await ctx.db
-    .query("mediaAssets")
-    .withIndex("by_cache_key", (q) => q.eq("cacheKey", cacheKey))
-    .unique();
+  let existing: Doc<"mediaAssets"> | null = null;
+  if (!job.rebuild) {
+    existing = await ctx.db
+      .query("mediaAssets")
+      .withIndex("by_cache_key_and_state", (q) => q.eq("cacheKey", cacheKey).eq("state", "ready"))
+      .order("desc")
+      .first();
+    if (!existing) {
+      existing = await ctx.db
+        .query("mediaAssets")
+        .withIndex("by_cache_key_and_state", (q) =>
+          q.eq("cacheKey", cacheKey).eq("state", "processing"),
+        )
+        .order("desc")
+        .first();
+    }
+  }
   const now = Date.now();
   if (existing) {
     await ctx.db.patch("mediaJobs", args.jobId, {
@@ -432,48 +413,6 @@ export async function claimAssetForJob(
       return { mode: "waiting" as const, assetId: existing._id };
     if (existing.activeJob === args.jobId && existing.state === "processing")
       return { mode: "owner" as const, assetId: existing._id };
-
-    const staleJobs = await ctx.db
-      .query("mediaJobs")
-      .withIndex("by_asset", (q) => q.eq("asset", existing._id))
-      .collect();
-    for (const staleJob of staleJobs) {
-      if (staleJob._id !== args.jobId && staleJob.state === "failed") {
-        await ctx.db.patch("mediaJobs", staleJob._id, { asset: undefined });
-        for (const association of await ctx.db
-          .query("roomMedia")
-          .withIndex("by_job", (q) => q.eq("job", staleJob._id))
-          .collect()) {
-          if (association.asset === existing._id) {
-            await ctx.db.patch("roomMedia", association._id, {
-              asset: undefined,
-            });
-          }
-        }
-      }
-    }
-    await deleteAssetEnrichment(ctx, existing._id);
-    await deleteAssetArtifacts(ctx, existing);
-    await ctx.db.patch("mediaAssets", existing._id, {
-      activeJob: args.jobId,
-      state: "processing",
-      annotationsState: "processing",
-      annotationsError: undefined,
-      sourceArtifactId: undefined,
-      extractedAudioArtifactId: undefined,
-      instrumentalArtifactId: undefined,
-      vocalsArtifactId: undefined,
-      finalArtifactId: undefined,
-      melodyArtifactId: undefined,
-      annotationsArtifactId: undefined,
-      midiArtifactId: undefined,
-      musicXmlArtifactId: undefined,
-      title: args.title,
-      duration: args.duration,
-      updatedAt: now,
-    });
-    await deleteLyricTracks(ctx, existing._id);
-    return { mode: "owner" as const, assetId: existing._id };
   }
 
   const assetId = await ctx.db.insert("mediaAssets", {
@@ -497,59 +436,43 @@ export async function claimAssetForJob(
 
 export async function recordStageResultForJob(
   ctx: MutationCtx,
-  {
-    jobId,
-    kind,
-    artifactId,
-    secondaryArtifactId,
-    tertiaryArtifactId,
-  }: {
-    jobId: Id<"mediaJobs">;
-    kind: OperationKind;
-    artifactId: ArtifactId;
-    secondaryArtifactId?: ArtifactId;
-    tertiaryArtifactId?: ArtifactId;
-  },
+  { jobId, result }: { jobId: Id<"mediaJobs">; result: Infer<typeof stageResult> },
 ) {
-  const { asset } = await requireOwnedAsset(ctx, jobId);
+  const { job, asset } = await requireOwnedAsset(ctx, jobId);
+  if (result.kind !== "separate")
+    await activities.validateProduced(ctx, job.workflowId!, result.artifactId, "artifactId");
+  if (result.kind === "separate") {
+    await activities.publishArtifacts(ctx, job.workflowId!, asset._id, {
+      instrumentalArtifactId: result.instrumentalArtifactId,
+      vocalsArtifactId: result.vocalsArtifactId,
+    });
+  }
   const patch =
-    kind === "download"
-      ? { sourceArtifactId: artifactId }
-      : kind === "extractAudio"
-        ? { extractedAudioArtifactId: artifactId }
-        : kind === "separate"
+    result.kind === "download"
+      ? { sourceArtifactId: result.artifactId }
+      : result.kind === "extractAudio"
+        ? { extractedAudioArtifactId: result.artifactId }
+        : result.kind === "separate"
           ? {
-              instrumentalArtifactId: artifactId,
-              vocalsArtifactId: secondaryArtifactId,
+              instrumentalArtifactId: result.instrumentalArtifactId,
+              vocalsArtifactId: result.vocalsArtifactId,
             }
-          : kind === "analyzeMelody"
-            ? { melodyArtifactId: artifactId }
-            : kind === "assembleAnnotations"
-              ? {
-                  annotationsArtifactId: artifactId,
-                  midiArtifactId: secondaryArtifactId,
-                  musicXmlArtifactId: tertiaryArtifactId,
-                  annotationsState: "ready" as const,
-                  annotationsError: undefined,
-                }
-              : kind === "mux"
-                ? { finalArtifactId: artifactId }
-                : {};
-  await ctx.db.patch("mediaAssets", asset._id, {
-    ...patch,
-    updatedAt: Date.now(),
-  });
+          : { finalArtifactId: result.artifactId };
+  for (const [key, value] of Object.entries(patch)) {
+    const previous = asset[key as keyof typeof asset];
+    if (previous && previous !== value) throw new Error("Run output is already recorded");
+  }
+  await ctx.db.patch(asset._id, { ...patch, updatedAt: Date.now() });
 }
 
 async function markJobReady(ctx: MutationCtx, jobId: Id<"mediaJobs">, assetId: Id<"mediaAssets">) {
   const job = await requireJob(ctx, jobId);
+  if (job.state !== "processing" && job.state !== "ready") throw new Error("Run is not processing");
   if (job.asset && job.asset !== assetId) {
     throw new Error("Media job references a different asset");
   }
   await ctx.db.patch("mediaJobs", jobId, {
     state: "ready",
-    stage: "ready",
-    progress: 1,
     asset: assetId,
     updatedAt: Date.now(),
   });
@@ -572,10 +495,15 @@ export async function completeJobFromAsset(
 }
 
 export async function finalizeAssetForJob(ctx: MutationCtx, jobId: Id<"mediaJobs">) {
-  const { asset } = await requireOwnedAsset(ctx, jobId);
+  const { job, asset } = await requireOwnedAsset(ctx, jobId);
   if (!asset.finalArtifactId) throw new Error("Media asset is missing its final video");
+  await activities.publishArtifacts(ctx, job.workflowId!, asset._id, {
+    artifactId: asset.finalArtifactId,
+  });
   await ctx.db.patch("mediaAssets", asset._id, {
     state: "ready",
+    sourceArtifactId: undefined,
+    extractedAudioArtifactId: undefined,
     activeJob: undefined,
     updatedAt: Date.now(),
   });
@@ -585,7 +513,7 @@ export async function finalizeAssetForJob(ctx: MutationCtx, jobId: Id<"mediaJobs
     .collect();
   for (const waitingJob of jobs) {
     if (waitingJob.state !== "queued" && waitingJob.state !== "processing") continue;
-    await markJobReady(ctx, waitingJob._id, asset._id);
+    if (waitingJob._id === jobId) await markJobReady(ctx, jobId, asset._id);
     if (waitingJob._id !== jobId && waitingJob.workflowId) {
       await sendWorkflowEvent(ctx, {
         workflowId: waitingJob.workflowId as WorkflowId,
@@ -606,10 +534,9 @@ export async function failMediaJob(
   },
 ) {
   const job = await ctx.db.get("mediaJobs", args.jobId);
-  if (!job || job.state === "ready") return;
+  if (!job || (job.state !== "processing" && job.state !== "queued")) return;
   await ctx.db.patch("mediaJobs", args.jobId, {
     state: "failed",
-    stage: "failed",
     errorCode: args.errorCode,
     errorMessage: args.errorMessage,
     updatedAt: Date.now(),
@@ -620,6 +547,9 @@ export async function failMediaJob(
   await cancelAssetEnrichment(ctx, asset._id);
   await ctx.db.patch("mediaAssets", asset._id, {
     state: "failed",
+    sourceArtifactId: undefined,
+    extractedAudioArtifactId: undefined,
+    finalArtifactId: undefined,
     activeJob: undefined,
     updatedAt: Date.now(),
   });

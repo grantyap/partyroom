@@ -3,7 +3,6 @@ import type { WorkflowId } from "@convex-dev/workflow";
 import {
   ActivityManager,
   defineActivity,
-  defineActivityRegistry,
   defineQueue,
   wire,
   type ActivityInput,
@@ -15,7 +14,7 @@ vi.mock("convex/server", async (importOriginal) => ({
   createFunctionHandle: async (reference: unknown) => reference,
 }));
 
-describe("typed activity registry", () => {
+describe("typed activity definitions", () => {
   test("preserves queue names and activity input/output types", () => {
     const stems = defineQueue("stems", {
       leaseDurationMs: 30_000,
@@ -33,13 +32,8 @@ describe("typed activity registry", () => {
       startToCloseTimeoutMs: 45 * 60_000,
       scheduleToCloseTimeoutMs: 2 * 60 * 60_000,
     });
-    const registry = defineActivityRegistry({
-      queues: { stems },
-      activities: { separate },
-    });
-
-    expect(registry.activities.separate.name).toBe("media.separate");
-    expect(registry.activities.separate.queue.name).toBe("stems");
+    expect(separate.name).toBe("media.separate");
+    expect(separate.queue.name).toBe("stems");
     expectTypeOf<ActivityInput<typeof separate>>().toMatchTypeOf<{
       audioStorageId: string;
     }>();
@@ -69,7 +63,7 @@ describe("typed activity registry", () => {
     const runMutation = async (_fn: unknown, args: unknown) => {
       expect(args).toMatchObject({
         artifactScopeId: "scope-1",
-        artifactSlots: ["output"],
+        outputSchema: activity.outputSchema,
         completion: {
           fnHandle: "activity-completion",
           context: { workflowId: "workflow-1" },
@@ -83,5 +77,34 @@ describe("typed activity registry", () => {
         sourceUrl: "https://example.com/source",
       }),
     ).resolves.toBe("activity-1");
+  });
+
+  test("publishes artifacts from a slot map", async () => {
+    const manager = new ActivityManager(
+      { artifacts: { adopt: "adopt" } } as never,
+      "activity-completion" as never,
+    );
+    const runMutation = vi.fn(async (_fn: unknown, args: unknown) => {
+      expect(args).toEqual({
+        workflowId: "workflow-1",
+        owner: "asset-1",
+        artifacts: [
+          { artifactId: "artifact-1", slot: "finalArtifactId" },
+          { artifactId: "artifact-2", slot: "previewArtifactId" },
+        ],
+      });
+      return null;
+    });
+
+    await manager.publishArtifacts(
+      { runMutation } as never,
+      "workflow-1",
+      "asset-1",
+      {
+        finalArtifactId: "artifact-1",
+        previewArtifactId: "artifact-2",
+      },
+    );
+    expect(runMutation).toHaveBeenCalledOnce();
   });
 });

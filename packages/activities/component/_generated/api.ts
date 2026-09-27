@@ -11,6 +11,9 @@
 import type * as activities from "../activities.js";
 import type * as artifacts from "../artifacts.js";
 import type * as crons from "../crons.js";
+import type * as drain from "../drain.js";
+import type * as leases from "../leases.js";
+import type * as maintenance from "../maintenance.js";
 import type * as validators from "../validators.js";
 import type * as workflowSteps from "../workflowSteps.js";
 
@@ -25,6 +28,9 @@ const fullApi: ApiFromModules<{
   activities: typeof activities;
   artifacts: typeof artifacts;
   crons: typeof crons;
+  drain: typeof drain;
+  leases: typeof leases;
+  maintenance: typeof maintenance;
   validators: typeof validators;
   workflowSteps: typeof workflowSteps;
 }> = anyApi as any;

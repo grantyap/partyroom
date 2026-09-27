@@ -45,19 +45,19 @@ therefore be idempotent. Managed artifact scopes collect registered outputs
 from every attempt, and a component-owned storage sweep reclaims uploads that
 complete before registration.
 
-The component never claims exactly-once execution. Instead it guarantees:
+The component does not make external side effects exactly once. It does guarantee:
 
 - at most one current lease for an activity;
 - monotonically increasing attempt numbers;
-- fencing of stale attempts with an unguessable lease token;
-- idempotent acknowledgement of a previously committed terminal result;
+- fencing of stale attempts with an unguessable attempt token;
+- idempotent acknowledgement of a terminal result that Convex already committed;
 - durable retry decisions and deadlines in Convex;
 - atomic persistence of a terminal result and invocation of the application's
   completion mutation.
 
-It does not claim exactly-once external side effects. Artifact registration and
-garbage collection bound their lifetime instead of changing the execution
-guarantee.
+Handlers must make external side effects idempotent. Artifact registration and
+garbage collection limit artifact lifetime, but they do not change this
+execution guarantee.
 
 ## Queues and activities
 
@@ -89,10 +89,15 @@ running
 Workers pull only when they have a free local execution slot. Accepted work is
 never buffered solely in worker memory.
 
-Each claim receives an `attempt`, `leaseToken`, and `leaseExpiresAt`. Every
-renewal and terminal request must present the current attempt and token. A
-watchdog scheduled mutation checks the lease deadline. A renewed lease causes
-the watchdog to reschedule itself; an expired lease is retried or failed.
+Protocol v2 claims return an `attemptToken` plus attempt and deadline metadata.
+Workers use that token for lease renewal, artifact uploads, source reads, and
+terminal requests. Every write checks the deadlines immediately; it does not
+wait for the watchdog. The watchdog retries or fails abandoned attempts.
+
+Terminal receipts belong to an attempt and remain available after a retry.
+Repeating the same result returns the original decision. A different result is
+rejected. Completion also validates the output schema and every artifact's
+activity, attempt, and slot ownership.
 
 ## Timeouts and retries
 
@@ -119,14 +124,14 @@ and test a managed child that runs longer than one lease.
 
 ## Completion and workflow wake-up
 
-Scheduling stores a completion mutation handle supplied by application code.
-The component's terminal mutation validates the lease, records the result, and
-invokes that handle in one Convex transaction. The application completion
-mutation sends the corresponding Workflow event.
+Scheduling stores a completion mutation supplied by application code. The
+component's terminal mutation validates the attempt, records the result, and
+invokes that mutation in one Convex transaction. The application completion
+mutation then sends the corresponding Workflow event.
 
-This atomic boundary prevents an activity from being marked complete while its
-workflow remains permanently blocked. Repeating the same terminal request is a
-successful no-op; a stale attempt or conflicting result is rejected.
+This boundary prevents an activity from becoming complete while its workflow
+remains blocked. Repeating the same terminal request is a successful no-op;
+stale attempts and conflicting results are rejected.
 
 Terminal activity records are retained for seven days after successful
 completion delivery, then removed by a component-owned scheduled mutation.
@@ -150,13 +155,17 @@ automatically. Workers upload through
 `context.uploadArtifact` / `context.upload_artifact`; unrestricted worker upload
 URLs are not exposed.
 
-`ManagedWorkflowManager` binds the scope lifecycle to Convex Workflow. Starting
-a managed workflow creates a scope and binds it to the workflow ID without
-exposing the scope to application code. Successful completion keeps every
-`retained` artifact produced by an activity's final successful attempt and
-deletes every other artifact in bounded batches. Failure or cancellation
-deletes all artifacts in the scope. Settlement retries durably if its
-completion mutation fails.
+`ManagedWorkflowManager` creates one scope per workflow run. When application
+code publishes a domain reference, it must call `activities.publishArtifacts`
+in the same mutation with the workflow ID, owner ID, and output slots. Adoption
+checks that the artifact was produced successfully, still exists in storage,
+belongs to the scope, and has the expected owner. Declaring an artifact as
+`retained` allows publication; it does not publish the artifact automatically.
+
+Successful, failed, canceled, and expired scopes all delete only unadopted
+artifacts. Published outputs survive partial workflow failure. Deletion requires
+the owner's ID. Scope settlement also fences all remaining activities and
+retries durably if the completion mutation fails.
 
 Scopes also expire independently, and an hourly component sweep removes old
 component-storage objects that were uploaded but never registered.
@@ -207,15 +216,10 @@ export const publish = defineActivityInput({
 });
 ```
 
-Define the workflow through the configured managed manager. The handler
-receives its declared application arguments and typed, workflow-bound steps:
+Define the workflow with the configured managed manager. Its handler receives
+the workflow arguments and a typed `step.steps` object:
 
 ```ts
-const notifySubscribers = mutationOptions({
-  mutation: internal.example.notifySubscribers,
-  inline: true,
-});
-
 export const exampleWorkflow = managedWorkflow
   .define({
     args: { sourceUrl: v.string() },
@@ -224,7 +228,9 @@ export const exampleWorkflow = managedWorkflow
       publish: activityStep(exampleActivities.publish, {
         input: internal.example.activityInputs.publish,
       }),
-      notify: workflowStep(notifySubscribers, {
+      notify: workflowStep({
+        mutation: internal.example.notifySubscribers,
+        inline: true,
         label: "Notify subscribers",
       }),
     },
@@ -242,25 +248,26 @@ export const exampleWorkflow = managedWorkflow
   });
 ```
 
-The key is the stable consumer-facing step identity and its declaration order
-is the default display order. Labels default to a humanized key and can be
-overridden. Activity input and output types are inferred from `defineActivity`.
-`defineActivityInput` is an app-level helper built on that app's generated
-`internalQuery`; it adds `workflowId` and the activity's return validator so
-those invariants cannot be wired incorrectly at each call site.
-When an input builder is present, `activityStep.run` accepts the builder's
-domain arguments, injects `workflowId`, runs the query, and schedules its
-validated return value. It then links the activity to the workflow, waits for
-its validated output, and exposes worker heartbeat progress. `workflowStep.run`
-executes one registered query, mutation, action, or child workflow as a
-structured journal boundary. Conditional steps may be marked early with
-`step.steps.name.skip()`; unreached steps are finalized automatically.
-Use `queryOptions`, `mutationOptions`, `actionOptions`, or `workflowOptions` to
-construct reusable execution policy separately from each workflow's label and
-display order.
+Each step has a stable key. The key sets the default display order, and its
+human-readable form sets the default label. Both can be overridden. Activity
+input and output types come from `defineActivity`.
 
-Structured activity and workflow steps can run safely in parallel. The
-coordinator starts, executes, and finishes each phase in stable key order:
+`defineActivityInput` is an application helper built on a generated
+`internalQuery`. It adds `workflowId` and the activity's output validator, so
+callers cannot omit the workflow ID or use the wrong validator. With an input
+builder, `activityStep.run` accepts the builder's domain arguments, adds the
+workflow ID, runs the query, validates its result, and schedules the activity.
+It then waits for validated worker output and reports worker heartbeat progress.
+
+`workflowStep.run` executes one registered query, mutation, action, or child
+workflow as one durable workflow operation. Call `step.steps.name.skip()` for
+a branch that is not taken; steps the handler never reaches are finalized
+automatically. Put the operation target, run options, label, and order in the
+same `workflowStep` object. For example:
+`workflowStep({ action, retry, label, order })`.
+
+Activity and workflow steps can run in parallel. The coordinator prepares and
+finishes them in key order while their executions run concurrently:
 
 ```ts
 const results = await step.parallel({
@@ -269,29 +276,12 @@ const results = await step.parallel({
 });
 ```
 
-Use `manualWorkflowStep()` only for a small parent-specific sequence that would
-not benefit from its own registered child workflow:
-
-```ts
-steps: {
-  refreshCache: manualWorkflowStep({ label: "Refresh cache" }),
-}
-
-await step.steps.refreshCache.run(async () => {
-  const keys = await step.runQuery(internal.example.listCacheKeys, {});
-  await step.runMutation(internal.example.refreshCache, { keys });
-});
-```
-
-The manual `run(callback)` call must be awaited immediately. Starting another
-managed step while it is active throws with guidance before the workflow can
-append a nondeterministic journal sequence.
-
-The component persists the complete progress projection. Consumers call
-`managedWorkflow.getProgress(ctx, workflowId)` and receive ordered pending,
-queued, running, completed, failed, canceled, or skipped steps with timing and
-activity progress. Domain tables do not need their own activity-ID arrays,
-timing arrays, completion callbacks, or label maps.
+The component stores step labels and order. The workflow journal and live
+activity state store execution progress. Call
+`managedWorkflow.getProgress(ctx, workflowId)` to get the steps in order, with
+their pending, queued, running, completed, failed, canceled, or skipped state,
+timing, and progress. Domain tables no longer need activity-ID arrays, timing
+arrays, completion callbacks, or label maps.
 
 Start it through `managedWorkflow.start`, not the underlying
 `WorkflowManager.start`. The manager creates the scope and installs the
@@ -310,9 +300,9 @@ const workflowId = await managedWorkflow.start(
 ```
 
 Worker handlers upload only declared slots through `context.uploadArtifact` or
-`context.upload_artifact`. A workflow author therefore makes one artifact
-decision: its disposition in the activity output. Retry, orphan, failure,
-cancellation, and terminal cleanup are infrastructure behavior.
+`context.upload_artifact`. Declare each output disposition, then explicitly adopt
+retained artifacts in the mutation that publishes their domain references.
+Retry, orphan, failure, cancellation, and scope cleanup are infrastructure behavior.
 
 ## Cancellation
 
@@ -364,11 +354,10 @@ fail an activity merely because a rolling deployment changed the transport.
 The `defineActivity` and managed workflow APIs repeat these rules in their
 editor documentation so the decision is visible at callsites.
 
-The worker activity contracts are generated from the application activity registry.
-TypeScript receives compile-time input/output inference. Python receives
-generated Pydantic models plus runtime validation. This provides wire
-compatibility without pretending that the TypeScript compiler can type-check
-Python source.
+Worker contracts are generated from the application activity registry.
+TypeScript gets compile-time input/output inference. Python gets generated
+Pydantic models and runtime validation. This keeps the JSON contract aligned
+without pretending that the TypeScript compiler can type-check Python code.
 
 Run `bun run generate:activities` after changing a wire schema. Generated
 Python models and the JSON contract snapshot are committed so contract changes
@@ -376,12 +365,12 @@ are reviewable.
 
 ## Media integration
 
-The media workflows declare consumer-visible activity and custom steps through
-`managedWorkflow.define`. They execute activities through
-`step.steps.name.run(input)` and keep business-result persistence as explicit
-domain mutations. Core and enrichment progress snapshots are combined for the
-room UI. The older media activity/timing projection remains only as a fallback
-for jobs created before managed step registration.
+The media workflows declare their activities and custom steps with
+`managedWorkflow.define`. They run activities with
+`step.steps.name.run(input)` and persist business results in explicit domain
+mutations. The room UI combines core and enrichment progress. The older media
+activity/timing projection is retained only as a fallback for jobs created
+before managed-step registration.
 
 Workers authenticate to `/activities/workers/*` with
 `ACTIVITY_WORKER_TOKEN`. The media source URL remains encrypted in the
@@ -410,3 +399,32 @@ This component does not implement workflow replay, signals, queries, child
 workflows, continue-as-new, search attributes, local activities, or exactly-once
 side effects. Convex Workflow already provides workflow durability; duplicating
 those features would create two competing orchestration authorities.
+
+## Breaking upgrade
+
+Use an online, versioned rollout for populated deployments. Preserve the old
+workflow graph and handlers under stable v1 function references, add the new
+graph under separate v2 references, and run compatible v1 and v2 workers at the
+same time. Route new submissions to v2 while existing v1 workflows drain on
+their original graph. Workers must claim only protocol versions they understand;
+separate task queues are preferred.
+
+Do not replace v1 workflow exports in place, cancel healthy v1 runs as the
+normal migration path, or edit Workflow component journals. Remove v1 code and
+workers only after fresh verification proves that no v1 workflow, activity,
+lease, retry, or terminal delivery remains.
+
+Reprocessing now creates a new `mediaJobs` row and a new asset revision. The
+previous published revision remains available for playback.
+
+First deploy a compatibility schema and readers that handle both shapes. New
+v2 writes must use the target shape before the batched migration starts.
+Migrate terminal v1 rows online, reconstruct artifact owners from live asset
+and lyric references, and validate ready records. Do not infer ownership from
+a successful activity alone; its output may never have been published.
+
+After v1 drains, run two clean verification passes separated by the maximum v1
+lease, retry, and delivery interval, then deploy the strict schema. Keep
+destructive cleanup separate and delayed through a rollback window. See
+[`../../MIGRATION_FLOW_HANDOFF.md`](../../MIGRATION_FLOW_HANDOFF.md) for the
+complete migration and Coolify operator handoff.

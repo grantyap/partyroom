@@ -1,6 +1,5 @@
 import {
   defineActivity,
-  defineActivityRegistry,
   defineQueue,
   wire,
   type WireSchema,
@@ -201,8 +200,3 @@ export const mediaActivities = {
     startToCloseTimeoutMs: 30 * minute,
   }),
 };
-
-export const mediaActivityRegistry = defineActivityRegistry({
-  queues: mediaQueues,
-  activities: mediaActivities,
-});

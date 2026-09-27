@@ -1,7 +1,9 @@
 import { convexTest } from "convex-test";
-import { describe, expect, test } from "vitest";
+import type { WorkflowId } from "@convex-dev/workflow";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
+import { requeueRoomMedia } from "./media/domain/jobs";
 import {
   advanceRoomPlayback,
   enqueueRoomMedia,
@@ -11,6 +13,8 @@ import {
 import { defaultRoomMemberPermissions } from "./rooms.schema";
 import schema from "./schema";
 import { modules } from "./test.setup";
+
+afterEach(() => vi.useRealTimers());
 
 async function seedRoom(t: ReturnType<typeof convexTest>, occupied = true) {
   return await t.run(async (ctx) => {
@@ -77,12 +81,36 @@ async function makeReady(t: ReturnType<typeof convexTest>, roomMediaId: Id<"room
     });
     await ctx.db.patch("mediaJobs", association.job, {
       state: "ready",
-      stage: "ready",
-      progress: 1,
+      workflowId: "workflow",
+
       asset: assetId,
     });
     await ctx.db.patch("roomMedia", roomMediaId, { asset: assetId });
   });
+}
+
+async function delayedReadySetup() {
+  vi.useFakeTimers();
+  const t = convexTest(schema, modules);
+  const { roomId, playbackId } = await seedRoom(t);
+  const roomMediaId = await createRoomMedia(t, roomId, "processing");
+  const key = await enqueue(t, roomId, roomMediaId);
+  await makeReady(t, roomMediaId);
+  const published = (await t.run((ctx) => ctx.db.get("roomMedia", roomMediaId)))!;
+  const jobId = await t.run((ctx) => requeueRoomMedia(ctx, { roomId, roomMediaId }));
+  await t.mutation(internal.media.jobs.attachWorkflow, {
+    jobId,
+    workflowId: "rebuild" as WorkflowId,
+  });
+  return { t, roomId, playbackId, roomMediaId, key, published, jobId };
+}
+
+async function advancementJobs(t: ReturnType<typeof convexTest>) {
+  return await t.run(async (ctx) =>
+    (await ctx.db.system.query("_scheduled_functions").collect())
+      .filter((job) => job.name === "playback:finishIfCurrent")
+      .map((job) => job.args[0]),
+  );
 }
 
 async function enqueue(
@@ -131,7 +159,12 @@ describe("room playback aggregate", () => {
     const key = await enqueue(t, roomId, media);
     await makeReady(t, media);
 
-    await t.mutation(internal.playback.onRoomMediaReady, { roomMediaId: media });
+    const association = await t.run(async (ctx) => await ctx.db.get("roomMedia", media));
+    await t.mutation(internal.playback.onRoomMediaReady, {
+      roomMediaId: media,
+      jobId: association!.job,
+      assetId: association!.asset!,
+    });
 
     const playback = await t.run(async (ctx) => await ctx.db.get("roomPlayback", playbackId));
     expect(playback?.state).toMatchObject({
@@ -139,6 +172,111 @@ describe("room playback aggregate", () => {
       current: { key, kind: "ready" },
       queue: [],
     });
+  });
+
+  test("failed reprocessing keeps a playable published queue entry", async () => {
+    vi.useFakeTimers();
+    const t = convexTest(schema, modules);
+    const { roomId, playbackId } = await seedRoom(t, false);
+    const roomMediaId = await createRoomMedia(t, roomId, "ready");
+    await enqueue(t, roomId, roomMediaId);
+
+    const before = await t.run(async (ctx) => await ctx.db.get("roomPlayback", playbackId));
+    const newJobId = await t.run(
+      async (ctx) => await requeueRoomMedia(ctx, { roomId, roomMediaId }),
+    );
+    await t.mutation(internal.media.jobs.attachWorkflow, {
+      jobId: newJobId,
+      workflowId: "rebuild" as WorkflowId,
+    });
+    await t.mutation(internal.media.jobs.failJob, {
+      jobId: newJobId,
+      workflowId: "rebuild" as WorkflowId,
+      errorCode: "MUX_FAILED",
+      errorMessage: "mux failed",
+    });
+    await t.finishAllScheduledFunctions(() => vi.runAllTimers());
+
+    const after = await t.run(async (ctx) => await ctx.db.get("roomPlayback", playbackId));
+    expect(after?.state.queue).toEqual(before?.state.queue);
+    expect(after?.state.queue[0]).toMatchObject({ kind: "ready", roomMedia: roomMediaId });
+  });
+
+  test("a delayed ready callback uses the selected published asset", async () => {
+    const { t, playbackId, roomMediaId, key, published } = await delayedReadySetup();
+
+    await t.mutation(internal.playback.onRoomMediaReady, {
+      roomMediaId,
+      jobId: published.job,
+      assetId: published.asset!,
+    });
+
+    const playback = await t.run(async (ctx) => await ctx.db.get("roomPlayback", playbackId));
+    expect(playback?.state).toMatchObject({
+      kind: "occupiedPlaying",
+      current: { key, kind: "ready", asset: published.asset },
+      queue: [],
+    });
+  });
+
+  test("ready and failed callbacks reject stale revisions", async () => {
+    const ready = await delayedReadySetup();
+    await makeReady(ready.t, ready.roomMediaId);
+    await ready.t.mutation(internal.playback.onRoomMediaReady, {
+      roomMediaId: ready.roomMediaId,
+      jobId: ready.published.job,
+      assetId: ready.published.asset!,
+    });
+    expect(
+      (await ready.t.run(async (ctx) => await ctx.db.get("roomPlayback", ready.playbackId)))?.state,
+    ).toMatchObject({ kind: "occupiedWaiting", queue: [{ key: ready.key, kind: "processing" }] });
+
+    const failed = await delayedReadySetup();
+    const before = await failed.t.run(
+      async (ctx) => await ctx.db.get("roomPlayback", failed.playbackId),
+    );
+    await failed.t.mutation(internal.playback.onRoomMediaFailed, {
+      roomMediaId: failed.roomMediaId,
+      jobId: failed.published.job,
+      message: "stale failure",
+    });
+    const after = await failed.t.run(
+      async (ctx) => await ctx.db.get("roomPlayback", failed.playbackId),
+    );
+    expect(after?.state).toEqual(before?.state);
+  });
+
+  test("failure promotion updates revision and schedules advancement once", async () => {
+    const { t, playbackId, roomMediaId, key, published, jobId } = await delayedReadySetup();
+    await t.mutation(internal.media.jobs.failJob, {
+      jobId,
+      workflowId: "rebuild" as WorkflowId,
+      errorCode: "FAIL",
+      errorMessage: "failed",
+    });
+    await t.mutation(internal.playback.onRoomMediaFailed, {
+      roomMediaId,
+      jobId,
+      message: "failed",
+    });
+
+    const promoted = await t.run(async (ctx) => await ctx.db.get("roomPlayback", playbackId));
+    expect(promoted?.state).toMatchObject({
+      kind: "occupiedPlaying",
+      current: { key, asset: published.asset },
+      queue: [],
+    });
+    expect(promoted?.revision).toBe(1);
+    expect(await advancementJobs(t)).toEqual([
+      expect.objectContaining({ roomId: promoted?.room, currentKey: key, expectedRevision: 1 }),
+    ]);
+
+    await t.mutation(internal.playback.onRoomMediaFailed, {
+      roomMediaId,
+      jobId,
+      message: "failed",
+    });
+    expect(await advancementJobs(t)).toHaveLength(1);
   });
 
   test("an empty room may hold ready media and promotes it when occupied", async () => {

@@ -20,7 +20,7 @@ export const claimedActivitySchema = z.object({
   activityVersion: z.number().int().positive(),
   taskQueue: z.string().min(1),
   attempt: z.number().int().positive(),
-  leaseToken: z.string().min(1),
+  attemptToken: z.string().min(1),
   leaseExpiresAt: z.number(),
   attemptDeadline: z.number(),
   scheduleDeadline: z.number(),
@@ -36,11 +36,7 @@ export const renewalResponseSchema = z.object({
   leaseExpiresAt: z.number().optional(),
 });
 
-const leasedRequestSchema = z.object({
-  activityId: z.string().min(1),
-  attempt: z.number().int().positive(),
-  leaseToken: z.string().min(1),
-});
+const leasedRequestSchema = z.object({ attemptToken: z.string().min(1) });
 
 export const renewRequestSchema = leasedRequestSchema.extend({
   progress: z.number().optional(),
@@ -49,20 +45,16 @@ export const renewRequestSchema = leasedRequestSchema.extend({
 });
 
 export const completeRequestSchema = leasedRequestSchema.extend({
-  requestId: z.string().min(1),
   value: z.unknown(),
 });
 
 export const failRequestSchema = leasedRequestSchema.extend({
-  requestId: z.string().min(1),
   errorType: z.string().min(1),
   errorMessage: z.string(),
   nonRetryable: z.boolean().optional(),
 });
 
-export const cancelRequestSchema = leasedRequestSchema.extend({
-  requestId: z.string().min(1),
-});
+export const cancelRequestSchema = leasedRequestSchema.extend({});
 
 export const artifactUploadRequestSchema = leasedRequestSchema.extend({
   slot: z.string().min(1),
