@@ -51,6 +51,8 @@ export default defineSchema({
     routingVersion: v.optional(v.union(v.literal(1), v.literal(2))),
     updatedAt: v.number(),
   }).index("by_migration_id", ["migrationId"]),
+  // TODO(deprecation): Remove manual-runner verification records in a later
+  // migration once no older deployment needs their history.
   migrationVerifications: defineTable({
     migrationId: v.string(),
     generation: v.string(),

@@ -95,6 +95,8 @@ const mediaEnrichmentsFields = {
   updatedAt: v.number(),
 };
 
+// TODO(deprecation): Remove these four v1 row shapes in a later data migration
+// after the rollback window closes and historical rows are normalized.
 const legacyMediaJob = v.object({
   ...mediaJobsFields,
   ...legacyActivityProjection,
