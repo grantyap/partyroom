@@ -1,5 +1,6 @@
 import { defineApp } from "convex/server";
 import betterAuth from "@convex-dev/better-auth/convex.config";
+import migrations from "@convex-dev/migrations/convex.config.js";
 import presence from "@convex-dev/presence/convex.config.js";
 import workflow from "@convex-dev/workflow/convex.config.js";
 import activities from "@partyroom/activities/convex.config";
@@ -14,6 +15,7 @@ const app = defineApp({
   },
 });
 app.use(betterAuth);
+app.use(migrations);
 app.use(presence);
 app.use(workflow);
 app.use(activities);

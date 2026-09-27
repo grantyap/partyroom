@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "@convex-dev/better-auth": "catalog:",
+    "@convex-dev/migrations": "^0.3.6",
     "@convex-dev/presence": "catalog:",
     "@convex-dev/workflow": "^0.4.4",
     "@convex-dev/workpool": "^0.4.8",
