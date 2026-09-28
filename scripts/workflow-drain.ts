@@ -26,7 +26,7 @@ function cli(args: string[]) {
 function run(name: string, args: unknown, component?: string) {
   const command = ["run"];
   if (component) command.push("--component", component);
-  return JSON.parse(cli([...command, name, JSON.stringify(args)]));
+  return JSON.parse(cli([...command, name, JSON.stringify(args)]) || "null");
 }
 
 function scan(name: string, base: Record<string, unknown>, component?: string) {
