@@ -31,12 +31,13 @@ export const requestMedia = action({
       encryptSourceUrl(url),
       hashRequest(url),
     ]);
-    return await ctx.runMutation(internal.media.jobs.request, {
+    const { jobId, roomMediaId, created } = await ctx.runMutation(internal.media.jobs.request, {
       roomId,
       requestedBy,
       requestKey,
       encryptedSource,
       sourceIv,
     });
+    return { jobId, roomMediaId, created };
   },
 });
