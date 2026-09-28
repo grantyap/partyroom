@@ -218,21 +218,18 @@ export const claim = mutation({
       });
     }
 
-    if (queue.maxConcurrentActivities !== undefined) {
-      const running = await ctx.db
-        .query("activities")
-        .withIndex("by_queue_state", (q) =>
-          q.eq("taskQueue", args.taskQueue).eq("state", "running"),
-        )
-        .take(queue.maxConcurrentActivities);
-      if (running.length >= queue.maxConcurrentActivities) return null;
-    }
-
     const now = Date.now();
-    const candidates = await Promise.all(
-      args.supportedActivities.map(
-        async ({ name, version }) =>
-          await ctx.db
+    const firstAvailable = await ctx.db
+      .query("activities")
+      .withIndex("by_queue_state_available", (q) =>
+        q.eq("taskQueue", args.taskQueue).eq("state", "scheduled").lte("nextAttemptAt", now),
+      )
+      .first();
+    let activity = firstAvailable;
+    if (activity && !supported.has(`${activity.activityType}:${activity.activityVersion}`)) {
+      const candidates = await Promise.all(
+        args.supportedActivities.map(({ name, version }) =>
+          ctx.db
             .query("activities")
             .withIndex("by_queue_state_activity_available", (q) =>
               q
@@ -243,12 +240,23 @@ export const claim = mutation({
                 .lte("nextAttemptAt", now),
             )
             .first(),
-      ),
-    );
-    const activity = candidates
-      .filter((candidate): candidate is Activity => candidate !== null)
-      .sort((left, right) => left.nextAttemptAt - right.nextAttemptAt)[0];
+        ),
+      );
+      activity = candidates
+        .filter((candidate): candidate is Activity => candidate !== null)
+        .sort((left, right) => left.nextAttemptAt - right.nextAttemptAt)[0] ?? null;
+    }
     if (!activity) return null;
+
+    if (queue.maxConcurrentActivities !== undefined) {
+      const running = await ctx.db
+        .query("activities")
+        .withIndex("by_queue_state", (q) =>
+          q.eq("taskQueue", args.taskQueue).eq("state", "running"),
+        )
+        .take(queue.maxConcurrentActivities);
+      if (running.length >= queue.maxConcurrentActivities) return null;
+    }
 
     if (activity.cancelRequested) {
       await finish(ctx, activity, { kind: "canceled" });

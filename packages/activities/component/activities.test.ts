@@ -63,6 +63,18 @@ describe("attempt capabilities and publication", () => {
     expect(await t.mutation(api.activities.claim, { ...claimArgs, workerId: "other" })).toBeNull();
   });
 
+  test("claims a supported activity behind an older version", async () => {
+    const { t, args, attemptToken } = await setup();
+    await t.mutation(api.activities.complete, { attemptToken, value: { value: "done" } });
+    await t.mutation(api.activities.schedule, { ...args, activityVersion: 2 });
+    const supportedId = await t.mutation(api.activities.schedule, args);
+
+    expect(await t.mutation(api.activities.claim, claimArgs)).toMatchObject({
+      activityId: supportedId,
+      activityVersion: 1,
+    });
+  });
+
   test("renews only a live capability", async () => {
     const { t, attemptToken, lease } = await setup();
     vi.setSystemTime(lease.leaseExpiresAt - 1);
