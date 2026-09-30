@@ -219,7 +219,7 @@
 @theme inline {
   --font-sans: "Inter Variable", sans-serif;
 
-  --font-heading: "Playfair Display", Georgia, serif;
+  --font-heading: "Playfair Display Variable", Georgia, serif;
 
   --color-sidebar-ring: var(--sidebar-ring);
 
