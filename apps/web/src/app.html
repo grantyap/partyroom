@@ -8,12 +8,13 @@
     <link rel="apple-touch-icon" sizes="180x180" href="%sveltekit.assets%/apple-touch-icon.png" />
     <link rel="manifest" href="%sveltekit.assets%/site.webmanifest" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <style>
-      html:has([data-marketing-page]),
-      body:has([data-marketing-page]) {
-        background-color: var(--marketing-background);
-      }
-    </style>
+    <!--
+      Keep html/body backgrounds aligned with the marketing page: iOS Safari
+      uses them to fill safe-area insets outside the content viewport.
+      The marketing +page.svelte sets these via Tailwind html:has(&)/body:has(&)
+      variants. Preserve that behavior when changing the page or its colors;
+      a background on the page wrapper alone does not cover the safe areas.
+    -->
     %sveltekit.head%
   </head>
   <body data-sveltekit-preload-data="hover">
