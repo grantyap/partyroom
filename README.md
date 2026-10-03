@@ -142,6 +142,32 @@ The `backend-deploy` service automatically applies the Convex function environme
 functions after the backend is healthy. It reads the generated instance credentials from the
 persistent `data` volume, so no admin key needs to be copied into Coolify.
 
+### GPU build cache
+
+The NVIDIA stem worker and lyrics worker install third-party dependencies in a separate image
+layer, before copying local Python source. Changes to worker code reuse that layer; changes to
+lockfiles, dependency metadata, accelerator, or base images rebuild it.
+The first build after changing this layout still needs to populate the new layers.
+
+Keep the same Docker builder and preserve its build cache between Coolify deployments. Check
+host cleanup policies for `docker builder prune`, `docker buildx prune`, or
+`docker system prune --all`; these can discard reusable build layers and download caches.
+The runtime model volumes are separate and do not preserve Python dependency build caches.
+
+To confirm reuse, inspect a second deployment with unchanged dependencies: the initial `uv sync`
+and the runtime `COPY --from=dependencies .../.venv` should be `CACHED`. An edit to
+`packages/activity-worker-python` source should rerun only the local install and subsequent
+layers. Read-only host checks include `docker buildx ls` and `docker buildx du`.
+Run `python3 scripts/check-worker-build-cache.py` to check this with an isolated source edit
+and verify the shared package imports in the resulting stem-worker image. The check uses the
+Docker host architecture; Apple silicon does not exercise the x86-only CUDA packages.
+
+If builders are ephemeral, configure registry-backed `cache_from` and `cache_to` for each worker
+using your private registry and supported builder. No registry cache is configured here because
+its location and credentials depend on the deployment host. See
+[Docker cache backends](https://docs.docker.com/build/cache/backends/) and
+[uv Docker layer caching](https://docs.astral.sh/uv/guides/integration/docker/#intermediate-layers).
+
 Development commands also merge `docker-compose.dev.yaml`, which disables the containerized `web`
 service so Vite continues to run on the host with HMR.
 

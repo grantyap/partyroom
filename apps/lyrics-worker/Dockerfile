@@ -7,11 +7,12 @@ ENV UV_LINK_MODE=copy \
     UV_HTTP_TIMEOUT=300
 
 WORKDIR /workspace/apps/lyrics-worker
-COPY packages/activity-worker-python /workspace/packages/activity-worker-python
+# Copy dependency metadata only; local source changes must not reinstall CUDA.
+COPY packages/activity-worker-python/pyproject.toml /workspace/packages/activity-worker-python/pyproject.toml
 COPY apps/lyrics-worker/pyproject.toml apps/lyrics-worker/uv.lock ./
 ARG PYTORCH_ACCELERATOR=cpu
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-install-project --extra "${PYTORCH_ACCELERATOR}"
+    uv sync --frozen --no-dev --no-install-project --no-install-package partyroom-activity-worker --extra "${PYTORCH_ACCELERATOR}"
 
 
 FROM python:3.12-slim-trixie
@@ -22,6 +23,14 @@ RUN apt-get update \
 
 WORKDIR /workspace/apps/lyrics-worker
 COPY --from=dependencies /workspace/apps/lyrics-worker/.venv ./.venv
+COPY packages/activity-worker-python /workspace/packages/activity-worker-python
+COPY apps/lyrics-worker/pyproject.toml apps/lyrics-worker/uv.lock ./
+ARG PYTORCH_ACCELERATOR=cpu
+
+# Install local code above the reusable third-party environment layer.
+RUN --mount=from=dependencies,source=/bin/uv,target=/bin/uv \
+    --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-install-project --link-mode=copy --extra "${PYTORCH_ACCELERATOR}"
 COPY apps/lyrics-worker/app ./app
 
 ENV PATH="/workspace/apps/lyrics-worker/.venv/bin:$PATH" \
