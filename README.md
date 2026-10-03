@@ -146,7 +146,8 @@ persistent `data` volume, so no admin key needs to be copied into Coolify.
 
 The NVIDIA stem worker and lyrics worker install third-party dependencies in a separate image
 layer, before copying local Python source. Changes to worker code reuse that layer; changes to
-lockfiles, dependency metadata, accelerator, or base images rebuild it.
+lockfiles, dependency metadata, accelerator, or base images rebuild it. The shared uv download
+cache is locked during installation so concurrent worker builds can reuse completed downloads.
 The first build after changing this layout still needs to populate the new layers.
 
 Keep the same Docker builder and preserve its build cache between Coolify deployments. Check

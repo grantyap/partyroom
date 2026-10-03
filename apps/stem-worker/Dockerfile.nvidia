@@ -14,7 +14,7 @@ WORKDIR /workspace/apps/stem-worker
 # Copy dependency metadata only; local source changes must not reinstall CUDA.
 COPY packages/activity-worker-python/pyproject.toml /workspace/packages/activity-worker-python/pyproject.toml
 COPY apps/stem-worker/pyproject.toml apps/stem-worker/uv.lock ./
-RUN --mount=type=cache,target=/root/.cache/uv \
+RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     uv sync --frozen --no-dev --no-install-project --no-install-package partyroom-activity-worker --extra nvidia
 
 
@@ -31,7 +31,7 @@ COPY apps/stem-worker/pyproject.toml apps/stem-worker/uv.lock ./
 
 # Install local code above the reusable third-party environment layer.
 RUN --mount=from=dependencies,source=/bin/uv,target=/bin/uv \
-    --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     uv sync --frozen --no-dev --no-install-project --link-mode=copy --extra nvidia
 COPY apps/stem-worker/app ./app
 

@@ -11,7 +11,7 @@ WORKDIR /workspace/apps/lyrics-worker
 COPY packages/activity-worker-python/pyproject.toml /workspace/packages/activity-worker-python/pyproject.toml
 COPY apps/lyrics-worker/pyproject.toml apps/lyrics-worker/uv.lock ./
 ARG PYTORCH_ACCELERATOR=cpu
-RUN --mount=type=cache,target=/root/.cache/uv \
+RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     uv sync --frozen --no-dev --no-install-project --no-install-package partyroom-activity-worker --extra "${PYTORCH_ACCELERATOR}"
 
 
@@ -29,7 +29,7 @@ ARG PYTORCH_ACCELERATOR=cpu
 
 # Install local code above the reusable third-party environment layer.
 RUN --mount=from=dependencies,source=/bin/uv,target=/bin/uv \
-    --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     uv sync --frozen --no-dev --no-install-project --link-mode=copy --extra "${PYTORCH_ACCELERATOR}"
 COPY apps/lyrics-worker/app ./app
 
