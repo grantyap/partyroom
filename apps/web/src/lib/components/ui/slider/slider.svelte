@@ -7,6 +7,8 @@
 		value = $bindable(),
 		orientation = "horizontal",
 		class: className,
+		"aria-label": ariaLabel,
+		"aria-labelledby": ariaLabelledby,
 		...restProps
 	}: WithoutChildrenOrChild<SliderPrimitive.RootProps> = $props();
 </script>
@@ -43,6 +45,8 @@ get along, so we shut typescript up by casting `value` to `never`.
 		</span>
 		{#each thumbItems as thumb (thumb.index)}
 			<SliderPrimitive.Thumb
+				aria-label={ariaLabel}
+				aria-labelledby={ariaLabelledby}
 				data-slot="slider-thumb"
 				index={thumb.index}
 				class="hover:ring-ring/30 focus-visible:ring-ring/30 h-4 w-6 rounded-full bg-white shadow-md ring-1 ring-black/10 transition-[color,box-shadow,background-color] not-dark:bg-clip-padding hover:ring-4 focus-visible:ring-4 focus-visible:outline-hidden data-vertical:h-6 data-vertical:w-4 block shrink-0 select-none disabled:pointer-events-none disabled:opacity-50"
