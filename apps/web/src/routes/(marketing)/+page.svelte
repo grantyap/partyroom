@@ -5,6 +5,7 @@
 	import ArrowUpRightIcon from "@lucide/svelte/icons/arrow-up-right";
 	import { Radio, Tv, Music2, ListMusic, Mic2, MessageCircle, Users, Pause, SkipForward } from "@lucide/svelte";
 	import type { PageProps } from "./$types";
+	import MarketingFeatureDemos from "$lib/components/marketing-feature-demos.svelte";
 
 	const { data, form }: PageProps = $props();
 	let accessOpen = $state(false);
@@ -68,7 +69,7 @@
    <div>
     <p class="mb-6 flex items-center gap-2 text-xs font-semibold tracking-[0.16em] uppercase"><span class="size-2 rounded-full bg-(--purple)"></span>Karaoke with friends</p>
     <h1 id="headline" class="font-heading text-[clamp(3.3rem,8.3vw,8rem)] leading-[0.94] font-extrabold tracking-[-0.075em]">Karaoke<br />every song<br /><span class="text-(--purple)">ever.</span></h1>
-    <p class="mt-8 max-w-sm text-lg leading-7 text-(--muted)">Pick a song, send your friends the room link, and sing along. Partyroom removes the vocals and puts the lyrics on screen.</p>
+    <p class="mt-8 max-w-sm text-lg leading-7 text-(--muted)">Turn a song link into karaoke, with the vocals removed and lyrics in sync. Invite your friends and sing together.</p>
     <a href={data.hasEarlyAccess ? "/app" : "#invite"} class="mt-8 inline-flex items-center gap-10 rounded-full bg-(--purple) px-7 py-4 text-sm font-semibold text-(--room) transition hover:bg-(--purple)/80">{data.hasEarlyAccess ? "Let’s sing" : "Get early access"}<ArrowUpRightIcon class="size-5" aria-hidden="true" /></a>
     <p class="mt-4 text-xs text-(--muted)">Works in your browser.</p>
    </div>
@@ -114,9 +115,10 @@
     {/each}
    </ol>
   </section>
+  <MarketingFeatureDemos />
   <section id="invite" aria-labelledby="invite-heading" class="scroll-mt-6 border-y border-(--line) bg-(--surface)">
    <div class="mx-auto grid max-w-[1440px] gap-10 px-6 py-16 sm:px-12 lg:grid-cols-2 lg:gap-24 lg:px-20 lg:py-24">
-    <div><p class="mb-5 text-xs font-bold tracking-[0.15em] uppercase">Early access</p><h2 id="invite-heading" class="font-heading text-5xl leading-[0.98] font-extrabold tracking-[-0.06em] sm:text-7xl">Join the<br />party</h2><p class="mt-6 max-w-sm text-base leading-7 text-(--muted)">Partyroom is in early access. Leave your name and email, and we’ll send you an invite when it’s ready.</p><p class="mt-8 text-5xl" aria-hidden="true">↘</p></div>
+    <div><p class="mb-5 text-xs font-bold tracking-[0.15em] uppercase">Early access</p><h2 id="invite-heading" class="font-heading text-5xl leading-[0.98] font-extrabold tracking-[-0.06em] sm:text-7xl">Join the<br />party</h2><p class="mt-6 max-w-sm text-base leading-7 text-(--muted)">Leave your name and email. We’ll let you know when you can join.</p><p class="mt-8 text-5xl" aria-hidden="true">↘</p></div>
     <div class="rounded-2xl border border-(--line) bg-(--room) p-6 sm:p-8">
 					{#if form?.joined}
 						<div
