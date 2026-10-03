@@ -17,7 +17,7 @@ snippet to provide your own UI.
 ```
 -->
 <script lang="ts" module>
-	import type { LyricsTrack } from "$lib/karaoke";
+	import type { LyricsTrack } from "#lib/karaoke.js";
 
 	export type LyricsRenderProps = {
 		lyrics: LyricsTrack[];
@@ -29,7 +29,7 @@ snippet to provide your own UI.
 </script>
 
 <script lang="ts">
-	import { api } from "@partyroom/backend/convex/_generated/api";
+	import { api } from "@partyroom/backend/convex/_generated/api.js";
 	import { useMutation } from "convex-svelte";
 	import type { Snippet } from "svelte";
 	import { usePlayback } from "./context.svelte";

@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { refreshAll } from "$app/navigation";
-	import { authClient } from "$lib/auth-client";
-	import { getCurrentUser } from "$lib/auth.remote";
-	import * as DropdownMenu from "$lib/components/ui/dropdown-menu";
+	import { authClient } from "#lib/auth-client.js";
+	import { getCurrentUser } from "#lib/auth.remote.js";
+	import * as DropdownMenu from "#lib/components/ui/dropdown-menu/index.js";
 
 	let user = $state(await getCurrentUser());
 

@@ -41,7 +41,7 @@ export type OnlineTimingObjectOptions = {
    * How far ahead to schedule a playback start, in seconds; defaults to 1.
    * This gives each device time to prepare the media. The delay between producing
    * audio and hearing it is handled separately by SyncedMediaPlayback.
-   * @see `$lib/synced-playback` for audio output delay handling.
+   * @see `#lib/synced-playback/index.js` for audio output delay handling.
    */
   playStartDelaySeconds?: number;
 };
@@ -53,7 +53,7 @@ export type OnlineTimingObjectOptions = {
 export type TimingObjectReadyState = "connecting" | "open" | "closed";
 
 /**
- * Tracks where playback should be for everyone in a room. Import from `$lib/timing`.
+ * Tracks where playback should be for everyone in a room. Import from `#lib/timing/index.js`.
  * A timeline contains a media position, playback speed, and the time they apply.
  *
  * Create one instance in the component that owns the room's playback state.
@@ -66,14 +66,14 @@ export type TimingObjectReadyState = "connecting" | "open" | "closed";
  * corrects them.
  *
  * To play audio or video, pass this timeline to SyncedMediaPlayback from
- * `$lib/synced-playback`. That class controls the media element and accounts
+ * `#lib/synced-playback/index.js`. That class controls the media element and accounts
  * for the delay before sound reaches the output device.
  *
  * @example Create and start a timeline using the room's server callbacks
  * ```svelte
  * <script lang="ts">
  *   import { onMount } from "svelte";
- *   import { OnlineTimingObject, type OnlineTimingObjectOptions } from "$lib/timing";
+ *   import { OnlineTimingObject, type OnlineTimingObjectOptions } from "#lib/timing/index.js";
  *
  *   let { provider }: { provider: OnlineTimingObjectOptions } = $props();
  *   const timing = new OnlineTimingObject({
@@ -88,7 +88,7 @@ export type TimingObjectReadyState = "connecting" | "open" | "closed";
  *
  * @see {@link OnlineTimingObjectOptions} for the server functions this class needs.
  * @see {@link OnlineTimingObject.query} for lyric and progress time.
- * @see `$lib/synced-playback` for synchronized audio and video playback.
+ * @see `#lib/synced-playback/index.js` for synchronized audio and video playback.
  * @see https://www.w3.org/community/reports/webtiming/CG-FINAL-timingobject-20241203/#connecting-the-timing-object
  * @see https://www.w3.org/community/reports/webtiming/CG-FINAL-timingobject-20241203/#state-vector-synchronization
  */
@@ -293,7 +293,7 @@ export class OnlineTimingObject extends EventTarget implements ITimingObject {
    *
    * Player buttons should call SyncedMediaPlayback's request methods. Those
    * methods check canControl before calling this lower-level method.
-   * @see `$lib/synced-playback` for the player control API.
+   * @see `#lib/synced-playback/index.js` for the player control API.
    */
   async update(update: TimingStateVectorUpdate | TTimingStateVectorUpdate) {
     if (this.#readyState !== "open") throw new Error("Timing resource is not connected");

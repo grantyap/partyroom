@@ -1,5 +1,5 @@
 import { createConvexHttpClient } from "@mmailaender/convex-better-auth-svelte/sveltekit";
-import { api } from "@partyroom/backend/convex/_generated/api";
+import { api } from "@partyroom/backend/convex/_generated/api.js";
 import { error } from "@sveltejs/kit";
 import type { PageServerLoad } from "./$types";
 

@@ -25,10 +25,7 @@ describe("browserReachableServiceUrl", () => {
       ),
     ).toBe("/api/media/api/storage/local");
     expect(
-      browserReachableServiceUrl(
-        "http://[::1]:3210/api/storage/v6",
-        "http://partyroom.test:3210",
-      ),
+      browserReachableServiceUrl("http://[::1]:3210/api/storage/v6", "http://partyroom.test:3210"),
     ).toBe("/api/media/api/storage/v6");
   });
 
@@ -54,8 +51,6 @@ describe("browserReachableServiceUrl", () => {
   });
 
   test("returns malformed URLs unchanged", () => {
-    expect(browserReachableServiceUrl("not a URL", "http://192.168.1.238:3210")).toBe(
-      "not a URL",
-    );
+    expect(browserReachableServiceUrl("not a URL", "http://192.168.1.238:3210")).toBe("not a URL");
   });
 });

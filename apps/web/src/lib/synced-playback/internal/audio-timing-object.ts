@@ -1,5 +1,5 @@
 import type { ITimingObject, ITimingProvider } from "timing-object";
-import type { TimingStateVector } from "$lib/timing";
+import type { TimingStateVector } from "#lib/timing/index.js";
 
 type AudioTimingSource = ITimingObject & {
   query(timestamp?: number): TimingStateVector;
@@ -11,7 +11,7 @@ type AudioTimingSource = ITimingObject & {
  * slightly ahead by the audio output delay, in seconds. The room timeline and
  * visible player's position stay unchanged. Updates through this clock are rejected.
  *
- * @see `$lib/synced-playback` for the controller that creates and manages this clock.
+ * @see `#lib/synced-playback/index.js` for the controller that creates and manages this clock.
  */
 export class AudioTimingObject extends EventTarget implements ITimingObject {
   readonly timingProviderSource: ITimingProvider | null = null;

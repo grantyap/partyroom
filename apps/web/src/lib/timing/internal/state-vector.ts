@@ -6,7 +6,7 @@ import type { TimingStateVector } from "../types";
  * After that time, advances it using the speed and acceleration in the vector.
  *
  * Internal math helper. UI code should call OnlineTimingObject.query().
- * @see `$lib/timing` for the shared timeline API.
+ * @see `#lib/timing/index.js` for the shared timeline API.
  */
 export function queryTimingStateVector(vector: TimingStateVector, timestamp: number) {
   if (timestamp < vector.timestamp) {

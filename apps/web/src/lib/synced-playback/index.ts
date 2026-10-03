@@ -9,7 +9,7 @@
  * Playback depends on timing; timing does not depend on playback.
  *
  * @see {@link SyncedMediaPlayback} for usage.
- * @see `$lib/timing` for creating the timeline shared by players, lyrics, and controls.
+ * @see `#lib/timing/index.js` for creating the timeline shared by players, lyrics, and controls.
  */
 export {
   SyncedMediaPlayback,

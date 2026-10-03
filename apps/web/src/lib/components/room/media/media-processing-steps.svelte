@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Progress } from "$lib/components/ui/progress";
+	import { Progress } from "#lib/components/ui/progress/index.js";
 	import { Timer } from "@lucide/svelte";
 	import { stageLabel, statusLabel, stepTimingLabel } from "../media-format";
 	import type { MediaStep } from "../types";

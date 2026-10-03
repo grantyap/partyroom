@@ -1,7 +1,7 @@
 import type { ITimingObject } from "timing-object";
 import { audioOutputDelay } from "./audio-output-latency";
 import { AudioTimingObject } from "./audio-timing-object";
-import type { OnlineTimingObject } from "$lib/timing";
+import type { OnlineTimingObject } from "#lib/timing/index.js";
 
 type AudioGraph = {
   context: AudioContext;

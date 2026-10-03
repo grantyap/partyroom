@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import type { ITimingObject, ITimingProvider } from "timing-object";
 import { AudioTimingObject } from "./audio-timing-object";
-import type { TimingStateVector } from "$lib/timing";
-import { queryTimingStateVector } from "$lib/timing/internal/state-vector";
+import type { TimingStateVector } from "#lib/timing/index.js";
+import { queryTimingStateVector } from "#lib/timing/internal/state-vector.js";
 
 class Source extends EventTarget implements ITimingObject {
   readonly timingProviderSource: ITimingProvider | null = null;

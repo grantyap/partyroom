@@ -17,7 +17,7 @@ layout, compose `Playback.QueueForm`, `Playback.QueueList`,
 ```
 -->
 <script lang="ts">
-	import * as RoomTabs from "$lib/components/room/tabs";
+	import * as RoomTabs from "#lib/components/room/tabs/index.js";
 	import { usePlayback } from "../context.svelte";
 	import QueueForm from "./playback-queue-form.svelte";
 	import QueueList from "./playback-queue-list.svelte";

@@ -25,7 +25,7 @@ change how an error is shown. It renders nothing when there is no error.
 </script>
 
 <script lang="ts">
-	import { cn } from "$lib/utils";
+	import { cn } from "#lib/utils.js";
 	import type { Snippet } from "svelte";
 	import type { HTMLAttributes } from "svelte/elements";
 	import { usePlayback } from "./context.svelte";

@@ -38,15 +38,15 @@ replace that content while keeping the sortable item shell.
 </script>
 
 <script lang="ts">
-	import TextScroller from "$lib/components/text-scroller/text-scroller.svelte";
+	import TextScroller from "#lib/components/text-scroller/text-scroller.svelte";
 	import {
 		Avatar,
 		AvatarFallback,
 		AvatarImage,
-	} from "$lib/components/ui/avatar";
-	import { Button } from "$lib/components/ui/button";
+	} from "#lib/components/ui/avatar/index.js";
+	import { Button } from "#lib/components/ui/button/index.js";
 	import { Trash2 } from "@lucide/svelte";
-	import { api } from "@partyroom/backend/convex/_generated/api";
+	import { api } from "@partyroom/backend/convex/_generated/api.js";
 	import { useMutation } from "convex-svelte";
 	import type { Snippet } from "svelte";
 	import { formatDuration } from "../../media-format";

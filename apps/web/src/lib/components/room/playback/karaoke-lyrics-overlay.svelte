@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { KaraokeCue } from "$lib/karaoke";
+	import type { KaraokeCue } from "#lib/karaoke.js";
 	import KaraokeLyricLine from "./karaoke-lyric-line.svelte";
 
 	let {

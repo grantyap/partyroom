@@ -2,14 +2,7 @@ import Error from "./playback-error.svelte";
 import Lyrics from "./playback-lyrics.svelte";
 import NowPlaying from "./playback-now-playing.svelte";
 import Player from "./playback-player.svelte";
-import {
-  Queue,
-  QueueCount,
-  QueueEmpty,
-  QueueForm,
-  QueueItem,
-  QueueList,
-} from "./queue";
+import { Queue, QueueCount, QueueEmpty, QueueForm, QueueItem, QueueList } from "./queue";
 import Root from "./playback-root.svelte";
 import Share from "./share-room-popover.svelte";
 import TvMode from "./playback-tv-mode.svelte";

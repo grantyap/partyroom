@@ -6,6 +6,7 @@ services:
       context: .
       dockerfile: apps/web/Dockerfile
       args:
+        ORIGIN: ${ORIGIN:?}
         PUBLIC_CONVEX_URL: ${PUBLIC_CONVEX_URL:?}
         PUBLIC_CONVEX_SITE_URL: ${PUBLIC_CONVEX_SITE_URL:?}
         PUBLIC_FEEDBACK_FORM_URL: ${PUBLIC_FEEDBACK_FORM_URL:?}
@@ -14,7 +15,6 @@ services:
       - "3000"
     environment:
       PORT: 3000
-      ORIGIN: ${ORIGIN:?}
       GOOGLE_FORM_ACTION_URL: ${GOOGLE_FORM_ACTION_URL:?}
       GOOGLE_FORM_NAME_FIELD: ${GOOGLE_FORM_NAME_FIELD:?}
       GOOGLE_FORM_EMAIL_FIELD: ${GOOGLE_FORM_EMAIL_FIELD:?}

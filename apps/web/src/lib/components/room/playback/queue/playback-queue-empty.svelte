@@ -16,7 +16,7 @@ state. It renders nothing while the queue contains a song.
 -->
 <script lang="ts">
 	import { ListMusic } from "@lucide/svelte";
-	import { cn } from "$lib/utils";
+	import { cn } from "#lib/utils.js";
 	import type { Snippet } from "svelte";
 	import type { HTMLAttributes } from "svelte/elements";
 	import { usePlayback } from "../context.svelte";

@@ -1,11 +1,11 @@
-import { capabilities, hasCapability } from "$lib/capabilities";
+import { capabilities, hasCapability } from "#lib/capabilities.js";
 import { redirect } from "@sveltejs/kit";
 import type { PageServerLoad } from "./$types";
 
 export const load: PageServerLoad = async ({ parent }) => {
-	const { user } = await parent();
+  const { user } = await parent();
 
-	if (!hasCapability(user, capabilities.rooms.list)) {
-		redirect(303, "/");
-	}
+  if (!hasCapability(user, capabilities.rooms.list)) {
+    redirect(303, "/");
+  }
 };

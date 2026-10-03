@@ -1,11 +1,11 @@
 <script lang="ts">
 	import { enhance } from "$app/forms";
 	import { page } from "$app/state";
-	import partyroomLogo from "$lib/assets/icons/Partyroom logo.svg";
+	import partyroomLogo from "#lib/assets/icons/Partyroom logo.svg";
 	import ArrowUpRightIcon from "@lucide/svelte/icons/arrow-up-right";
 	import { Radio, Tv, Music2, ListMusic, Mic2, MessageCircle, Users, Pause, SkipForward } from "@lucide/svelte";
 	import type { PageProps } from "./$types";
-	import MarketingFeatureDemos from "$lib/components/marketing-feature-demos.svelte";
+	import MarketingFeatureDemos from "#lib/components/marketing-feature-demos.svelte";
 
 	const { data, form }: PageProps = $props();
 	let accessOpen = $state(false);
@@ -138,7 +138,7 @@
 							action="?/join"
 							class="space-y-4"
 							use:enhance
-							data-sveltekit-noscroll
+							data-sveltekit-reset="false"
 						>
 							<label class="block">
 								<span

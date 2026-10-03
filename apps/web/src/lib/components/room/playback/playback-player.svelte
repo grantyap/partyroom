@@ -27,10 +27,10 @@ layout. It handles playback, the empty state, skipping, and TV mode. Add an
 </script>
 
 <script lang="ts">
-	import { Button } from "$lib/components/ui/button";
+	import { Button } from "#lib/components/ui/button/index.js";
 	import { Minimize2 } from "@lucide/svelte";
-	import { cn } from "$lib/utils";
-	import { api } from "@partyroom/backend/convex/_generated/api";
+	import { cn } from "#lib/utils.js";
+	import { api } from "@partyroom/backend/convex/_generated/api.js";
 	import { useMutation } from "convex-svelte";
 	import type { Snippet } from "svelte";
 	import type { HTMLAttributes } from "svelte/elements";

@@ -1,4 +1,4 @@
-import { api } from "@partyroom/backend/convex/_generated/api";
+import { api } from "@partyroom/backend/convex/_generated/api.js";
 import type { FunctionReturnType } from "convex/server";
 
 export type ChatMessage = FunctionReturnType<(typeof api.chat)["getMessages"]>[number];

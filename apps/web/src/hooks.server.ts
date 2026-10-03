@@ -1,8 +1,9 @@
-import { dev } from "$app/environment";
-import { env } from "$env/dynamic/private";
-import { EARLY_ACCESS_COOKIE, hasEarlyAccess } from "$lib/server/early-access";
+import { redirect } from "@sveltejs/kit";
+import type { Handle } from "@sveltejs/kit/hooks";
+import { dev } from "$app/env";
+import { GOOGLE_SHEETS_ACCESS_SECRET } from "$app/env/private";
+import { EARLY_ACCESS_COOKIE, hasEarlyAccess } from "#lib/server/early-access.js";
 import { getToken } from "@mmailaender/convex-better-auth-svelte/sveltekit";
-import { redirect, type Handle } from "@sveltejs/kit";
 import { withServerConvexToken } from "convex-svelte/sveltekit/server";
 
 export const handle: Handle = async ({ event, resolve }) => {
@@ -13,7 +14,7 @@ export const handle: Handle = async ({ event, resolve }) => {
     if (
       !dev &&
       isEarlyAccessRoute(event.url.pathname) &&
-      !hasEarlyAccess(event.cookies.get(EARLY_ACCESS_COOKIE), env.GOOGLE_SHEETS_ACCESS_SECRET)
+      !hasEarlyAccess(event.cookies.get(EARLY_ACCESS_COOKIE), GOOGLE_SHEETS_ACCESS_SECRET)
     ) {
       redirect(302, "/?access=required");
     }

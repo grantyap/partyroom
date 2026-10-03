@@ -1,12 +1,12 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import { Button } from "$lib/components/ui/button";
-	import { Input } from "$lib/components/ui/input";
-	import { Slider } from "$lib/components/ui/slider";
+	import { Button } from "#lib/components/ui/button/index.js";
+	import { Input } from "#lib/components/ui/input/index.js";
+	import { Slider } from "#lib/components/ui/slider/index.js";
 	import { ArrowRight, Mic2, Check, ListMusic, MessageCircle, Music2, Plus, RotateCcw, Share2, Tv, Users } from "@lucide/svelte";
 	import QRCode from "qrcode";
 	import KaraokeLyricLine from "./room/playback/karaoke-lyric-line.svelte";
-	import type { KaraokeCue } from "$lib/karaoke";
+	import type { KaraokeCue } from "#lib/karaoke.js";
 
 	const cue: KaraokeCue = {
 		start: 0, end: 6,

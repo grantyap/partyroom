@@ -201,7 +201,7 @@ leading edge while it moves.
 </script>
 
 <script lang="ts">
-	import { cn, type WithoutChildren } from "$lib/utils";
+	import { cn, type WithoutChildren } from "#lib/utils.js";
 	import { onMount, type Snippet } from "svelte";
 	import type { HTMLAttributes } from "svelte/elements";
 

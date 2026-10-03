@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { Button } from "$lib/components/ui/button";
-	import { Input } from "$lib/components/ui/input";
-	import { api } from "@partyroom/backend/convex/_generated/api";
-	import type { Id } from "@partyroom/backend/convex/_generated/dataModel";
+	import { Button } from "#lib/components/ui/button/index.js";
+	import { Input } from "#lib/components/ui/input/index.js";
+	import { api } from "@partyroom/backend/convex/_generated/api.js";
+	import type { Id } from "@partyroom/backend/convex/_generated/dataModel.js";
 	import { useAction, useMutation, useQuery } from "convex-svelte";
 	import { onMount } from "svelte";
 	import RoomMediaItem from "./room-media-item.svelte";

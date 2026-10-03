@@ -1,5 +1,5 @@
-import type { OnlineTimingObject } from "$lib/timing";
-import type { Id } from "@partyroom/backend/convex/_generated/dataModel";
+import type { OnlineTimingObject } from "#lib/timing/index.js";
+import type { Id } from "@partyroom/backend/convex/_generated/dataModel.js";
 import { createContext } from "svelte";
 import type { CurrentMedia, OverlayMessage, Playback, RoomMediaItem } from "../types";
 import { KaraokeLyricsState } from "./karaoke-lyrics-state.svelte";

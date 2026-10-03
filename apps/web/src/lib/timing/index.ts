@@ -9,7 +9,7 @@
  * changing the timeline shared by the room.
  *
  * @see {@link OnlineTimingObject} for server callbacks and a Svelte setup example.
- * @see `$lib/synced-playback` for playing audio/video with output delay compensation.
+ * @see `#lib/synced-playback/index.js` for playing audio/video with output delay compensation.
  */
 export {
   OnlineTimingObject,

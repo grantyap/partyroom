@@ -5,9 +5,9 @@
 		AvatarGroup,
 		AvatarGroupCount,
 		AvatarImage,
-	} from "$lib/components/ui/avatar";
-	import * as Popover from "$lib/components/ui/popover";
-	import { getMemberColors } from "$lib/member-colors";
+	} from "#lib/components/ui/avatar/index.js";
+	import * as Popover from "#lib/components/ui/popover/index.js";
+	import { getMemberColors } from "#lib/member-colors.js";
 
 	type Member = {
 		userId: string;

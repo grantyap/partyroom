@@ -1,5 +1,5 @@
-import { getCurrentUser } from "$lib/auth.remote";
-import { capabilities, hasCapability } from "$lib/capabilities";
+import { getCurrentUser } from "#lib/auth.remote.js";
+import { capabilities, hasCapability } from "#lib/capabilities.js";
 import { redirect } from "@sveltejs/kit";
 import type { PageServerLoad } from "./$types";
 

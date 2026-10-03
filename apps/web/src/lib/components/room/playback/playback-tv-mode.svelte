@@ -23,7 +23,7 @@ Use the default button or add a `children` snippet to provide your own control.
 </script>
 
 <script lang="ts">
-	import { Button } from "$lib/components/ui/button";
+	import { Button } from "#lib/components/ui/button/index.js";
 	import { Maximize2 } from "@lucide/svelte";
 	import type { Snippet } from "svelte";
 	import { usePlayback } from "./context.svelte";

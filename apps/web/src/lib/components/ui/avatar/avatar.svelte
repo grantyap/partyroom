@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { Avatar as AvatarPrimitive } from "bits-ui";
-	import { cn } from "$lib/utils.js";
-	import { getMemberColors } from "$lib/member-colors";
+	import { cn } from "#lib/utils.js";
+	import { getMemberColors } from "#lib/member-colors.js";
 
 	let {
 		ref = $bindable(null),

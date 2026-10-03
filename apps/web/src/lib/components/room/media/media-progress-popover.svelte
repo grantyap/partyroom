@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { buttonVariants } from "$lib/components/ui/button";
-	import * as Popover from "$lib/components/ui/popover";
-	import { Progress } from "$lib/components/ui/progress";
+	import { buttonVariants } from "#lib/components/ui/button/index.js";
+	import * as Popover from "#lib/components/ui/popover/index.js";
+	import { Progress } from "#lib/components/ui/progress/index.js";
 	import { Check, Circle, LoaderCircle, Timer, X } from "@lucide/svelte";
 	import { onMount } from "svelte";
 	import {

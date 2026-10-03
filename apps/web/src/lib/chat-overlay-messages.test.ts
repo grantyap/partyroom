@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import type { ChatMessage } from "$lib/components/room/types";
-import { getMemberColor } from "$lib/member-colors";
+import type { ChatMessage } from "#lib/components/room/types.js";
+import { getMemberColor } from "#lib/member-colors.js";
 import { toChatOverlayMessages } from "./chat-overlay-messages";
 
 describe("toChatOverlayMessages", () => {

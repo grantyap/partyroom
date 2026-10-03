@@ -1,23 +1,23 @@
 <script lang="ts">
-	import { invalidateAll } from "$app/navigation";
-	import { authClient } from "$lib/auth-client";
-	import { capabilities, hasCapability } from "$lib/capabilities";
-	import { toChatOverlayMessages } from "$lib/chat-overlay-messages";
-	import ErrorState from "$lib/components/error-state.svelte";
+	import { refreshAll } from "$app/navigation";
+	import { authClient } from "#lib/auth-client.js";
+	import { capabilities, hasCapability } from "#lib/capabilities.js";
+	import { toChatOverlayMessages } from "#lib/chat-overlay-messages.js";
+	import ErrorState from "#lib/components/error-state.svelte";
 	import {
 		RoomChat,
 		RoomLyrics,
 		RoomPermissions,
 		type ChatMessage,
 		type RoomMemberPermission,
-	} from "$lib/components/room";
-	import RoomMembersPopover from "$lib/components/room/chat/room-members-popover.svelte";
-	import * as Playback from "$lib/components/room/playback";
-	import * as RoomTabs from "$lib/components/room/tabs";
-	import { Button, buttonVariants } from "$lib/components/ui/button";
-	import * as Drawer from "$lib/components/ui/drawer";
-	import { createUuidInAnyContext } from "$lib/context-uuid";
-	import { Presence } from "$lib/presence.svelte";
+	} from "#lib/components/room/index.js";
+	import RoomMembersPopover from "#lib/components/room/chat/room-members-popover.svelte";
+	import * as Playback from "#lib/components/room/playback/index.js";
+	import * as RoomTabs from "#lib/components/room/tabs/index.js";
+	import { Button, buttonVariants } from "#lib/components/ui/button/index.js";
+	import * as Drawer from "#lib/components/ui/drawer/index.js";
+	import { createUuidInAnyContext } from "#lib/context-uuid.js";
+	import { Presence } from "#lib/presence.svelte.js";
 	import {
 		Headphones,
 		ListMusic,
@@ -30,8 +30,8 @@
 	import ArrowLeftIcon from "@lucide/svelte/icons/arrow-left";
 	import SettingsIcon from "@lucide/svelte/icons/settings";
 	import { useAuth } from "@mmailaender/convex-better-auth-svelte/svelte";
-	import { api } from "@partyroom/backend/convex/_generated/api";
-	import type { Id } from "@partyroom/backend/convex/_generated/dataModel";
+	import { api } from "@partyroom/backend/convex/_generated/api.js";
+	import type { Id } from "@partyroom/backend/convex/_generated/dataModel.js";
 	import { useMutation, useQuery } from "convex-svelte";
 	import type { PageProps } from "./$types";
 
@@ -113,7 +113,7 @@
 				throw new Error(result.error.message);
 			}
 
-			await invalidateAll();
+			await refreshAll();
 		} catch (cause) {
 			joinError =
 				cause instanceof Error

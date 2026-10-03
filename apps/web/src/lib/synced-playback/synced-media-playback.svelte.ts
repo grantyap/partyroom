@@ -1,4 +1,4 @@
-import type { OnlineTimingObject } from "$lib/timing";
+import type { OnlineTimingObject } from "#lib/timing/index.js";
 import { MediaAudioOutput } from "./internal/media-audio-output";
 import { untrack } from "svelte";
 import {
@@ -100,7 +100,7 @@ const createConfiguredTimingsrc = (alignmentToleranceSeconds: number) => {
 
 /**
  * Plays audio or video in time with everyone else in the room, accounting for
- * the delay before sound reaches this device's output. Import from `$lib/synced-playback`.
+ * the delay before sound reaches this device's output. Import from `#lib/synced-playback/index.js`.
  *
  * Create during Svelte component initialization. Pass an audio or video element
  * and the room's OnlineTimingObject. This controller keeps playback in sync,
@@ -122,8 +122,8 @@ const createConfiguredTimingsrc = (alignmentToleranceSeconds: number) => {
  * @example Audio-only Svelte player (use HTMLVideoElement for video)
  * ```svelte
  * <script lang="ts">
- *   import { SyncedMediaPlayback } from "$lib/synced-playback";
- *   import type { OnlineTimingObject } from "$lib/timing";
+ *   import { SyncedMediaPlayback } from "#lib/synced-playback/index.js";
+ *   import type { OnlineTimingObject } from "#lib/timing/index.js";
  *
  *   let { src, timing }: { src: string; timing: OnlineTimingObject } = $props();
  *   let audio = $state<HTMLAudioElement>();

@@ -1,13 +1,13 @@
 import { untrack } from "svelte";
-import { PUBLIC_CONVEX_URL } from "$env/static/public";
-import { browserReachableServiceUrl } from "$lib/service-url";
+import { PUBLIC_CONVEX_URL } from "$app/env/public";
+import { browserReachableServiceUrl } from "#lib/service-url.js";
 import {
   findKaraokeCue,
   lyricsIntoCues,
   parseLyricObservations,
   type KaraokeCue,
   type LyricsTrack,
-} from "$lib/karaoke";
+} from "#lib/karaoke.js";
 
 export type KaraokeLyricsStateOptions = {
   getLyrics: () => LyricsTrack[];

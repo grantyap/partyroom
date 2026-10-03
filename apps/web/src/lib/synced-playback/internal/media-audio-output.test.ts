@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { MediaAudioOutput } from "./media-audio-output";
-import type { OnlineTimingObject } from "$lib/timing";
+import type { OnlineTimingObject } from "#lib/timing/index.js";
 
 class Media extends EventTarget {
   static instances: Media[] = [];

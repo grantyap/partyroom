@@ -1,4 +1,4 @@
-import { loginSchema } from "$lib/components/auth/form-schema";
+import { loginSchema } from "#lib/components/auth/form-schema.js";
 import { superValidate } from "sveltekit-superforms";
 import { zod4 } from "sveltekit-superforms/adapters";
 import type { PageLoad } from "./$types";

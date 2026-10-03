@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { goto } from "$app/navigation";
-	import { Button } from "$lib/components/ui/button";
-	import * as Empty from "$lib/components/ui/empty";
-	import * as Item from "$lib/components/ui/item";
-	import { api } from "@partyroom/backend/convex/_generated/api";
+	import { Button } from "#lib/components/ui/button/index.js";
+	import * as Empty from "#lib/components/ui/empty/index.js";
+	import * as Item from "#lib/components/ui/item/index.js";
+	import { api } from "@partyroom/backend/convex/_generated/api.js";
 	import { useMutation, useQuery } from "convex-svelte";
 
 	const rooms = useQuery(api.rooms.getRooms);

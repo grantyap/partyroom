@@ -22,7 +22,7 @@ Use the default badge or add a `children` snippet to show the count another way.
 </script>
 
 <script lang="ts">
-	import { Badge } from "$lib/components/ui/badge";
+	import { Badge } from "#lib/components/ui/badge/index.js";
 	import type { Snippet } from "svelte";
 	import { usePlayback } from "../context.svelte";
 

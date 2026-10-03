@@ -1,6 +1,6 @@
 <script lang="ts">
-	import * as Tabs from "$lib/components/ui/tabs";
-	import { cn } from "$lib/utils";
+	import * as Tabs from "#lib/components/ui/tabs/index.js";
+	import { cn } from "#lib/utils.js";
 	import type { ComponentProps } from "svelte";
 
 	type ContentProps = ComponentProps<typeof Tabs.Content>;

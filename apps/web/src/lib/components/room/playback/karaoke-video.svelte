@@ -1,10 +1,10 @@
 <script lang="ts">
-	import { PUBLIC_CONVEX_URL } from "$env/static/public";
-	import { Button } from "$lib/components/ui/button";
-	import type { LyricsTrack } from "$lib/karaoke";
-	import { SyncedMediaPlayback } from "$lib/synced-playback";
-	import type { OnlineTimingObject } from "$lib/timing";
-	import { browserReachableServiceUrl } from "$lib/service-url";
+	import { PUBLIC_CONVEX_URL } from '$app/env/public';
+	import { Button } from "#lib/components/ui/button/index.js";
+	import type { LyricsTrack } from "#lib/karaoke.js";
+	import { SyncedMediaPlayback } from "#lib/synced-playback/index.js";
+	import type { OnlineTimingObject } from "#lib/timing/index.js";
+	import { browserReachableServiceUrl } from "#lib/service-url.js";
 	import { RefreshCw } from "@lucide/svelte";
 	import {
 		isVideoProvider,
@@ -221,10 +221,10 @@
 	{/if}
 
 	<KaraokeVideoControls
-		{timing}
-		{canControl}
-		{fullscreen}
-		{onToggleFullscreen}
+		timing={timing}
+		canControl={canControl}
+		fullscreen={fullscreen}
+		onToggleFullscreen={onToggleFullscreen}
 		onSkip={onSkip ? playbackSync.handleSkipRequest : undefined}
 	/>
 
@@ -252,9 +252,9 @@
 
 	{#if activeCue}
 		<KaraokeLyricsOverlay
-			{activeCue}
-			{nextCue}
-			{adjustedTime}
+			activeCue={activeCue}
+			nextCue={nextCue}
+			adjustedTime={adjustedTime}
 			wordTiming={lyricsState?.wordTiming ?? false}
 		/>
 	{/if}

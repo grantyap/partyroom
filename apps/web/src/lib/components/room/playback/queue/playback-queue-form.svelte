@@ -14,11 +14,11 @@ custom queue layout. It renders nothing when the current user cannot add songs.
 ```
 -->
 <script lang="ts">
-	import { Button } from "$lib/components/ui/button";
-	import { Input } from "$lib/components/ui/input";
-	import { cn } from "$lib/utils";
+	import { Button } from "#lib/components/ui/button/index.js";
+	import { Input } from "#lib/components/ui/input/index.js";
+	import { cn } from "#lib/utils.js";
 	import { Plus } from "@lucide/svelte";
-	import { api } from "@partyroom/backend/convex/_generated/api";
+	import { api } from "@partyroom/backend/convex/_generated/api.js";
 	import { useAction } from "convex-svelte";
 	import type { HTMLAttributes } from "svelte/elements";
 	import { usePlayback } from "../context.svelte";

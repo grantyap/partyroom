@@ -3,7 +3,7 @@ import {
   getAuthState as convexBetterAuthGetAuthState,
   createConvexHttpClient,
 } from "@mmailaender/convex-better-auth-svelte/sveltekit";
-import { api } from "@partyroom/backend/convex/_generated/api";
+import { api } from "@partyroom/backend/convex/_generated/api.js";
 import { error } from "@sveltejs/kit";
 
 export const getCurrentUser = query(async () => {

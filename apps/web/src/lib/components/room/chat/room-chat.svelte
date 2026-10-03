@@ -1,15 +1,15 @@
 <script lang="ts">
-	import { invalidateAll } from "$app/navigation";
-	import * as RoomTabs from "$lib/components/room/tabs";
-	import { ScrollFollow } from "$lib/components/scroll-follow.svelte";
-	import { Button } from "$lib/components/ui/button";
-	import { Input } from "$lib/components/ui/input";
-	import { getMemberColors } from "$lib/member-colors";
+	import { refreshAll } from "$app/navigation";
+	import * as RoomTabs from "#lib/components/room/tabs/index.js";
+	import { ScrollFollow } from "#lib/components/scroll-follow.svelte.js";
+	import { Button } from "#lib/components/ui/button/index.js";
+	import { Input } from "#lib/components/ui/input/index.js";
+	import { getMemberColors } from "#lib/member-colors.js";
 	import {
 		isMeaningfulUserName,
 		setUserName,
 		USER_NAME_MAX_LENGTH,
-	} from "$lib/user-name";
+	} from "#lib/user-name.js";
 	import { MessageCircle, Send } from "@lucide/svelte";
 	import ChevronDownIcon from "@lucide/svelte/icons/chevron-down";
 	import type { ChatMessage } from "../types";
@@ -89,7 +89,7 @@
 		try {
 			const name = await setUserName(guestNameInput, guestUserId);
 			onGuestName(name);
-			await invalidateAll();
+			await refreshAll();
 		} catch (cause) {
 			guestNameError =
 				cause instanceof Error ? cause.message : "Unable to save your chat name";

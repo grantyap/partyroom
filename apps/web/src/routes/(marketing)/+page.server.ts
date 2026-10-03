@@ -1,21 +1,24 @@
-import { env } from "$env/dynamic/private";
-import { getCurrentUser } from "$lib/auth.remote";
-import { capabilities, hasCapability } from "$lib/capabilities";
+import {
+  GOOGLE_FORM_ACTION_URL,
+  GOOGLE_FORM_NAME_FIELD,
+  GOOGLE_FORM_EMAIL_FIELD,
+  GOOGLE_SHEETS_ACCESS_URL,
+  GOOGLE_SHEETS_ACCESS_SECRET,
+} from "$app/env/private";
+import { getCurrentUser } from "#lib/auth.remote.js";
+import { capabilities, hasCapability } from "#lib/capabilities.js";
 import {
   createEarlyAccessToken,
   EARLY_ACCESS_COOKIE,
   EARLY_ACCESS_MAX_AGE,
   hasEarlyAccess,
-} from "$lib/server/early-access";
+} from "#lib/server/early-access.js";
 import { fail, redirect } from "@sveltejs/kit";
 import { z } from "zod";
 import type { Actions, PageServerLoad } from "./$types";
 
 export const load: PageServerLoad = ({ cookies }) => ({
-  hasEarlyAccess: hasEarlyAccess(
-    cookies.get(EARLY_ACCESS_COOKIE),
-    env.GOOGLE_SHEETS_ACCESS_SECRET,
-  ),
+  hasEarlyAccess: hasEarlyAccess(cookies.get(EARLY_ACCESS_COOKIE), GOOGLE_SHEETS_ACCESS_SECRET),
 });
 
 const inviteSchema = z.object({
@@ -38,7 +41,6 @@ export const actions: Actions = {
       });
     }
 
-    const { GOOGLE_FORM_ACTION_URL, GOOGLE_FORM_NAME_FIELD, GOOGLE_FORM_EMAIL_FIELD } = env;
     if (!GOOGLE_FORM_ACTION_URL || !GOOGLE_FORM_NAME_FIELD || !GOOGLE_FORM_EMAIL_FIELD) {
       return fail(503, { joinError: "Invites are temporarily unavailable." });
     }
@@ -71,7 +73,6 @@ export const actions: Actions = {
       return fail(400, { accessError: "Enter a valid access code." });
     }
 
-    const { GOOGLE_SHEETS_ACCESS_URL, GOOGLE_SHEETS_ACCESS_SECRET } = env;
     if (!GOOGLE_SHEETS_ACCESS_URL || !GOOGLE_SHEETS_ACCESS_SECRET) {
       return fail(503, { accessError: "Access codes are temporarily unavailable." });
     }

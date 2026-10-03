@@ -13,13 +13,15 @@ COPY packages/media-activities/package.json ./packages/media-activities/
 RUN bun install --frozen-lockfile --filter web
 
 COPY . .
+ARG ORIGIN
 ARG PUBLIC_CONVEX_URL
 ARG PUBLIC_CONVEX_SITE_URL
 ARG PUBLIC_FEEDBACK_FORM_URL
 RUN if [ -z "$PUBLIC_CONVEX_URL" ] || [ -z "$PUBLIC_CONVEX_SITE_URL" ] || [ -z "$PUBLIC_FEEDBACK_FORM_URL" ]; then \
       echo "PUBLIC_CONVEX_URL, PUBLIC_CONVEX_SITE_URL, and PUBLIC_FEEDBACK_FORM_URL are required" >&2; exit 1; \
     fi
-ENV PUBLIC_CONVEX_URL=$PUBLIC_CONVEX_URL \
+ENV ORIGIN=$ORIGIN \
+    PUBLIC_CONVEX_URL=$PUBLIC_CONVEX_URL \
     PUBLIC_CONVEX_SITE_URL=$PUBLIC_CONVEX_SITE_URL \
     PUBLIC_FEEDBACK_FORM_URL=$PUBLIC_FEEDBACK_FORM_URL
 RUN bun run --cwd apps/web build

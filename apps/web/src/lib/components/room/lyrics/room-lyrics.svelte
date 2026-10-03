@@ -1,10 +1,10 @@
 <script lang="ts">
-	import { usePlayback } from "$lib/components/room/playback/context.svelte";
-	import PlaybackLyrics from "$lib/components/room/playback/playback-lyrics.svelte";
-	import KaraokeLyricLine from "$lib/components/room/playback/karaoke-lyric-line.svelte";
-	import * as RoomTabs from "$lib/components/room/tabs";
-	import { ScrollFollow } from "$lib/components/scroll-follow.svelte";
-	import { Button } from "$lib/components/ui/button";
+	import { usePlayback } from "#lib/components/room/playback/context.svelte.js";
+	import PlaybackLyrics from "#lib/components/room/playback/playback-lyrics.svelte";
+	import KaraokeLyricLine from "#lib/components/room/playback/karaoke-lyric-line.svelte";
+	import * as RoomTabs from "#lib/components/room/tabs/index.js";
+	import { ScrollFollow } from "#lib/components/scroll-follow.svelte.js";
+	import { Button } from "#lib/components/ui/button/index.js";
 	import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";
 
 	let { active = true }: { active?: boolean } = $props();

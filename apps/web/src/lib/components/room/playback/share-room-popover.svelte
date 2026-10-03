@@ -22,9 +22,9 @@ element so it can open the popover and remain accessible.
 </script>
 
 <script lang="ts">
-	import { Button, buttonVariants } from "$lib/components/ui/button";
-	import { Input } from "$lib/components/ui/input";
-	import * as Popover from "$lib/components/ui/popover";
+	import { Button, buttonVariants } from "#lib/components/ui/button/index.js";
+	import { Input } from "#lib/components/ui/input/index.js";
+	import * as Popover from "#lib/components/ui/popover/index.js";
 	import { Check, Copy, Share2 } from "@lucide/svelte";
 	import QRCode from "qrcode";
 	import { onMount, type Snippet } from "svelte";

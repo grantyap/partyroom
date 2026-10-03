@@ -1,5 +1,5 @@
-import type { ChatMessage, OverlayMessage } from "$lib/components/room/types";
-import { getMemberColor } from "$lib/member-colors";
+import type { ChatMessage, OverlayMessage } from "#lib/components/room/types.js";
+import { getMemberColor } from "#lib/member-colors.js";
 
 /**
  * Converts chat query data into messages for the video overlay.

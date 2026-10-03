@@ -33,10 +33,10 @@ working.
 </script>
 
 <script lang="ts">
-	import { cn } from "$lib/utils";
+	import { cn } from "#lib/utils.js";
 	import { DragDropProvider, type DragDropEvents } from "@dnd-kit-svelte/svelte";
 	import { isSortable } from "@dnd-kit-svelte/svelte/sortable";
-	import { api } from "@partyroom/backend/convex/_generated/api";
+	import { api } from "@partyroom/backend/convex/_generated/api.js";
 	import { useMutation } from "convex-svelte";
 	import type { Snippet } from "svelte";
 	import type { HTMLAttributes } from "svelte/elements";

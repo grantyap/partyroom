@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { Button } from "$lib/components/ui/button";
+	import { Button } from "#lib/components/ui/button/index.js";
 	import { RotateCcw, Timer, Trash2 } from "@lucide/svelte";
-	import type { Id } from "@partyroom/backend/convex/_generated/dataModel";
+	import type { Id } from "@partyroom/backend/convex/_generated/dataModel.js";
 	import KaraokeVideo from "../playback/karaoke-video.svelte";
 	import { formatDuration, mediaElapsed, stageLabel } from "../media-format";
 	import MediaProcessingSteps from "./media-processing-steps.svelte";

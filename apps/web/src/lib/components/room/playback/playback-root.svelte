@@ -20,9 +20,9 @@ spacing, or other layout.
 ```
 -->
 <script lang="ts">
-	import { OnlineTimingObject } from "$lib/timing";
-	import { api } from "@partyroom/backend/convex/_generated/api";
-	import type { Id } from "@partyroom/backend/convex/_generated/dataModel";
+	import { OnlineTimingObject } from "#lib/timing/index.js";
+	import { api } from "@partyroom/backend/convex/_generated/api.js";
+	import type { Id } from "@partyroom/backend/convex/_generated/dataModel.js";
 	import { useAction, useMutation, useQuery } from "convex-svelte";
 	import { onMount, type Snippet } from "svelte";
 	import type { OverlayMessage } from "../types";

@@ -5,7 +5,7 @@ word-timed lyrics, each word also receives `data-lyric-word="upcoming"`,
 "current", or "complete" while its line is current.
 -->
 <script lang="ts">
-	import { karaokeWordProgress, type KaraokeCue } from "$lib/karaoke";
+	import { karaokeWordProgress, type KaraokeCue } from "#lib/karaoke.js";
 
 	type KaraokeWordState = "upcoming" | "current" | "complete";
 

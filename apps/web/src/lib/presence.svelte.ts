@@ -1,5 +1,5 @@
-import { api } from "@partyroom/backend/convex/_generated/api";
-import type { Id } from "@partyroom/backend/convex/_generated/dataModel";
+import { api } from "@partyroom/backend/convex/_generated/api.js";
+import type { Id } from "@partyroom/backend/convex/_generated/dataModel.js";
 import { getConvexClient } from "convex-svelte";
 import type { FunctionReturnType } from "convex/server";
 import { createUuidInAnyContext } from "./context-uuid";

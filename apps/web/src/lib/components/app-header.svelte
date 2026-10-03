@@ -1,24 +1,24 @@
 <script lang="ts">
 	import { goto, refreshAll } from "$app/navigation";
 	import { page } from "$app/state";
-	import { PUBLIC_FEEDBACK_FORM_URL } from "$env/static/public";
-	import partyroomLogo from "$lib/assets/icons/Partyroom logo.svg";
-	import { authClient } from "$lib/auth-client";
+	import { PUBLIC_FEEDBACK_FORM_URL } from '$app/env/public';
+	import partyroomLogo from "#lib/assets/icons/Partyroom logo.svg";
+	import { authClient } from "#lib/auth-client.js";
 	import {
 		capabilities,
 		hasCapability,
 		type Capability,
-	} from "$lib/capabilities";
-	import * as Avatar from "$lib/components/ui/avatar";
-	import { Button } from "$lib/components/ui/button";
-	import * as Drawer from "$lib/components/ui/drawer";
-	import * as DropdownMenu from "$lib/components/ui/dropdown-menu";
-	import { Input } from "$lib/components/ui/input";
+	} from "#lib/capabilities.js";
+	import * as Avatar from "#lib/components/ui/avatar/index.js";
+	import { Button } from "#lib/components/ui/button/index.js";
+	import * as Drawer from "#lib/components/ui/drawer/index.js";
+	import * as DropdownMenu from "#lib/components/ui/dropdown-menu/index.js";
+	import { Input } from "#lib/components/ui/input/index.js";
 	import {
 		hasStoredUserName,
 		setUserName,
 		USER_NAME_MAX_LENGTH,
-	} from "$lib/user-name";
+	} from "#lib/user-name.js";
 	import ChevronDownIcon from "@lucide/svelte/icons/chevron-down";
 	import CircleAlertIcon from "@lucide/svelte/icons/circle-alert";
 	import LifeBuoyIcon from "@lucide/svelte/icons/life-buoy";
@@ -51,15 +51,11 @@
 		hasCapability(user, capabilities.rooms.list),
 	);
 	const isGuest = $derived(user?.isAnonymous === true);
-	const currentUserName = $derived(
-		user && locallySavedForUserId === user._id
-			? (locallySavedUserName ?? user.name)
-			: user?.name,
-	);
+	const currentUserName = $derived(user && locallySavedForUserId === user._id ? locallySavedUserName ?? user.name : user?.name);
 	const canSetUserName = $derived(isGuest && !hasSetUserName);
 	const displayName = $derived.by(() => {
 		const name = currentUserName?.trim();
-		if (name && !(isGuest && /^(anonymous|guest)$/i.test(name))) {
+		if (name && !(isGuest && (/^(anonymous|guest)$/i).test(name))) {
 			return name;
 		}
 

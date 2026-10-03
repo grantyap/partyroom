@@ -1,4 +1,4 @@
-import { authClient } from "$lib/auth-client";
+import { authClient } from "#lib/auth-client.js";
 import z from "zod";
 
 export const USER_NAME_MAX_LENGTH = 50;

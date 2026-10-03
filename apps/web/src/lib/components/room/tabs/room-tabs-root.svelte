@@ -1,7 +1,7 @@
 <script lang="ts">
-	import * as Card from "$lib/components/ui/card";
-	import * as Tabs from "$lib/components/ui/tabs";
-	import { cn } from "$lib/utils";
+	import * as Card from "#lib/components/ui/card/index.js";
+	import * as Tabs from "#lib/components/ui/tabs/index.js";
+	import { cn } from "#lib/utils.js";
 	import type { ComponentProps } from "svelte";
 
 	type RootProps = ComponentProps<typeof Tabs.Root> & { cardClass?: string; workspace?: boolean };

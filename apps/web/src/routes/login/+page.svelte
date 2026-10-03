@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { goto } from "$app/navigation";
 	import { page } from "$app/state";
-	import { authClient } from "$lib/auth-client";
-	import partyroomLogo from "$lib/assets/icons/Partyroom logo.svg";
-	import { loginSchema } from "$lib/components/auth/form-schema";
-	import LoginForm from "$lib/components/auth/login-form.svelte";
+	import { authClient } from "#lib/auth-client.js";
+	import partyroomLogo from "#lib/assets/icons/Partyroom logo.svg";
+	import { loginSchema } from "#lib/components/auth/form-schema.js";
+	import LoginForm from "#lib/components/auth/login-form.svelte";
 	import { setMessage, superForm } from "sveltekit-superforms";
 	import { zod4 } from "sveltekit-superforms/adapters";
 	import type { PageProps } from "./$types";
@@ -35,7 +35,7 @@
 
 			if (result.data) {
 				const target = page.url.searchParams.get("to") || "/app";
-				await goto(target);
+				await goto(target).catch(() => goto("/app"));
 			}
 		},
 		resetForm: false,
