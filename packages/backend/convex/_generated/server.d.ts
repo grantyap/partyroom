@@ -31,6 +31,7 @@ type Env = {
   readonly CONVEX_CLOUD_URL: string;
   readonly CONVEX_SITE_URL: string;
   readonly ACTIVITY_WORKER_TOKEN: string;
+  readonly DEV_SITE_URL: string | undefined;
   readonly SITE_URL: string;
   readonly WORKER_CONVEX_CLOUD_ORIGIN: string;
   readonly WORKER_SIGNING_SECRET: string;

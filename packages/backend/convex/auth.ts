@@ -18,6 +18,9 @@ export const authComponent = createClient<DataModel>(components.betterAuth);
 export const createAuth = (convexCtx: GenericCtx<DataModel>) => {
   return betterAuth({
     baseURL: siteUrl,
+    trustedOrigins: env.DEV_SITE_URL
+      ? [env.DEV_SITE_URL, "http://localhost:5173", "http://127.0.0.1:5173"]
+      : [],
     database: authComponent.adapter(convexCtx),
     // Configure simple, non-verified email/password to get started
     emailAndPassword: {

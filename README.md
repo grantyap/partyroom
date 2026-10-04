@@ -137,6 +137,49 @@ Client-side transposition uses AudioWorklet, which requires a secure browser con
 Use `localhost` on the development machine, or trusted HTTPS when testing from other
 devices. Plain HTTP on a LAN IP address cannot transpose; native playback still works.
 
+### LAN HTTPS and physical iPhone testing
+
+Install [Caddy](https://caddyserver.com/docs/install) once (`brew install caddy` on macOS).
+In macOS System Settings > General > Sharing, set the local hostname to `pmm`
+so Bonjour advertises `pmm.local`. Choose another hostname if that name is already taken.
+Both devices must be on the same network with Bonjour and device-to-device traffic allowed.
+
+Set `DEV_HTTPS_HOST=pmm.local` in `apps/web/.env` (or the root `.env`), then run any
+existing web development command, such as `bun run dev:mac`. Alternatively:
+
+```bash
+DEV_HTTPS_HOST=pmm.local bun run dev:mac
+```
+
+The web task starts Caddy alongside Vite and provides `https://pmm.local` for the
+app and `https://pmm.local:8443` for Convex. Localhost remains available at
+`http://localhost:5173`. No IP addresses or manual changes to `PUBLIC_CONVEX_*`
+are needed. Startup leaves the backend's canonical `SITE_URL` unchanged and sets
+local Convex's `DEV_SITE_URL` to allow the exact HTTPS origin alongside localhost.
+Keep the normal Compose ports available and allow Caddy through the host firewall.
+Port 5173 must be free; the task fails rather than silently switching ports.
+
+On first startup, Caddy generates a persistent development CA under the ignored
+`.cache/dev-https/` directory. The terminal prints the full path of `root.crt`.
+AirDrop **only that public certificate** to your iPhone, install its profile,
+and enable full trust in Settings > General > About > Certificate Trust Settings.
+Never share the CA's private key. This trusts certificates issued by your local CA;
+protect its keys and remove the profile when no longer needed.
+On the Mac, import the same `root.crt` into Keychain Access and explicitly trust
+it for SSL before opening the HTTPS URL in a browser. The dev server trusts it
+automatically for its own backend requests; system trust is never changed by the script.
+
+Open `https://pmm.local` in Safari without a certificate warning and sign in
+separately from localhost. Test pitch up/down/reset, seeking, pause/resume,
+and returning after locking the phone. A changing IP needs no certificate changes.
+Do not delete `.cache/dev-https/` unless you intend to replace and re-trust the CA.
+
+Ctrl-C stops Vite and Caddy together; Compose infrastructure remains available.
+Unset `DEV_HTTPS_HOST` to return to the ordinary HTTP-only development workflow.
+To revoke the extra local authentication origin, run
+`bunx convex env remove DEV_SITE_URL --env-file .env.local` from `packages/backend`.
+This setup affects development only, not production builds or deployments.
+
 ## Coolify
 
 Deploy `docker-compose.yaml` as the production stack and route the `web` service to port `3000`.

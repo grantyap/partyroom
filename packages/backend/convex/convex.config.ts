@@ -9,6 +9,7 @@ import { v } from "convex/values";
 const app = defineApp({
   env: {
     SITE_URL: v.string(),
+    DEV_SITE_URL: v.optional(v.string()),
     ACTIVITY_WORKER_TOKEN: v.string(),
     WORKER_CONVEX_CLOUD_ORIGIN: v.string(),
     WORKER_SIGNING_SECRET: v.string(),

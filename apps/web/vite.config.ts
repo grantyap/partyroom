@@ -17,4 +17,7 @@ export default defineConfig(({ mode }) => ({
       experimental: { remoteFunctions: true },
     }),
   ],
+  server: {
+    allowedHosts: process.env.DEV_HTTPS_HOST ? [process.env.DEV_HTTPS_HOST.trim()] : [],
+  },
 }));
