@@ -61,6 +61,8 @@ export class KaraokeLyricsState {
       const controller = new AbortController();
       void fetch(browserReachableServiceUrl(track.content.url, PUBLIC_CONVEX_URL), {
         signal: controller.signal,
+        // Replace cached artifacts truncated by the previous storage proxy.
+        cache: "reload",
       })
         .then((response) => {
           if (!response.ok) {
