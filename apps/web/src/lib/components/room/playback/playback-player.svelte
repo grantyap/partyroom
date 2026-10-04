@@ -48,6 +48,7 @@ layout. It handles playback, the empty state, skipping, and TV mode. Add an
 	const playbackContext = usePlayback();
 	const advance = useMutation(api.playback.advance);
 	const transpose = useMutation(api.playback.transpose);
+	const setLyrics = useMutation(api.playback.setLyrics);
 	let transposePending = $state(false);
 	let transposeError = $state<string | null>(null);
 	const currentKey = $derived(playbackContext.playback?.current?._id);
@@ -78,6 +79,11 @@ layout. It handles playback, the empty state, skipping, and TV mode. Add an
 			roomId: playbackContext.roomId,
 			currentKey: playback.current._id,
 		});
+	}
+
+	async function changeLyrics(lyricsId: string, offsetMs: number) {
+		if (!playbackContext.playback?.permissions.controlPlayback) return;
+		await setLyrics({ roomId: playbackContext.roomId, lyricsId, offsetMs });
 	}
 </script>
 
@@ -111,6 +117,8 @@ layout. It handles playback, the empty state, skipping, and TV mode. Add an
 			instrumentalSrc={playbackContext.currentMedia.instrumentalUrl}
 			transposeSemitones={playbackContext.playback.current.transposeSemitones}
 			onTranspose={setTransposition}
+			onLyricsChange={changeLyrics}
+			settingsKey={currentKey}
 			{transposePending}
 			{transposeError}
 			lyrics={playbackContext.currentMedia.lyrics}

@@ -1,6 +1,6 @@
 <!--
 @component
-Displays lyrics controls using data from `Playback.Root`.
+Displays the selected lyrics source using data from `Playback.Root`.
 
 The default control renders only when lyrics are available. Add a `children`
 snippet to provide your own UI.
@@ -33,7 +33,6 @@ snippet to provide your own UI.
 	import { useMutation } from "convex-svelte";
 	import type { Snippet } from "svelte";
 	import { usePlayback } from "./context.svelte";
-	import LyricsPopover from "./lyrics-popover.svelte";
 
 	let { children }: { children?: Snippet<[LyricsRenderProps]> } = $props();
 
@@ -55,7 +54,10 @@ snippet to provide your own UI.
 {#if children}
 	{@render children(renderProps)}
 {:else if renderProps.lyrics.length}
-	{#key playbackContext.currentMedia?._id}
-		<LyricsPopover {...renderProps} />
-	{/key}
+	{@const delay = renderProps.lyricsOffsetMs ?? playbackContext.lyrics.selectedLyrics?.suggestedOffsetMs ?? 0}
+	<p class="min-w-0 truncate text-xs text-muted-foreground">
+		{playbackContext.lyrics.selectedLyrics?.label ?? "No source"}
+		<span class="mx-1" aria-hidden="true">·</span>
+		<span class="tabular-nums">{delay === 0 ? "No delay" : `${delay > 0 ? "+" : ""}${delay / 1000}s delay`}</span>
+	</p>
 {/if}

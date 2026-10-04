@@ -18,6 +18,7 @@
 	import { KaraokeLyricsState } from "./karaoke-lyrics-state.svelte";
 	import KaraokeLyricsOverlay from "./karaoke-lyrics-overlay.svelte";
 	import KaraokeVideoControls from "./karaoke-video-controls.svelte";
+	import PlayerSettings from "./player-settings.svelte";
 
 	type Props = {
 		src: string;
@@ -31,6 +32,8 @@
 		class?: string;
 		selectedLyricsId?: string | null;
 		lyricsOffsetMs?: number;
+		onLyricsChange?: (lyricsId: string, offsetMs: number) => void | Promise<void>;
+		settingsKey?: string;
 		lyricsState?: KaraokeLyricsState;
 		timing?: OnlineTimingObject;
 		canControl?: boolean;
@@ -53,6 +56,8 @@
 		class: className = "",
 		selectedLyricsId: sharedSelectedLyricsId,
 		lyricsOffsetMs: sharedLyricsOffsetMs,
+		onLyricsChange,
+		settingsKey,
 		lyricsState: sharedLyricsState,
 		timing,
 		canControl = true,
@@ -64,6 +69,8 @@
 	}: Props = $props();
 
 	let video = $state<HTMLVideoElement>();
+	let playerElement = $state<MediaPlayerElement>();
+	const hasSettings = $derived(Boolean(onTranspose || onLyricsChange));
 	let standaloneCurrentTime = $state(0);
 	let animationFrame: number | undefined;
 	// The shared state is supplied by Playback.Player and remains stable for this player.
@@ -145,6 +152,7 @@
 
 	function listenForPlayerEvents(node: HTMLElement) {
 		const player = node as MediaPlayerElement;
+		playerElement = player;
 		const listeners = {
 			"provider-change": (event: Event) =>
 				setProvider((event as CustomEvent<MediaProviderAdapter | null>).detail),
@@ -176,6 +184,7 @@
 		setProvider(player.provider);
 		return {
 			destroy() {
+				playerElement = undefined;
 				for (const [type, listener] of Object.entries(listeners)) {
 					node.removeEventListener(type, listener);
 				}
@@ -233,6 +242,8 @@
 			event="pointerup"
 			action="toggle:paused"
 		></media-gesture>
+	{/if}
+	{#if canControl || hasSettings}
 		<media-gesture
 			class="player-gesture absolute inset-0 z-10 block"
 			event="pointerup"
@@ -240,15 +251,34 @@
 		></media-gesture>
 	{/if}
 
+	{#snippet settings()}
+		<PlayerSettings
+			{canControl}
+			controlsReady={!timing || timing.readyState === "open"}
+			{onTranspose}
+			{transposeSemitones}
+			appliedSemitones={playbackSync.appliedSemitones}
+			transposeDisabled={transposePending || !playbackSync.transposeReady}
+			transposeError={transposeError ?? playbackSync.transposeError}
+			{lyrics}
+			selectedLyricsId={sharedSelectedLyricsId}
+			lyricsOffsetMs={sharedLyricsOffsetMs}
+			{onLyricsChange}
+			currentKey={settingsKey ?? src}
+			portalTarget={fullscreen ? document.fullscreenElement ?? undefined : undefined}
+			onOpenChange={(open) => {
+				if (open) playerElement?.controls.pause();
+				else playerElement?.controls.resume();
+			}}
+		/>
+	{/snippet}
+
 	<KaraokeVideoControls
 		{timing}
 		{canControl}
 		{fullscreen}
 		{onToggleFullscreen}
-		{onTranspose}
-		{transposeSemitones}
-		appliedSemitones={playbackSync.appliedSemitones}
-		transposeDisabled={transposePending || !playbackSync.transposeReady}
+		settings={hasSettings ? settings : undefined}
 		onSkip={onSkip ? playbackSync.handleSkipRequest : undefined}
 	/>
 
@@ -257,15 +287,9 @@
 			{transposeError ?? playbackSync.transposeError}
 		</p>
 	{/if}
-	{#if onTranspose}
+	{#if onTranspose && appliedSemitones !== 0}
 		<span class={`absolute top-3 z-20 rounded bg-zinc-950/90 px-2 py-1 text-xs text-white ${fullscreen ? "left-3" : "right-3"}`} title="Song transposition in semitones">
-			{#if playbackSync.transposeError}
-				Original
-			{:else if !playbackSync.transposeReady}
-				Loading audio
-			{:else}
-				{transpositionLabel}
-			{/if}
+			{transpositionLabel}
 		</span>
 	{/if}
 
