@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { PUBLIC_CONVEX_URL } from '$app/env/public';
+	import { PUBLIC_CONVEX_URL } from "$app/env/public";
 	import { Button } from "#lib/components/ui/button/index.js";
 	import type { LyricsTrack } from "#lib/karaoke.js";
 	import { SyncedMediaPlayback } from "#lib/synced-playback/index.js";
@@ -21,6 +21,11 @@
 
 	type Props = {
 		src: string;
+		instrumentalSrc?: string | null;
+		transposeSemitones?: number;
+		onTranspose?: (semitones: number) => void;
+		transposePending?: boolean;
+		transposeError?: string | null;
 		lyrics?: LyricsTrack[];
 		title?: string | null;
 		class?: string;
@@ -38,6 +43,11 @@
 
 	let {
 		src,
+		instrumentalSrc,
+		transposeSemitones = 0,
+		onTranspose,
+		transposePending = false,
+		transposeError,
 		lyrics = [],
 		title,
 		class: className = "",
@@ -70,6 +80,8 @@
 	const playbackSync = new SyncedMediaPlayback({
 		getElement: () => video,
 		getTimingObject: () => timing,
+		getAudioUrl: () => instrumentalUrl,
+		getTransposeSemitones: () => transposeSemitones,
 		canControl: () => canControl,
 		onSkip: () => onSkip?.(),
 		alignmentToleranceSeconds: 0.01,
@@ -81,6 +93,9 @@
 			availableLyrics.find(({ captionsUrl }) => captionsUrl)?.captionsUrl,
 	);
 	const videoUrl = $derived(browserReachableServiceUrl(src, PUBLIC_CONVEX_URL));
+	const instrumentalUrl = $derived(instrumentalSrc
+		? browserReachableServiceUrl(instrumentalSrc, PUBLIC_CONVEX_URL)
+		: undefined);
 	const publicCaptionsUrl = $derived(
 		captionsUrl
 			? browserReachableServiceUrl(captionsUrl, PUBLIC_CONVEX_URL)
@@ -89,6 +104,10 @@
 	const adjustedTime = $derived(lyricsState?.adjustedTime ?? 0);
 	const activeCue = $derived(lyricsState?.activeCue);
 	const nextCue = $derived(lyricsState?.nextCue);
+	const appliedSemitones = $derived(playbackSync.appliedSemitones);
+	const transpositionLabel = $derived(appliedSemitones === 0
+		? "Original"
+		: `${appliedSemitones > 0 ? "+" : ""}${appliedSemitones} ${Math.abs(appliedSemitones) === 1 ? "semitone" : "semitones"}`);
 
 	function updateTime() {
 		if (sharedLyricsState) return;
@@ -194,6 +213,7 @@
 	load="eager"
 	preload="auto"
 	keyDisabled={Boolean(timing) && !canControl}
+	keyShortcuts={{ toggleMuted: { keys: "m", onKeyDown: playbackSync.handleMuteRequest } }}
 	aria-label={title ? `Karaoke video: ${title}` : "Karaoke video"}
 >
 	<media-provider class="player-provider block aspect-video w-full bg-black">
@@ -221,12 +241,33 @@
 	{/if}
 
 	<KaraokeVideoControls
-		timing={timing}
-		canControl={canControl}
-		fullscreen={fullscreen}
-		onToggleFullscreen={onToggleFullscreen}
+		{timing}
+		{canControl}
+		{fullscreen}
+		{onToggleFullscreen}
+		{onTranspose}
+		{transposeSemitones}
+		appliedSemitones={playbackSync.appliedSemitones}
+		transposeDisabled={transposePending || !playbackSync.transposeReady}
 		onSkip={onSkip ? playbackSync.handleSkipRequest : undefined}
 	/>
+
+	{#if onTranspose && (transposeError || playbackSync.transposeError)}
+		<p class="absolute inset-x-3 top-12 z-30 rounded bg-zinc-950/90 p-2 text-xs text-red-300" role="alert">
+			{transposeError ?? playbackSync.transposeError}
+		</p>
+	{/if}
+	{#if onTranspose}
+		<span class={`absolute top-3 z-20 rounded bg-zinc-950/90 px-2 py-1 text-xs text-white ${fullscreen ? "left-3" : "right-3"}`} title="Song transposition in semitones">
+			{#if playbackSync.transposeError}
+				Original
+			{:else if !playbackSync.transposeReady}
+				Loading audio
+			{:else}
+				{transpositionLabel}
+			{/if}
+		</span>
+	{/if}
 
 	{#if playbackSync.needsUserGesture}
 		<div
@@ -252,9 +293,9 @@
 
 	{#if activeCue}
 		<KaraokeLyricsOverlay
-			activeCue={activeCue}
-			nextCue={nextCue}
-			adjustedTime={adjustedTime}
+			{activeCue}
+			{nextCue}
+			{adjustedTime}
 			wordTiming={lyricsState?.wordTiming ?? false}
 		/>
 	{/if}

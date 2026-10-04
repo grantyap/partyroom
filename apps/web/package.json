@@ -36,6 +36,8 @@
     "@partyroom/backend": "workspace:*",
     "@partyroom/capabilities": "workspace:*",
     "@partyroom/env": "workspace:*",
+    "@soundtouchjs/audio-worklet": "2.1.1",
+    "@soundtouchjs/core": "2.1.1",
     "better-auth": "catalog:",
     "convex": "catalog:",
     "convex-svelte": "catalog:",

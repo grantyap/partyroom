@@ -26,6 +26,10 @@ export type SyncedMediaPlaybackOptions = {
    * @see {@link OnlineTimingObject} for creating the timeline.
    */
   getTimingObject: () => OnlineTimingObject | undefined;
+  /** Separate instrumental stem. Omit for native playback without transposition. */
+  getAudioUrl?: () => string | null | undefined;
+  /** Shared pitch offset; does not change the room timeline or playback speed. */
+  getTransposeSemitones?: () => number;
   /**
    * Largest difference, in seconds, between the media position and room timeline
    * that can be left uncorrected. Defaults to 0.025 (25 milliseconds).
@@ -111,13 +115,11 @@ const createConfiguredTimingsrc = (alignmentToleranceSeconds: number) => {
  * controls change only the local element and bypass the room's shared playback.
  * When needsUserGesture is true, show a join button that calls resume().
  *
- * The supplied element follows the room timeline. A second audio element plays
- * the sound slightly ahead to allow for output delay. This requires an additional
- * media load and decoder. On supported browsers, the delay estimate combines
- * AudioContext.baseLatency and outputLatency. If compensation is unavailable,
- * playback continues without it. iPhone and iPad use a single media element to
- * avoid competing playback sessions; estimates do not guarantee exact audible sync.
- * Read the shared timeline for lyrics and progress UI without adding an offset.
+ * The supplied element follows the room timeline. When getAudioUrl supplies an
+ * instrumental stem, Web Audio decodes and schedules it independently while the
+ * video is muted. Audio is advanced by estimated device and processor buffering
+ * delay. Native playback remains available if stem playback fails, with an error
+ * and an effective offset of zero. Read the shared timeline for lyrics and UI.
  *
  * @example Audio-only Svelte player (use HTMLVideoElement for video)
  * ```svelte
@@ -151,9 +153,12 @@ export class SyncedMediaPlayback {
   #error = $state<string | null>(null);
   #alignmentErrorSeconds = $state<number>();
   #mediaTimelineRevision = $state(0);
-  #audioOutput: MediaAudioOutput | undefined;
+  #audioOutput = $state.raw<MediaAudioOutput>();
   #audioOutputDelaySeconds = $state(0);
   #audioCompensationActive = $state(false);
+  #transposeReady = $state(false);
+  #transposeError = $state<string | null>(null);
+  #appliedSemitones = $state(0);
   readonly #alignmentToleranceSeconds: number;
 
   /**
@@ -213,6 +218,16 @@ export class SyncedMediaPlayback {
     return this.#audioCompensationActive;
   }
 
+  get transposeReady() {
+    return this.#transposeReady;
+  }
+  get transposeError() {
+    return this.#transposeError;
+  }
+  get appliedSemitones() {
+    return this.#appliedSemitones;
+  }
+
   /**
    * Connects a media element to the room timeline. Call during Svelte component
    * initialization. Changes to the supplied getters are observed automatically;
@@ -242,19 +257,26 @@ export class SyncedMediaPlayback {
     $effect(() => {
       const element = options.getElement();
       const timing = options.getTimingObject();
-      if (!element || !timing || timing.readyState !== "open") return;
+      const audioUrl = options.getAudioUrl?.();
+      if (!element || !timing || timing.readyState !== "open" || !options.getAudioUrl) return;
+      this.#transposeReady = false;
+      this.#appliedSemitones = 0;
       const output = untrack(() =>
-        MediaAudioOutput.create(
-          element,
-          timing,
-          createConfiguredTimingsrc(alignmentToleranceSeconds),
-        ),
+        audioUrl
+          ? MediaAudioOutput.create(element, timing, audioUrl, alignmentToleranceSeconds)
+          : undefined,
       );
       this.#audioOutput = output;
+      this.#transposeError = output
+        ? null
+        : MediaAudioOutput.unavailableReason ?? "Transposition unavailable. Playing the original key.";
       return () => {
         output?.dispose();
         if (this.#audioOutput === output) this.#audioOutput = undefined;
       };
+    });
+    $effect(() => {
+      this.#audioOutput?.setSemitones(options.getTransposeSemitones?.() ?? 0);
     });
     $effect(() => {
       this.#mediaTimelineRevision;
@@ -287,6 +309,11 @@ export class SyncedMediaPlayback {
         this.#alignmentErrorSeconds = vector.position - element.currentTime;
         this.#audioOutputDelaySeconds = this.#audioOutput?.delaySeconds ?? 0;
         this.#audioCompensationActive = this.#audioOutput?.active ?? false;
+        this.#transposeReady = this.#audioOutput?.ready ?? false;
+        this.#appliedSemitones = this.#audioOutput?.ready
+          ? (options.getTransposeSemitones?.() ?? 0)
+          : 0;
+        if (this.#audioOutput?.error) this.#transposeError = this.#audioOutput.error;
         if (this.#audioOutput?.needsUserGesture || (vector.velocity === 1 && element.paused)) {
           this.#needsUserGesture = true;
         } else if (vector.velocity === 0 || !element.paused) {
@@ -370,6 +397,13 @@ export class SyncedMediaPlayback {
     } catch (cause) {
       console.error("Unable to skip media", cause);
     }
+  };
+
+  /** Local mute targets the audio mix while the native video stays muted. */
+  readonly handleMuteRequest = () => {
+    const element = this.#options.getElement();
+    if (this.#audioOutput?.ready) this.#audioOutput.toggleMuted();
+    else if (element) element.muted = !element.muted;
   };
 
   /**

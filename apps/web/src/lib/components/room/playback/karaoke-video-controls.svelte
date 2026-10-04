@@ -2,7 +2,7 @@
 	import { buttonVariants } from "#lib/components/ui/button/index.js";
 	import type { OnlineTimingObject } from "#lib/timing/index.js";
 	import { cn } from "#lib/utils.js";
-	import { Maximize, Minimize, Pause, Play, SkipForward } from "@lucide/svelte";
+	import { Maximize, Minimize, Minus, Pause, Play, Plus, RotateCcw, SkipForward } from "@lucide/svelte";
 
 	let {
 		timing,
@@ -10,12 +10,20 @@
 		onSkip,
 		fullscreen = false,
 		onToggleFullscreen,
+		onTranspose,
+		transposeSemitones = 0,
+		appliedSemitones = 0,
+		transposeDisabled = false,
 	}: {
 		timing?: OnlineTimingObject;
 		canControl: boolean;
 		onSkip?: () => void;
 		fullscreen?: boolean;
 		onToggleFullscreen?: () => void;
+		onTranspose?: (semitones: number) => void;
+		transposeSemitones?: number;
+		appliedSemitones?: number;
+		transposeDisabled?: boolean;
 	} = $props();
 
 	const controlsReady = $derived(!timing || timing.readyState === "open");
@@ -27,7 +35,35 @@
 		hideDelay={3000}
 	>
 		<media-controls-group class="absolute inset-x-0 bottom-0 block">
-			<div class="flex items-center gap-3 bg-zinc-950/95 px-3 py-2 text-white">
+			{#if onTranspose}
+				<div class="flex items-center justify-end gap-1 border-b border-white/15 bg-zinc-950/95 px-3 py-1 text-white" role="group" aria-label="Song key">
+					<button type="button"
+						class={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }), "text-white hover:bg-white/15 hover:text-white")}
+						disabled={!controlsReady || transposeDisabled || transposeSemitones <= -6}
+						onclick={() => onTranspose?.(transposeSemitones - 1)}
+						aria-label="Lower key one semitone" title="Lower key one semitone">
+						<Minus />
+					</button>
+					<output class="w-14 text-center text-xs tabular-nums" aria-label="Current transposition" aria-live="polite">
+						{appliedSemitones === 0 ? "Original" : `${appliedSemitones > 0 ? "+" : ""}${appliedSemitones}`}
+					</output>
+					<button type="button"
+						class={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }), "text-white hover:bg-white/15 hover:text-white")}
+						disabled={!controlsReady || transposeDisabled || transposeSemitones >= 6}
+						onclick={() => onTranspose?.(transposeSemitones + 1)}
+						aria-label="Raise key one semitone" title="Raise key one semitone">
+						<Plus />
+					</button>
+					<button type="button"
+						class={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }), "text-white hover:bg-white/15 hover:text-white")}
+						disabled={!controlsReady || transposeSemitones === 0}
+						onclick={() => onTranspose?.(0)}
+						aria-label="Reset to original key" title="Reset to original key">
+						<RotateCcw />
+					</button>
+				</div>
+			{/if}
+			<div class="flex items-center gap-2 bg-zinc-950/95 px-3 py-2 text-white">
 				<media-play-button
 					class={cn(
 						buttonVariants({ variant: "ghost", size: "icon" }),

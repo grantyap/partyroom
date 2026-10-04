@@ -90,6 +90,7 @@ spacing, or other layout.
 			title: current.title,
 			duration: current.durationSeconds ?? undefined,
 			finalUrl: current.finalUrl,
+			instrumentalUrl: current.instrumentalUrl,
 			lyrics: detail?.lyrics ?? [],
 			selectedLyricsId: detail?.selectedLyricsId,
 			lyricsOffsetMs: detail?.lyricsOffsetMs ?? 0,

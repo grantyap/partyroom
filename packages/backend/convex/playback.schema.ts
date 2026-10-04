@@ -25,6 +25,7 @@ export const readyQueueItem = v.object({
   title: v.string(),
   durationSeconds: v.union(v.number(), v.null()),
   finalArtifactId: v.string(),
+  transposeSemitones: v.optional(v.number()),
 });
 
 export const nonReadyQueueItem = v.union(processingQueueItem, failedQueueItem);

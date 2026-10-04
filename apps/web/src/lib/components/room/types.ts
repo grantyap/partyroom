@@ -18,6 +18,7 @@ export type CurrentMedia = {
   title?: string | null;
   duration?: number;
   finalUrl?: string | null;
+  instrumentalUrl?: string | null;
   lyrics: RoomMediaItem["lyrics"];
   selectedLyricsId?: string;
   lyricsOffsetMs: number;

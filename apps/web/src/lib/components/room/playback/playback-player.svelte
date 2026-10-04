@@ -47,6 +47,29 @@ layout. It handles playback, the empty state, skipping, and TV mode. Add an
 
 	const playbackContext = usePlayback();
 	const advance = useMutation(api.playback.advance);
+	const transpose = useMutation(api.playback.transpose);
+	let transposePending = $state(false);
+	let transposeError = $state<string | null>(null);
+	const currentKey = $derived(playbackContext.playback?.current?._id);
+	$effect(() => {
+		currentKey;
+		transposeError = null;
+	});
+
+	async function setTransposition(semitones: number) {
+		const playback = playbackContext.playback;
+		if (!playback?.permissions.controlPlayback || !playback.current || transposePending) return;
+		transposePending = true;
+		transposeError = null;
+		const key = playback.current._id;
+		try {
+			await transpose({ roomId: playbackContext.roomId, currentKey: key, semitones });
+		} catch {
+			if (currentKey === key) transposeError = "Unable to change the key. Try again.";
+		} finally {
+			transposePending = false;
+		}
+	}
 
 	async function advancePlayback() {
 		const playback = playbackContext.playback;
@@ -85,6 +108,11 @@ layout. It handles playback, the empty state, skipping, and TV mode. Add an
 		<KaraokeVideo
 			class={playbackContext.tvMode ? "max-h-screen w-full" : "w-full"}
 			src={playbackContext.currentMedia.finalUrl}
+			instrumentalSrc={playbackContext.currentMedia.instrumentalUrl}
+			transposeSemitones={playbackContext.playback.current.transposeSemitones}
+			onTranspose={setTransposition}
+			{transposePending}
+			{transposeError}
 			lyrics={playbackContext.currentMedia.lyrics}
 			title={playbackContext.currentMedia.title}
 			selectedLyricsId={playbackContext.currentMedia.selectedLyricsId}

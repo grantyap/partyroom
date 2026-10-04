@@ -1,7 +1,7 @@
 /**
  * Use SyncedMediaPlayback to play audio or video in time with the room's timeline.
- * It also accounts for the delay before sound reaches the output device when the
- * browser supports it. Files under internal/ are managed by this controller.
+ * Supply an instrumental URL for client-side transposition and estimated audio
+ * delay compensation. Files under internal/ are managed by this controller.
  *
  * This module handles playback on one device, while timing provides the timeline
  * shared by the room. They are separate so device-specific audio delays stay local

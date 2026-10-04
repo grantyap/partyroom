@@ -54,6 +54,8 @@ const readyQueueItemResult = v.object({
   title: v.string(),
   durationSeconds: v.union(v.number(), v.null()),
   finalUrl: v.union(v.string(), v.null()),
+  instrumentalUrl: v.union(v.string(), v.null()),
+  transposeSemitones: v.number(),
 });
 const playbackResult = v.object({
   playback: v.object({
@@ -270,6 +272,7 @@ async function addedByUsersForClient(ctx: QueryCtx, items: QueueItem[]) {
 }
 
 async function readyQueueItemForClient(ctx: QueryCtx, item: ReadyItem, addedBy: AddedBy) {
+  const asset = await ctx.db.get("mediaAssets", item.asset);
   return {
     _id: item.key,
     roomMedia: item.roomMedia,
@@ -281,6 +284,10 @@ async function readyQueueItemForClient(ctx: QueryCtx, item: ReadyItem, addedBy: 
     title: item.title,
     durationSeconds: item.durationSeconds,
     finalUrl: await artifactUrl(ctx, item.finalArtifactId),
+    instrumentalUrl: asset?.instrumentalArtifactId
+      ? await artifactUrl(ctx, asset.instrumentalArtifactId)
+      : null,
+    transposeSemitones: item.transposeSemitones ?? 0,
   };
 }
 
@@ -482,6 +489,37 @@ export const update = mutation({
       playStartDelayMs:
         playStartDelaySeconds === undefined ? undefined : playStartDelaySeconds * 1_000,
     });
+    return null;
+  },
+});
+
+export async function transposeRoomPlayback(
+  ctx: MutationCtx,
+  { roomId, currentKey, semitones }: { roomId: Id<"rooms">; currentKey: string; semitones: number },
+) {
+  if (!Number.isInteger(semitones) || semitones < -6 || semitones > 6)
+    throw new Error("Transposition must be a whole number from -6 to 6 semitones");
+  const playback = await playbackForRoom(ctx, roomId);
+  const current = currentItem(playback.state);
+  if (!current || current.key !== currentKey) return;
+  const updated = { ...current, transposeSemitones: semitones };
+  const state = playback.state;
+  // Pitch changes do not change the transport revision or its scheduled finish.
+  if (state.kind === "occupiedPlaying" || state.kind === "occupiedPaused") {
+    await ctx.db.patch(playback._id, { state: { ...state, current: updated } });
+  } else if (state.kind === "empty" && state.transport.kind !== "idle") {
+    await ctx.db.patch(playback._id, {
+      state: { ...state, transport: { ...state.transport, current: updated } },
+    });
+  }
+}
+
+export const transpose = mutation({
+  args: { roomId: v.id("rooms"), currentKey: v.string(), semitones: v.number() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await requireRoomAction(ctx, args.roomId, capabilities.rooms.controlPlayback);
+    await transposeRoomPlayback(ctx, args);
     return null;
   },
 });

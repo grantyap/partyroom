@@ -1,7 +1,8 @@
 import { convexTest } from "convex-test";
 import type { WorkflowId } from "@convex-dev/workflow";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { internal } from "./_generated/api";
+import { api, internal } from "./_generated/api";
+import { authComponent } from "./auth";
 import type { Id } from "./_generated/dataModel";
 import { requeueRoomMedia } from "./media/domain/jobs";
 import {
@@ -9,12 +10,16 @@ import {
   enqueueRoomMedia,
   markRoomOccupied,
   updateRoomTiming,
+  transposeRoomPlayback,
 } from "./playback";
 import { defaultRoomMemberPermissions } from "./rooms.schema";
 import schema from "./schema";
 import { modules } from "./test.setup";
 
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 async function seedRoom(t: ReturnType<typeof convexTest>, occupied = true) {
   return await t.run(async (ctx) => {
@@ -338,6 +343,70 @@ describe("room playback aggregate", () => {
         anchorPositionMs: 12_500,
         anchorUpdatedAt: 100_000,
       },
+    });
+  });
+
+  test("transposition is shared, survives pause/resume, and preserves scheduled advancement", async () => {
+    const t = convexTest(schema, modules);
+    const { roomId, playbackId } = await seedRoom(t);
+    const media = await createRoomMedia(t, roomId, "ready");
+    const currentKey = await enqueue(t, roomId, media);
+    const before = await t.run((ctx) => ctx.db.get(playbackId));
+    const jobs = await advancementJobs(t);
+    await t.run((ctx) => transposeRoomPlayback(ctx, { roomId, currentKey, semitones: -3 }));
+    const after = await t.run((ctx) => ctx.db.get(playbackId));
+    expect(after).toMatchObject({
+      revision: before!.revision,
+      queueRevision: before!.queueRevision,
+      state: { current: { key: currentKey, transposeSemitones: -3 } },
+    });
+    expect(await advancementJobs(t)).toEqual(jobs);
+    await t.run((ctx) => updateRoomTiming(ctx, { roomId, currentKey, update: { velocity: 0 } }));
+    await t.run((ctx) => updateRoomTiming(ctx, { roomId, currentKey, update: { velocity: 1 } }));
+    expect(await t.run((ctx) => ctx.db.get(playbackId))).toMatchObject({
+      state: { current: { transposeSemitones: -3 } },
+    });
+  });
+
+  test("ignores transposition requests for the previous song and resets on advancement", async () => {
+    const t = convexTest(schema, modules);
+    const { roomId, playbackId } = await seedRoom(t);
+    const first = await createRoomMedia(t, roomId, "ready");
+    const second = await createRoomMedia(t, roomId, "ready");
+    const currentKey = await enqueue(t, roomId, first);
+    const nextKey = await enqueue(t, roomId, second);
+    await t.run((ctx) => transposeRoomPlayback(ctx, { roomId, currentKey, semitones: 6 }));
+    await t.run((ctx) => advanceRoomPlayback(ctx, { roomId, currentKey }));
+    const before = await t.run((ctx) => ctx.db.get(playbackId));
+    await t.run((ctx) => transposeRoomPlayback(ctx, { roomId, currentKey, semitones: -6 }));
+    expect(await t.run((ctx) => ctx.db.get(playbackId))).toEqual(before);
+    expect(before?.state).toMatchObject({ current: { key: nextKey } });
+    if (before?.state.kind === "occupiedPlaying")
+      expect(before.state.current.transposeSemitones ?? 0).toBe(0);
+  });
+
+  test.each([-7, 7, 0.5, NaN, Infinity])("rejects invalid transposition %s", async (semitones) => {
+    const t = convexTest(schema, modules);
+    const { roomId } = await seedRoom(t);
+    await expect(
+      t.run((ctx) => transposeRoomPlayback(ctx, { roomId, currentKey: "stale", semitones })),
+    ).rejects.toThrow("whole number");
+  });
+
+  test("enforces playback permissions on the public transposition mutation", async () => {
+    const t = convexTest(schema, modules);
+    const { roomId, playbackId } = await seedRoom(t);
+    const media = await createRoomMedia(t, roomId, "ready");
+    const currentKey = await enqueue(t, roomId, media);
+    const user = vi.spyOn(authComponent, "getAuthUser");
+    user.mockResolvedValue({ _id: "visitor" } as never);
+    await expect(
+      t.mutation(api.playback.transpose, { roomId, currentKey, semitones: 2 }),
+    ).rejects.toThrow("Unauthorized");
+    user.mockResolvedValue({ _id: "owner" } as never);
+    await t.mutation(api.playback.transpose, { roomId, currentKey, semitones: 2 });
+    expect(await t.run((ctx) => ctx.db.get(playbackId))).toMatchObject({
+      state: { current: { transposeSemitones: 2 } },
     });
   });
 });

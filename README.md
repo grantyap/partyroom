@@ -133,6 +133,10 @@ and push the functions.
 Open [http://localhost:5173](http://localhost:5173) in your browser to see the web application.
 Your app will connect to the local self-hosted Convex backend automatically.
 
+Client-side transposition uses AudioWorklet, which requires a secure browser context.
+Use `localhost` on the development machine, or trusted HTTPS when testing from other
+devices. Plain HTTP on a LAN IP address cannot transpose; native playback still works.
+
 ## Coolify
 
 Deploy `docker-compose.yaml` as the production stack and route the `web` service to port `3000`.
