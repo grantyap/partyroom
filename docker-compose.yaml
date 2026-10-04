@@ -28,7 +28,8 @@ services:
         - CMD
         - bun
         - -e
-        - fetch('http://localhost:3000/').then((response) => { if (!response.ok) process.exit(1); }).catch(() => process.exit(1));
+        - >-
+          fetch('http://127.0.0.1:3000/', { signal: AbortSignal.timeout(2000), redirect: 'error' }).then((response) => { if (!response.ok) process.exit(1); }).catch(() => process.exit(1));
       interval: 5s
       timeout: 3s
       start_period: 10s
@@ -85,9 +86,11 @@ services:
       WORKER_SIGNING_SECRET: ${WORKER_SIGNING_SECRET:?}
 
     healthcheck:
-      test: curl -f http://localhost:3210/version
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "--max-time", "2", "http://127.0.0.1:3210/version"]
       interval: 5s
+      timeout: 3s
       start_period: 10s
+      retries: 10
 
   backend-deploy:
     build:
@@ -112,7 +115,8 @@ services:
       dockerfile: packages/backend/Dockerfile
     entrypoint: ["bash", "/usr/local/bin/run-workflow-drain"]
     command: ["release-v2", "--production"]
-    restart: on-failure
+    # One-time job: Coolify excludes restart: "no" services from overall health.
+    restart: "no"
     environment:
       MIGRATION_TARGET: production
     volumes:
@@ -134,6 +138,13 @@ services:
     depends_on:
       backend-deploy:
         condition: service_completed_successfully
+
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "--max-time", "2", "http://127.0.0.1:6791/"]
+      interval: 5s
+      timeout: 3s
+      start_period: 30s
+      retries: 10
 
   media-worker:
     build:
@@ -161,7 +172,8 @@ services:
         - CMD
         - bun
         - -e
-        - fetch('http://localhost:4100/health').then((response) => { if (!response.ok) process.exit(1); }).catch(() => process.exit(1));
+        - >-
+          fetch('http://127.0.0.1:4100/health', { signal: AbortSignal.timeout(2000), redirect: 'error' }).then(async (response) => { if (!response.ok) process.exit(1); const health = await response.json(); if (health.ok !== true || health.started !== true) process.exit(1); }).catch(() => process.exit(1));
       interval: 5s
       timeout: 3s
       start_period: 5s
@@ -199,10 +211,10 @@ services:
         - CMD
         - python3
         - -c
-        - import urllib.request; urllib.request.urlopen('http://localhost:4200/health')
+        - import json, urllib.request; health = json.load(urllib.request.urlopen('http://127.0.0.1:4200/health', timeout=2)); raise SystemExit(0 if health.get('ok') is True and health.get('started') is True else 1)
       interval: 5s
       timeout: 3s
-      start_period: 10s
+      start_period: 120s
       retries: 10
 
   lyrics-worker:
@@ -236,10 +248,10 @@ services:
         - CMD
         - python3
         - -c
-        - import urllib.request; urllib.request.urlopen('http://localhost:4300/health')
+        - import json, urllib.request; health = json.load(urllib.request.urlopen('http://127.0.0.1:4300/health', timeout=2)); raise SystemExit(0 if health.get('ok') is True and health.get('started') is True else 1)
       interval: 5s
       timeout: 3s
-      start_period: 10s
+      start_period: 120s
       retries: 10
 
   annotations-worker:
@@ -267,7 +279,7 @@ services:
         - CMD
         - python3
         - -c
-        - import urllib.request; urllib.request.urlopen('http://localhost:4400/health')
+        - import json, urllib.request; health = json.load(urllib.request.urlopen('http://127.0.0.1:4400/health', timeout=2)); raise SystemExit(0 if health.get('ok') is True and health.get('started') is True else 1)
       interval: 5s
       timeout: 3s
       start_period: 10s

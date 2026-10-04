@@ -189,6 +189,20 @@ The `backend-deploy` service automatically applies the Convex function environme
 functions after the backend is healthy. It reads the generated instance credentials from the
 persistent `data` volume, so no admin key needs to be copied into Coolify.
 
+Every long-running service has a Compose health check. Web and dashboard probes require a
+successful HTTP response; worker probes also require `ok` and `started` to be true. The stem
+and lyrics workers have a two-minute startup grace period for Python/accelerator initialization.
+These checks verify local service readiness, not successful processing of a media job.
+
+`backend-deploy` and `queue-release` are one-time jobs with `restart: "no"`, which
+[Coolify excludes from overall health](https://github.com/coollabsio/coolify/blob/main/app/Traits/CalculatesExcludedStatus.php).
+A completed job should show `Exited (0)`. Check their exit codes and deployment logs; a failed
+`queue-release` now requires a redeploy or manual rerun rather than retrying indefinitely.
+Coolify uses [the health checks in the Compose file](https://coolify.io/docs/applications/builds/docker-compose#health-checks),
+so reload the Compose definition and redeploy to apply changes. Run
+`bun test scripts/compose-health.test.ts` to verify the probe commands against ready, unready,
+malformed, and unavailable HTTP responses.
+
 ### GPU build cache
 
 The NVIDIA stem worker and lyrics worker install third-party dependencies in a separate image
