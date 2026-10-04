@@ -17,6 +17,8 @@ export default defineConfig(({ mode }) => ({
       experimental: { remoteFunctions: true },
     }),
   ],
+  // The production image does not ship backend workspace source files.
+  ssr: { noExternal: ["@partyroom/backend"] },
   server: {
     allowedHosts: process.env.DEV_HTTPS_HOST ? [process.env.DEV_HTTPS_HOST.trim()] : [],
   },
