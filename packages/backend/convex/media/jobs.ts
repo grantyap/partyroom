@@ -107,6 +107,8 @@ export const request = internalMutation({
     workflowVersion: v.union(v.literal(1), v.literal(2)),
   }),
   handler: async (ctx, args) => {
+    const { user } = await requireRoomAction(ctx, args.roomId, capabilities.rooms.addToQueue);
+    if (user._id !== args.requestedBy) throw new Error("Unauthorized");
     const result = await createOrJoinMedia(ctx, args);
     if (result.created && !isDraining()) {
       const workflowId = await managedWorkflow.start(

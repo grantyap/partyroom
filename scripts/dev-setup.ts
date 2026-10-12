@@ -56,6 +56,10 @@ const workerSettings = readFileSync(resolve(root, ".env"), "utf8").match(
   /^(ACTIVITY_WORKER_TOKEN|WORKER_SIGNING_SECRET)=.*$/gm,
 );
 if (workerSettings?.length !== 2) throw new Error("Missing worker secrets in root .env");
+const billingSettings =
+  env.match(/^STRIPE_(SECRET_KEY|WEBHOOK_SECRET|PREMIUM_PRICE_ID)=.+$/gm) ?? [];
+const emailSettings =
+  env.match(/^RESEND_(API_KEY|FROM_EMAIL|WEBHOOK_SECRET|TEST_MODE)=.+$/gm) ?? [];
 
 const reuseBackend = container && inspected?.stdout.trim() === mode;
 run("docker", [
@@ -88,6 +92,6 @@ run(
   "bunx",
   ["convex", "env", "set", "--force"],
   backend,
-  `${[...settings, ...workerSettings].join("\n")}\n`,
+  `${[...settings, ...workerSettings, ...billingSettings, ...emailSettings].join("\n")}\n`,
 );
 run("bunx", ["convex", "dev", "--once", "--env-file", ".env.local"], backend);

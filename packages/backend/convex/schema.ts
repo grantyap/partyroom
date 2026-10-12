@@ -5,6 +5,21 @@ import { mediaTables } from "./media/schema";
 import { roomPlaybackState } from "./playback.schema";
 
 export default defineSchema({
+  billingPeriods: defineTable({
+    stripeSubscriptionId: v.string(),
+    expiresAt: v.number(),
+    expired: v.boolean(),
+  }).index("by_subscription", ["stripeSubscriptionId"]),
+  billingRenewals: defineTable({
+    stripeInvoiceId: v.string(),
+    stripeSubscriptionId: v.string(),
+    invoiceCreated: v.number(),
+    firstFailureAt: v.optional(v.number()),
+    paid: v.boolean(),
+    expired: v.boolean(),
+  })
+    .index("by_invoice", ["stripeInvoiceId"])
+    .index("by_subscription_and_created", ["stripeSubscriptionId", "invoiceCreated"]),
   ...mediaTables,
   rooms: defineTable({
     owner: v.string(),

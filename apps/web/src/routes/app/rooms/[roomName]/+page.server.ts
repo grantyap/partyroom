@@ -21,6 +21,10 @@ export const load: PageServerLoad = async ({ params, parent }) => {
         throw err;
       }
 
+      if (err.message.includes("Premium subscription required")) {
+        return null;
+      }
+
       // TODO: Maybe create a custom AppError so we can statically check this.
       if (err.message.toLowerCase().includes("room not found")) {
         error(404, "Not Found");
@@ -33,5 +37,6 @@ export const load: PageServerLoad = async ({ params, parent }) => {
   return {
     room,
     user,
+    premiumRequired: room === null,
   };
 };

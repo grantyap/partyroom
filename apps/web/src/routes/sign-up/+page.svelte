@@ -28,6 +28,7 @@
 					name: fullName,
 					email,
 					password,
+					callbackURL: "/app?verification=success",
 				},
 				{
 					onError: ({ error }) => {

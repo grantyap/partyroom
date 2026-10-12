@@ -1,7 +1,4 @@
 <script lang="ts">
-	import { goto, refreshAll } from "$app/navigation";
-	import { page } from "$app/state";
-	import { PUBLIC_FEEDBACK_FORM_URL } from '$app/env/public';
 	import partyroomLogo from "#lib/assets/icons/Partyroom logo.svg";
 	import { authClient } from "#lib/auth-client.js";
 	import {
@@ -9,28 +6,37 @@
 		hasCapability,
 		type Capability,
 	} from "#lib/capabilities.js";
+	import PremiumPanel from "#lib/components/premium-panel.svelte";
 	import * as Avatar from "#lib/components/ui/avatar/index.js";
 	import { Button } from "#lib/components/ui/button/index.js";
+	import * as Dialog from "#lib/components/ui/dialog/index.js";
 	import * as Drawer from "#lib/components/ui/drawer/index.js";
 	import * as DropdownMenu from "#lib/components/ui/dropdown-menu/index.js";
 	import { Input } from "#lib/components/ui/input/index.js";
+	import { SearchParams } from "#lib/hooks/search-params.svelte.js";
 	import {
 		hasStoredUserName,
 		setUserName,
 		USER_NAME_MAX_LENGTH,
 	} from "#lib/user-name.js";
+	import { PUBLIC_FEEDBACK_FORM_URL } from "$app/env/public";
+	import { goto, refreshAll } from "$app/navigation";
+	import { page } from "$app/state";
 	import ChevronDownIcon from "@lucide/svelte/icons/chevron-down";
 	import CircleAlertIcon from "@lucide/svelte/icons/circle-alert";
+	import ExternalLinkIcon from "@lucide/svelte/icons/external-link";
 	import LifeBuoyIcon from "@lucide/svelte/icons/life-buoy";
 	import LogInIcon from "@lucide/svelte/icons/log-in";
 	import LogOutIcon from "@lucide/svelte/icons/log-out";
 	import PencilIcon from "@lucide/svelte/icons/pencil";
+	import SettingsIcon from "@lucide/svelte/icons/settings";
 	import UserPlusIcon from "@lucide/svelte/icons/user-plus";
 
 	type AppUser = {
 		_id: string;
 		name?: string | null;
 		email?: string | null;
+		emailVerified?: boolean;
 		image?: string | null;
 		isAnonymous?: boolean | null;
 		capabilities?: readonly Capability[] | null;
@@ -46,16 +52,46 @@
 	let locallySavedForUserId = $state<string | null>(null);
 	let hasSetUserName = $state(false);
 	let nameDialogOpen = $state(false);
+	const query = new SearchParams({
+		billing: null,
+		verification: null,
+		error: null,
+	});
+	const currentUrl = $derived(page.shallow?.url ?? page.url);
+	const premiumOpen = $derived(
+		currentUrl.pathname !== "/app/settings" &&
+			(query.current.billing !== null ||
+				query.current.verification !== null ||
+				query.current.error !== null ||
+				currentUrl.hash === "#premium"),
+	);
+
+	function setPremiumOpen(open: boolean) {
+		if (open === premiumOpen) return;
+		void query.update(
+			open
+				? { billing: "" }
+				: { billing: null, verification: null, error: null },
+			{
+				pushHistory: open,
+				hash: currentUrl.hash === "#premium" ? "" : currentUrl.hash,
+			},
+		);
+	}
 
 	const canViewRoomList = $derived(
 		hasCapability(user, capabilities.rooms.list),
 	);
 	const isGuest = $derived(user?.isAnonymous === true);
-	const currentUserName = $derived(user && locallySavedForUserId === user._id ? locallySavedUserName ?? user.name : user?.name);
+	const currentUserName = $derived(
+		user && locallySavedForUserId === user._id
+			? (locallySavedUserName ?? user.name)
+			: user?.name,
+	);
 	const canSetUserName = $derived(isGuest && !hasSetUserName);
 	const displayName = $derived.by(() => {
 		const name = currentUserName?.trim();
-		if (name && !(isGuest && (/^(anonymous|guest)$/i).test(name))) {
+		if (name && !(isGuest && /^(anonymous|guest)$/i.test(name))) {
 			return name;
 		}
 
@@ -63,7 +99,7 @@
 	});
 	const initial = $derived(displayName.slice(0, 1).toUpperCase() || "P");
 	const returnTo = $derived(
-		`${page.url.pathname}${page.url.search}${page.url.hash}`,
+		`${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`,
 	);
 	const signInHref = $derived(`/login?to=${encodeURIComponent(returnTo)}`);
 	const signUpHref = $derived(`/sign-up?to=${encodeURIComponent(returnTo)}`);
@@ -217,12 +253,17 @@
 								Log in
 							</DropdownMenu.Item>
 						{:else}
+							<DropdownMenu.Item onclick={() => goto("/app/settings")}>
+								<SettingsIcon />
+								Settings
+							</DropdownMenu.Item>
 							<DropdownMenu.Separator />
 							<DropdownMenu.Item>
 								{#snippet child({ props })}
 									<a {...props} href={PUBLIC_FEEDBACK_FORM_URL} target="_blank">
 										<LifeBuoyIcon />
 										Give feedback
+										<ExternalLinkIcon class="**:text-muted-foreground!" />
 									</a>
 								{/snippet}
 							</DropdownMenu.Item>
@@ -284,3 +325,25 @@
 		{/if}
 	</div>
 </header>
+
+{#if user && !isGuest}
+	<Dialog.Root open={premiumOpen} onOpenChange={setPremiumOpen}>
+		<Dialog.Content
+			class="max-h-[calc(100svh-2rem)] overflow-y-auto sm:max-w-sm"
+		>
+			<Dialog.Header class="text-center">
+				<Dialog.Title class="font-heading text-2xl"
+					>{!user.emailVerified
+						? "Verify your email to host"
+						: "Partyroom Premium"}</Dialog.Title
+				>
+				<Dialog.Description
+					>{!user.emailVerified
+						? "First verify your email, then choose Premium."
+						: "Host karaoke with your friends."}</Dialog.Description
+				>
+			</Dialog.Header>
+			<PremiumPanel />
+		</Dialog.Content>
+	</Dialog.Root>
+{/if}

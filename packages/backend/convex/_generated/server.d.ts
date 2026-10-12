@@ -32,7 +32,14 @@ type Env = {
   readonly CONVEX_SITE_URL: string;
   readonly ACTIVITY_WORKER_TOKEN: string;
   readonly DEV_SITE_URL: string | undefined;
+  readonly RESEND_API_KEY: string | undefined;
+  readonly RESEND_FROM_EMAIL: string | undefined;
+  readonly RESEND_TEST_MODE: "true" | "false" | undefined;
+  readonly RESEND_WEBHOOK_SECRET: string | undefined;
   readonly SITE_URL: string;
+  readonly STRIPE_PREMIUM_PRICE_ID: string | undefined;
+  readonly STRIPE_SECRET_KEY: string | undefined;
+  readonly STRIPE_WEBHOOK_SECRET: string | undefined;
   readonly WORKER_CONVEX_CLOUD_ORIGIN: string;
   readonly WORKER_SIGNING_SECRET: string;
 };

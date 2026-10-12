@@ -3,11 +3,13 @@ import { convex } from "@convex-dev/better-auth/plugins";
 import { betterAuth } from "better-auth/minimal";
 import { anonymous } from "better-auth/plugins";
 import { generateSlug } from "random-word-slugs";
+import { v } from "convex/values";
 import { components, internal } from "./_generated/api";
 import { type DataModel } from "./_generated/dataModel";
-import { getCapabilities, isAnonymousUser } from "./capabilities";
+import { capabilities, getCapabilities, isAnonymousUser } from "./capabilities";
 import { query, env, type QueryCtx } from "./_generated/server";
 import authConfig from "./auth.config";
+import { getPremiumAccess } from "./billingAccess";
 
 const siteUrl = env.SITE_URL;
 
@@ -22,10 +24,25 @@ export const createAuth = (convexCtx: GenericCtx<DataModel>) => {
       ? [env.DEV_SITE_URL, "http://localhost:5173", "http://127.0.0.1:5173"]
       : [],
     database: authComponent.adapter(convexCtx),
-    // Configure simple, non-verified email/password to get started
     emailAndPassword: {
       enabled: true,
       requireEmailVerification: false,
+    },
+    emailVerification: {
+      // Existing users request a link with authClient.sendVerificationEmail({ email,
+      // callbackURL: "/app" }); after verification, call billingStripe:linkImportedCustomer.
+      // Keep sign-in available while the sender is being configured. Premium
+      // claims still require a verified email in billingAccess.ts.
+      sendOnSignUp: Boolean(
+        env.RESEND_API_KEY && env.RESEND_FROM_EMAIL && env.RESEND_TEST_MODE === "false",
+      ),
+      sendVerificationEmail: async ({ user, url }) => {
+        if (!("runMutation" in convexCtx)) {
+          throw new Error("Email verification requires a Convex action context");
+        }
+        // Await durable enqueue, not external delivery.
+        await convexCtx.runMutation(internal.email.sendVerification, { email: user.email, url });
+      },
     },
     plugins: [
       // The Convex plugin is required for Convex compatibility
@@ -53,13 +70,34 @@ export const createAuth = (convexCtx: GenericCtx<DataModel>) => {
 
 export const getCurrentUser = query({
   args: {},
+  returns: v.union(
+    v.null(),
+    v.object({
+      _id: v.string(),
+      name: v.union(v.string(), v.null()),
+      email: v.union(v.string(), v.null()),
+      image: v.union(v.string(), v.null()),
+      emailVerified: v.boolean(),
+      isAnonymous: v.boolean(),
+      capabilities: v.array(
+        v.union(...Object.values(capabilities.rooms).map((value) => v.literal(value))),
+      ),
+    }),
+  ),
   handler: async (ctx) => {
     const user = await getCurrentUserImpl(ctx);
+    const premium = user ? (await getPremiumAccess(ctx, user)).premium : false;
     return user
       ? {
-          ...user,
+          _id: user._id,
+          name: user.name ?? null,
+          email: user.email ?? null,
+          image: "image" in user && typeof user.image === "string" ? user.image : null,
+          emailVerified: "emailVerified" in user && user.emailVerified === true,
           isAnonymous: isAnonymousUser(user),
-          capabilities: getCapabilities(user),
+          capabilities: getCapabilities(user).filter(
+            (capability) => capability !== "room:create" || premium,
+          ),
         }
       : null;
   },

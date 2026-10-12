@@ -26,6 +26,8 @@
     "@convex-dev/better-auth": "catalog:",
     "@convex-dev/migrations": "^0.3.6",
     "@convex-dev/presence": "catalog:",
+    "@convex-dev/resend": "^0.2.8",
+    "@convex-dev/stripe": "^0.1.6",
     "@convex-dev/workflow": "^0.4.4",
     "@convex-dev/workpool": "^0.4.8",
     "@mmailaender/convex-better-auth-svelte": "catalog:",
@@ -38,6 +40,7 @@
     "dotenv": "catalog:",
     "fractional-indexing": "^4.0.0",
     "random-word-slugs": "^0.1.7",
+    "stripe": "^22.2.1",
     "yaml": "^2.9.0",
     "zod": "catalog:"
   },

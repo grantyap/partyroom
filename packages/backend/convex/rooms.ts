@@ -4,11 +4,8 @@ import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { authComponent, getCurrentUserImpl } from "./auth";
-import {
-	capabilities,
-	requireCapability,
-	type RoomPermission,
-} from "./capabilities";
+import { requirePremium } from "./billingAccess";
+import { capabilities, requireCapability, type RoomPermission } from "./capabilities";
 import { defaultRoomMemberPermissions, roomMemberPermissionsSchema } from "./rooms.schema";
 
 const roomDocSchema = v.object({
@@ -54,6 +51,8 @@ export const getRoomByName = query({
     if (!room) {
       throw new Error("Room not found");
     }
+
+    await requireRoomAction(ctx, room._id, capabilities.rooms.read);
 
     return {
       ...room,
@@ -128,7 +127,9 @@ export const recordRoomVisitByName = mutation({
       throw new Error("Unauthenticated");
     }
 
-    return await recordRoomVisitByNameForUser(ctx, name, user._id);
+    const room = await recordRoomVisitByNameForUser(ctx, name, user._id);
+    await requireRoomAction(ctx, room._id, capabilities.rooms.read);
+    return room;
   },
 });
 
@@ -177,6 +178,7 @@ export const createRoom = mutation({
     }
 
     requireCapability(user, capabilities.rooms.create);
+    await requirePremium(ctx, user);
 
     const roomName = name || generateSlug();
     const room = await ctx.db.insert("rooms", {
@@ -220,13 +222,11 @@ export const updateMemberPermissions = mutation({
   },
 });
 
-export function userHasRoomPermission(
-  opts: {
-    user: string;
-    room: Pick<Doc<"rooms">, "owner" | "memberPermissions">;
-    permission: RoomPermission;
-  },
-) {
+export function userHasRoomPermission(opts: {
+  user: string;
+  room: Pick<Doc<"rooms">, "owner" | "memberPermissions">;
+  permission: RoomPermission;
+}) {
   if (opts.room.owner === opts.user) {
     return true;
   }
@@ -258,5 +258,8 @@ export async function requireRoomAction(
   const room = await ctx.db.get("rooms", roomId);
   if (!room) throw new Error("Room not found");
   requireRoomPermission({ user: user._id, room, permission });
+  const host = room.owner === user._id ? user : await authComponent.getAnyUserById(ctx, room.owner);
+  if (!host) throw new Error("Room host not found");
+  await requirePremium(ctx, host);
   return { room, user };
 }

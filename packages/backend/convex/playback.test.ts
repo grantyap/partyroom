@@ -1,7 +1,7 @@
 import { convexTest } from "convex-test";
 import type { WorkflowId } from "@convex-dev/workflow";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { api, internal } from "./_generated/api";
+import { api, internal, components } from "./_generated/api";
 import { authComponent } from "./auth";
 import type { Id } from "./_generated/dataModel";
 import { requeueRoomMedia } from "./media/domain/jobs";
@@ -14,11 +14,12 @@ import {
 } from "./playback";
 import { defaultRoomMemberPermissions } from "./rooms.schema";
 import schema from "./schema";
-import { modules } from "./test.setup";
+import { modules, registerStripe } from "./test.setup";
 
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 async function seedRoom(t: ReturnType<typeof convexTest>, occupied = true) {
@@ -395,6 +396,21 @@ describe("room playback aggregate", () => {
 
   test("enforces playback permissions on the public transposition mutation", async () => {
     const t = convexTest(schema, modules);
+    registerStripe(t);
+    vi.stubEnv("STRIPE_PREMIUM_PRICE_ID", "price_premium");
+    await t.mutation(components.stripe.public.createOrUpdateCustomer, {
+      stripeCustomerId: "cus_owner",
+      metadata: { userId: "owner" },
+    });
+    await t.mutation(components.stripe.private.handleSubscriptionUpdated, {
+      stripeSubscriptionId: "sub_owner",
+      stripeCustomerId: "cus_owner",
+      status: "active",
+      currentPeriodEnd: Date.now() / 1000 + 86400,
+      cancelAtPeriodEnd: false,
+      priceId: "price_premium",
+      metadata: { userId: "owner" },
+    });
     const { roomId, playbackId } = await seedRoom(t);
     const media = await createRoomMedia(t, roomId, "ready");
     const currentKey = await enqueue(t, roomId, media);

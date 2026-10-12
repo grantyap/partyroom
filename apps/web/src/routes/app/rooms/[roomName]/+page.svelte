@@ -42,6 +42,7 @@
 	let settingsOpen = $state(false);
 	let joinAttempted = $state(false);
 	let joinError = $state<string | null>(null);
+	let settingsError = $state<string | null>(null);
 	let displayName = $state("");
 
 	const room = useQuery(
@@ -75,6 +76,7 @@
 		hasCapability(data.user, capabilities.rooms.list),
 	);
 	const isGuest = $derived(data.user?.isAnonymous === true);
+	const premiumRequired = $derived(room.error?.message.includes("Premium subscription required") || playback.error?.message.includes("Premium subscription required") || (!room.data && data.premiumRequired));
 	const roomError = $derived.by(() => {
 		if (!room.error) return null;
 		return room.error.message.toLowerCase().includes("room not found")
@@ -174,10 +176,13 @@
 	) {
 		const current = roomData?.memberPermissions;
 		if (!current || !roomId) return;
-		await updateMemberPermissions({
-			roomId,
-			memberPermissions: { ...current, [permission]: enabled },
-		});
+		settingsError = null;
+		try {
+			await updateMemberPermissions({ roomId, memberPermissions: { ...current, [permission]: enabled } });
+		} catch {
+			settingsError = "We couldn’t update room settings. Check that your Premium subscription is active and try again.";
+			throw new Error(settingsError);
+		}
 	}
 </script>
 
@@ -196,6 +201,8 @@
 		backLabel="All rooms"
 		backHref={canViewRoomList ? "/app" : null}
 	/>
+{:else if premiumRequired}
+	<ErrorState title="Hosting is paused" description="This room’s host needs an active Premium subscription. If this is your room, review your billing settings. Otherwise, ask the host to restore Premium." backLabel={canViewRoomList ? "Settings" : "Partyroom home"} backHref={canViewRoomList ? "/app/settings#billing" : "/"} />
 {:else if roomError}
 	<ErrorState
 		title="Unable to load room"
@@ -422,6 +429,7 @@
 					>
 				</Drawer.Header>
 				<div class="overflow-y-auto px-4 pb-4">
+					{#if settingsError}<p class="text-sm text-destructive" role="alert">{settingsError}</p>{/if}
 					<RoomPermissions
 						permissions={roomData.memberPermissions}
 						onChange={setMemberPermission}

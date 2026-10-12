@@ -16,6 +16,11 @@ bunx convex env set BETTER_AUTH_SECRET "$BETTER_AUTH_SECRET"
 bunx convex env set ACTIVITY_WORKER_TOKEN "$ACTIVITY_WORKER_TOKEN"
 bunx convex env set WORKER_SIGNING_SECRET "$WORKER_SIGNING_SECRET"
 bunx convex env set WORKER_CONVEX_CLOUD_ORIGIN http://backend:3210
+for setting in STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET STRIPE_PREMIUM_PRICE_ID RESEND_API_KEY RESEND_FROM_EMAIL RESEND_WEBHOOK_SECRET RESEND_TEST_MODE; do
+  if [[ -n "${!setting:-}" ]]; then
+    bunx convex env set "$setting" "${!setting}"
+  fi
+done
 bun /workspace/scripts/workflow-drain.ts prepare-v2 --production
 bunx convex deploy --typecheck disable
 bun /workspace/scripts/workflow-drain.ts complete-v2 --production
