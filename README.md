@@ -185,6 +185,30 @@ Client-side transposition uses AudioWorklet, which requires a secure browser con
 Use `localhost` on the development machine, or trusted HTTPS when testing from other
 devices. Plain HTTP on a LAN IP address cannot transpose; native playback still works.
 
+### Local Stripe and Resend webhooks
+
+Install `cloudflared` once (`brew install cloudflared` on macOS). Set
+`DEV_WEBHOOK_TUNNEL=true` in the root `.env`, then run your usual `bun run dev:*`
+command. You can also enable it for one run:
+
+```bash
+DEV_WEBHOOK_TUNNEL=true bun run dev:mac
+```
+
+The shared web launcher starts a Cloudflare Quick Tunnel to the local Convex HTTP
+server on port 3211 (or `SITE_PROXY_PORT`) and prints both complete webhook URLs.
+It also saves them in `.cache/dev-webhooks.json` while running; use
+`cat .cache/dev-webhooks.json` if Turbo's logs have scrolled past them.
+Use that origin plus `/stripe/webhook` for the Partyroom Stripe sandbox destination,
+and `/resend/webhook` for Resend. Put the signing secrets in the backend `.env.local`
+and run `bun run dev:setup` to load them into local Convex. Your frontend and auth
+URLs remain local. This does not deploy the branch.
+
+Ctrl-C stops the tunnel with Vite and Caddy. The public URL changes each run, so
+update the webhook destinations after restarting. Unset `DEV_WEBHOOK_TUNNEL` or
+set it to `false` to disable the tunnel. Missing cloudflared or an exited tunnel
+stops the development launcher with an error.
+
 ### LAN HTTPS and physical iPhone testing
 
 Install [Caddy](https://caddyserver.com/docs/install) once (`brew install caddy` on macOS).

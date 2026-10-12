@@ -1,10 +1,22 @@
 import { spawn } from "node:child_process";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "dotenv";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
+const webhookUrlsFile = resolve(root, ".cache/dev-webhooks.json");
+
+export function webhookUrls(output: string) {
+  const origin = output.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com\b/)?.[0];
+  return origin ? { stripe: `${origin}/stripe/webhook`, resend: `${origin}/resend/webhook` } : null;
+}
+
+export function webhookTunnelArgs(port = "3211") {
+  if (!/^\d+$/.test(port) || Number(port) < 1 || Number(port) > 65535)
+    throw new Error("SITE_PROXY_PORT must be a valid backend HTTP port.");
+  return ["tunnel", "--url", `http://127.0.0.1:${port}`];
+}
 
 export function httpsConfig(host: string, port = "3210") {
   if (
@@ -41,15 +53,26 @@ async function main() {
     stopping = true;
     process.exitCode = code;
     for (const child of children) child.kill("SIGTERM");
+    if (env.DEV_WEBHOOK_TUNNEL === "true") void rm(webhookUrlsFile, { force: true });
   }
   process.on("SIGINT", () => stop(130));
   process.on("SIGTERM", () => stop(143));
-  function run(command: string, args: string[], cwd: string, childEnv = env) {
-    const child = spawn(command, args, { cwd, env: childEnv, stdio: "inherit" });
+  function run(
+    command: string,
+    args: string[],
+    cwd: string,
+    childEnv = env,
+    captureOutput = false,
+  ) {
+    const child = spawn(command, args, {
+      cwd,
+      env: childEnv,
+      stdio: captureOutput ? ["inherit", "pipe", "pipe"] : "inherit",
+    });
     children.add(child);
     child.on("error", (error) => {
       console.error(
-        `${command}: ${error.message}${command === "caddy" ? ". Install Caddy to enable LAN HTTPS." : ""}`,
+        `${command}: ${error.message}${command === "caddy" ? ". Install Caddy to enable LAN HTTPS." : command === "cloudflared" ? ". Install cloudflared with `brew install cloudflared`, or unset DEV_WEBHOOK_TUNNEL." : ""}`,
       );
       stop(1);
     });
@@ -57,6 +80,41 @@ async function main() {
     return child;
   }
   try {
+    if (env.DEV_WEBHOOK_TUNNEL === "true") {
+      await mkdir(resolve(root, ".cache"), { recursive: true });
+      await rm(webhookUrlsFile, { force: true });
+      if (stopping) return;
+      const tunnel = run("cloudflared", webhookTunnelArgs(env.SITE_PROXY_PORT), root, env, true);
+      tunnel.on("exit", (code) => stop(code ?? 1));
+      let output = "";
+      let found = false;
+      const showUrls = async (chunk: Buffer) => {
+        output = (output + chunk.toString()).slice(-8192);
+        const urls = webhookUrls(output);
+        if (!urls || found || stopping) return;
+        found = true;
+        await writeFile(webhookUrlsFile, `${JSON.stringify(urls, null, 2)}\n`);
+        if (stopping) {
+          await rm(webhookUrlsFile, { force: true });
+          return;
+        }
+        console.log(`\nStripe sandbox webhook: ${urls.stripe}\nResend webhook: ${urls.resend}`);
+        console.log(`Webhook URLs saved to ${webhookUrlsFile}\n`);
+      };
+      for (const [stream, destination] of [
+        [tunnel.stdout, process.stdout],
+        [tunnel.stderr, process.stderr],
+      ] as const) {
+        stream?.on("data", (chunk: Buffer) => {
+          destination.write(chunk);
+          void showUrls(chunk).catch((error) => {
+            console.error(error);
+            stop(1);
+          });
+        });
+      }
+      console.log("Starting webhook tunnel; waiting for its public HTTPS URL...");
+    }
     if (host) {
       const config = httpsConfig(host, env.PORT);
       const backend = resolve(root, "packages/backend");
