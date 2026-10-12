@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { authRedirect } from "#lib/auth-redirect.js";
 	import { goto } from "$app/navigation";
 	import { page } from "$app/state";
 	import { authClient } from "#lib/auth-client.js";
@@ -34,7 +35,7 @@
 			);
 
 			if (result.data) {
-				const target = page.url.searchParams.get("to") || "/app";
+				const target = authRedirect(page.url.searchParams.get("to"));
 				await goto(target).catch(() => goto("/app"));
 			}
 		},
@@ -47,7 +48,7 @@
 >
 	<div class="flex w-full max-w-sm flex-col gap-6">
 		<a
-			href="##"
+			href="/"
 			class="flex items-center gap-2 self-center font-medium text-foreground"
 		>
 			<img class="size-6 rounded-md" src={partyroomLogo} alt="" />

@@ -20,7 +20,7 @@ export const handle: Handle = async ({ event, resolve }) => {
     }
 
     if (isAuthenticatedRoute(event.url.pathname) && !token && !isRoomRoute(event.url.pathname)) {
-      redirect(302, `/login?to=${encodeURIComponent(event.url.pathname)}`);
+      redirect(302, `/login?to=${encodeURIComponent(event.url.pathname + event.url.search)}`);
     }
 
     return resolve(event);

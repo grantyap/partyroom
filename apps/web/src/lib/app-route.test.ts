@@ -3,8 +3,8 @@ import { capabilities } from "./capabilities";
 import { load } from "../routes/app/+page.server";
 
 test("app requires a registered user with permission to list rooms", async () => {
-  const run = (user: unknown) =>
-    load({ parent: async () => ({ user }) } as Parameters<typeof load>[0]);
+  const run = (user: unknown, href = "https://partyroom.invalid/app") =>
+    load({ parent: async () => ({ user }), url: new URL(href) } as Parameters<typeof load>[0]);
 
   for (const user of [null, { isAnonymous: true, capabilities: [] }]) {
     await expect(run(user)).rejects.toMatchObject({
@@ -12,6 +12,8 @@ test("app requires a registered user with permission to list rooms", async () =>
       location: "/login?to=%2Fapp",
     });
   }
+
+  await expect(run(null, "https://partyroom.invalid/app?billing")).rejects.toMatchObject({ location: "/login?to=%2Fapp%3Fbilling" });
 
   await expect(run({ isAnonymous: false, capabilities: [] })).rejects.toMatchObject({
     status: 403,
