@@ -163,7 +163,7 @@ try {
     `CONVEX_CLOUD_ORIGIN=${cloud}`,
     "-e",
     "CONVEX_SITE_ORIGIN=http://127.0.0.1:33211",
-    "ghcr.io/get-convex/convex-backend:latest",
+    "ghcr.io/convex/convex-backend:latest",
   ]);
   await online();
   const adminKey = await command(["docker", "exec", container, "./generate_admin_key.sh"]);

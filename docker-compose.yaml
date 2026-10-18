@@ -36,7 +36,7 @@ services:
       retries: 10
 
   backend:
-    image: ghcr.io/get-convex/convex-backend:latest
+    image: ghcr.io/convex/convex-backend:latest
     stop_grace_period: 10s
     stop_signal: SIGINT
     expose:
@@ -126,7 +126,7 @@ services:
         condition: service_completed_successfully
 
   dashboard:
-    image: ghcr.io/get-convex/convex-dashboard:latest
+    image: ghcr.io/convex/convex-dashboard:latest
     stop_grace_period: 10s
     stop_signal: SIGINT
     expose:
