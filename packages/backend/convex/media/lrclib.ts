@@ -376,6 +376,11 @@ function candidateIdentityScore(record: LrclibRecord, candidate: LrclibSearchCan
   );
 }
 
+function lyricIdentity(record: LrclibRecord) {
+  const artist = [...new Set(record.artistName.split("/").map(normalize))].join(" ");
+  return normalize(`${artist}\n${record.trackName}`);
+}
+
 export function rankLrclibMatches(
   records: LrclibRecord[],
   {
@@ -410,10 +415,8 @@ export function rankLrclibMatches(
     );
   const best = ranked[0];
   if (!best || best.score < MIN_MATCH_SCORE) return undefined;
-  const bestIdentity = normalize(`${best.record.artistName}\n${best.record.trackName}`);
-  const runnerUp = ranked.find(
-    ({ record }) => normalize(`${record.artistName}\n${record.trackName}`) !== bestIdentity,
-  );
+  const bestIdentity = lyricIdentity(best.record);
+  const runnerUp = ranked.find(({ record }) => lyricIdentity(record) !== bestIdentity);
   if (runnerUp && best.score - runnerUp.score < MIN_MATCH_MARGIN) return undefined;
   return best;
 }

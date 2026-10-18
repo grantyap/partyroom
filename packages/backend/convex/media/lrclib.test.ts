@@ -224,6 +224,35 @@ lines:
     expect(match?.wordTimed).toBe(true);
   });
 
+  test("does not reject duplicated slash-separated artist credits as ambiguous", () => {
+    const match = rankLrclibMatches(
+      [
+        lrclibRecord(1, "Viva la Vida", "Coldplay/Coldplay", { duration: 242 }),
+        lrclibRecord(2, "Viva La Vida", "Coldplay", { duration: 241 }),
+      ],
+      {
+        candidates: [{ trackName: "Viva La Vida", artistName: "Coldplay" }],
+        duration: 242,
+      },
+    );
+    expect(match?.record.id).toBe(1);
+  });
+
+  test("preserves punctuation equivalence and genuinely distinct repeated-word artists", () => {
+    expect(
+      rankLrclibMatches(
+        [lrclibRecord(1, "Example", "AC/DC"), lrclibRecord(2, "Example", "AC DC")],
+        { candidates: [{ trackName: "Example", artistName: "AC/DC" }], duration: 131 },
+      )?.record.id,
+    ).toBe(1);
+    expect(
+      rankLrclibMatches(
+        [lrclibRecord(1, "Example", "The The"), lrclibRecord(2, "Example", "The")],
+        { candidates: [{ trackName: "Example" }], duration: 131 },
+      ),
+    ).toBeUndefined();
+  });
+
   test("rejects unrelated and ambiguous search results", () => {
     expect(
       rankLrclibMatches([lrclibRecord(1, "Different Song", "Different Artist")], {
