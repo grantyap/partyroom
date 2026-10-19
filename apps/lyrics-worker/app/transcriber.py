@@ -81,7 +81,7 @@ class PytorchTranscriber:
             max_inference_batch_size=1,
             max_new_tokens=max_new_tokens,
             forced_aligner=aligner_model,
-            forced_aligner_kwargs={"dtype": dtype, "device_map": device},
+            forced_aligner_kwargs={"dtype": dtype, "device_map": resolved_device},
         )
 
     def transcribe(

@@ -93,6 +93,24 @@ class TranscriberTest(unittest.TestCase):
             ("samples", "LRCLIB", "English"),
         )
 
+    def test_forced_aligner_uses_the_resolved_device(self) -> None:
+        requests = []
+        module = types.ModuleType("qwen_asr")
+        module.Qwen3ASRModel = types.SimpleNamespace(
+            from_pretrained=lambda model, **kwargs: requests.append(kwargs)
+        )
+        with patch.dict(sys.modules, {"qwen_asr": module}), patch(
+            "app.transcriber.resolve_pytorch_device", return_value=("cpu", "bfloat16")
+        ):
+            create_transcriber(
+                "pytorch", asr_model="asr", aligner_model="aligner", max_new_tokens=512
+            )
+        self.assertEqual(requests[0]["device_map"], "cpu")
+        self.assertEqual(
+            requests[0]["forced_aligner_kwargs"],
+            {"dtype": "bfloat16", "device_map": "cpu"},
+        )
+
     def test_rejects_unknown_backend(self) -> None:
         with self.assertRaisesRegex(ValueError, "Unsupported lyrics backend"):
             create_transcriber(

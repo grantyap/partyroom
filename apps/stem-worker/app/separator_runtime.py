@@ -11,7 +11,7 @@ from collections import deque
 from pathlib import Path
 from typing import Any
 
-from partyroom_activity_worker import ActivityContext, ApplicationError
+from partyroom_activity_worker import ActivityContext, ApplicationError, locked_process_command
 
 
 class SeparatorRuntime:
@@ -20,6 +20,7 @@ class SeparatorRuntime:
         self._stderr_task: asyncio.Task[None] | None = None
         self._stderr: deque[str] = deque(maxlen=200)
         self._lock = asyncio.Lock()
+        self._keep_warm = os.getenv("STEM_KEEP_MODEL_WARM", "true").lower() != "false"
         self._diagnostics: dict[str, Any] = {
             "backend": os.getenv("STEM_BACKEND", "audio-separator"),
             "state": "stopped",
@@ -61,9 +62,7 @@ class SeparatorRuntime:
         self._diagnostics["state"] = "starting"
         self._stderr.clear()
         self._process = await asyncio.create_subprocess_exec(
-            sys.executable,
-            "-m",
-            "app.separator_server",
+            *locked_process_command(sys.executable, "-m", "app.separator_server"),
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -132,6 +131,9 @@ class SeparatorRuntime:
             except BaseException:
                 await self.stop()
                 raise
+            finally:
+                if not self._keep_warm:
+                    await self.stop()
 
     async def stop(self) -> None:
         process, self._process = self._process, None

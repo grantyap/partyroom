@@ -4,6 +4,9 @@ services:
       partyroom.dev.mode: nvidia
 
   stem-worker:
+    cgroup_parent: ${ML_WORKER_CGROUP_PARENT:-}
+    volumes:
+      - ml_runtime:/resource-lock
     build:
       dockerfile: apps/stem-worker/Dockerfile.nvidia
     command:
@@ -19,17 +22,26 @@ services:
               capabilities: [gpu]
     environment:
       STEM_BACKEND: audio-separator
+      STEM_KEEP_MODEL_WARM: "false"
+      ACTIVITY_PROCESS_LOCK_PATH: /resource-lock/model.lock
 
   lyrics-worker:
+    cgroup_parent: ${ML_WORKER_CGROUP_PARENT:-}
+    volumes:
+      - ml_runtime:/resource-lock
     build:
       args:
         PYTORCH_ACCELERATOR: cu128
     command:
       - sh
       - -c
-      - python3 -m app.nvidia_check && exec python3 -m uvicorn app.main:app --host 0.0.0.0 --port 4300
+      - if [ "$${LYRICS_DEVICE}" != cpu ]; then python3 -m app.nvidia_check || exit 1; fi; exec python3 -m uvicorn app.main:app --host 0.0.0.0 --port 4300
     environment:
-      LYRICS_DEVICE: cuda:0
+      LYRICS_DEVICE: ${LYRICS_DEVICE:-cuda:0}
+      CUDA_VISIBLE_DEVICES: ${LYRICS_CUDA_VISIBLE_DEVICES:-0}
+      OMP_NUM_THREADS: ${LYRICS_CPU_THREADS:-2}
+      MKL_NUM_THREADS: ${LYRICS_CPU_THREADS:-2}
+      ACTIVITY_PROCESS_LOCK_PATH: /resource-lock/model.lock
       LYRICS_WORKER_CONCURRENCY: ${LYRICS_WORKER_CONCURRENCY:-1}
     deploy:
       resources:
@@ -38,3 +50,6 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
+
+volumes:
+  ml_runtime:

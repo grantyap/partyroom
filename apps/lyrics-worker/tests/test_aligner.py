@@ -33,10 +33,10 @@ class PytorchDeviceTest(unittest.TestCase):
             ("cuda:0", "float16"),
         )
 
-    def test_uses_float32_without_cuda(self) -> None:
+    def test_uses_bfloat16_without_cuda(self) -> None:
         self.assertEqual(
             self.resolve(cuda_available=False, bfloat16_available=False),
-            ("cpu", "float32"),
+            ("cpu", "bfloat16"),
         )
 
 

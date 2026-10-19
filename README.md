@@ -109,6 +109,28 @@ Both NVIDIA workers validate CUDA during startup and stop rather than silently f
 The lyrics worker defaults to one concurrent activity in this mode to limit GPU memory pressure;
 set `LYRICS_WORKER_CONCURRENCY` explicitly to override it.
 
+On small shared hosts, set `LYRICS_DEVICE=cpu` and `LYRICS_CUDA_VISIBLE_DEVICES=-1`
+to run lyrics without CUDA. CPU inference uses bfloat16 weights. The NVIDIA overlay
+serializes stem and lyric model subprocesses through a shared file lock and releases
+the stem model after each job, so their model memory does not overlap.
+
+For an aggregate worker ceiling with Docker's systemd cgroup driver, set
+`ML_WORKER_CGROUP_PARENT=partyroom-ml.slice` and install this host unit at
+`/etc/systemd/system/partyroom-ml.slice`, then run `systemctl daemon-reload`:
+
+```ini
+[Unit]
+Description=Partyroom model worker budget
+[Slice]
+MemoryMax=7G
+MemorySwapMax=0
+CPUQuota=400%
+```
+
+This budget requires at least 10 GiB of Linux RAM, leaving 3 GiB for the web app,
+database, other workers, and kernel. Keep individual container limits in place too;
+a model exceeding its budget should fail its task without exhausting the host.
+
 The NVIDIA images use CUDA 12.8 PyTorch packages. The host does not need the CUDA toolkit installed,
 but its NVIDIA driver must support the container's CUDA runtime. Docker Desktop GPU support on
 Windows requires the WSL 2 backend; native Windows containers are not supported by this setup.

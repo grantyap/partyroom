@@ -6,6 +6,7 @@ from .runtime import (
     ManagedProcessResult,
     Worker,
     replace_url_origin,
+    locked_process_command,
 )
 
 __all__ = [
@@ -16,4 +17,5 @@ __all__ = [
     "ManagedProcessResult",
     "Worker",
     "replace_url_origin",
+    "locked_process_command",
 ]

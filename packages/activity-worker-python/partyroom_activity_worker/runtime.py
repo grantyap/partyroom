@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import inspect
+import os
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -23,6 +24,12 @@ from .protocol import (
 
 Input = TypeVar("Input", bound=BaseModel)
 Output = TypeVar("Output", bound=BaseModel)
+
+
+def locked_process_command(*command: str) -> tuple[str, ...]:
+    """Serialize model processes across workers sharing a lock file."""
+    path = os.getenv("ACTIVITY_PROCESS_LOCK_PATH")
+    return ("flock", "--no-fork", path, *command) if path else command
 
 
 class ApplicationError(Exception):
@@ -167,7 +174,7 @@ class ActivityContext:
         if not command:
             raise ValueError("At least one command argument is required")
         process = await asyncio.create_subprocess_exec(
-            *command,
+            *locked_process_command(*command),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )

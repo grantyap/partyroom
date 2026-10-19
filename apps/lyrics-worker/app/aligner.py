@@ -29,7 +29,8 @@ def resolve_pytorch_device(requested_device: str) -> tuple[str, Any]:
     )
     if device == "auto":
         device = "cpu"
-    dtype = torch.float32
+    # CPU float32 doubles the resident model weights on memory-limited workers.
+    dtype = torch.bfloat16
     if device.startswith("cuda"):
         dtype = (
             torch.bfloat16
