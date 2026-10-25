@@ -1,0 +1,43 @@
+name: Crash recovery
+
+on:
+  schedule:
+    - cron: "30 8 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: recovery-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  recovery:
+    name: Disposable backend crash recovery
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.4
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: 0.11.28
+          python-version: "3.12"
+          enable-cache: true
+      - run: bun install --frozen-lockfile
+      - run: uv sync --frozen --project packages/activity-worker-python
+      - run: bun scripts/restart-test/run.ts
+      - name: Preserve recovery diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: recovery-diagnostics
+          path: |
+            /tmp/partyroom-restart-*/*.log
+            /tmp/partyroom-restart-*/*.json
+          retention-days: 7

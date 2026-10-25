@@ -10,8 +10,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { ConvexHttpClient } from "../../packages/backend/node_modules/convex/browser";
-import { makeFunctionReference } from "../../packages/backend/node_modules/convex/server";
+import { ConvexHttpClient } from "convex/browser";
+import { makeFunctionReference } from "convex/server";
 
 const root = resolve(import.meta.dir, "../..");
 const directory = mkdtempSync(join(tmpdir(), "partyroom-restart-"));
@@ -135,18 +135,19 @@ try {
       !path.split("/").includes("node_modules") &&
       !path.split("/").some((part) => part.startsWith(".env") || part === ".turbo"),
   });
-  symlinkSync(join(root, "packages/backend/node_modules"), join(backend, "node_modules"));
-  for (const name of ["activities", "activity-worker", "media-activities"])
+  symlinkSync(join(root, "node_modules"), join(backend, "node_modules"));
+  symlinkSync(join(root, "node_modules"), join(directory, "node_modules"));
+  for (const name of ["activities", "activity-worker", "media-activities", "capabilities"])
     symlinkSync(join(root, "packages", name), join(directory, "packages", name));
   cpSync(join(import.meta.dir, "probe.ts.fixture"), join(backend, "convex/restartProbe.ts"));
   const lrclib = join(backend, "convex/media/lrclib.ts");
   const original = readFileSync(lrclib, "utf8");
-  assert(original.includes("const result = await fetchLyrics(args);"));
+  assert(original.includes("return await fetchLyrics(args);"));
   writeFileSync(
     lrclib,
     original.replace(
-      "const result = await fetchLyrics(args);",
-      'const result = {state: "ready" as const, timing: "line" as const, observations: [{time: 0, duration: 1, value: "test"}]} as Awaited<ReturnType<typeof fetchLyrics>>;',
+      "return await fetchLyrics(args);",
+      'return {state: "ready" as const, timing: "line" as const, observations: [{time: 0, duration: 1, value: "test"}]} as Awaited<ReturnType<typeof fetchLyrics>>;',
     ),
   );
   await command([

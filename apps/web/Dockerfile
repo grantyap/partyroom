@@ -1,4 +1,4 @@
-FROM oven/bun:1.4.2-debian AS build
+FROM oven/bun:1.4.4-debian AS build
 
 WORKDIR /workspace
 COPY package.json bun.lock ./
@@ -26,7 +26,7 @@ ENV ORIGIN=$ORIGIN \
     PUBLIC_FEEDBACK_FORM_URL=$PUBLIC_FEEDBACK_FORM_URL
 RUN bun run --cwd apps/web build
 
-FROM oven/bun:1.4.2-debian
+FROM oven/bun:1.4.4-debian
 
 WORKDIR /workspace
 COPY package.json bun.lock ./

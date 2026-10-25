@@ -1,6 +1,6 @@
 FROM ghcr.io/convex/convex-backend:2cbcf8179207eb4521360e6d81ebee5e7abbfa07 AS convex
 
-FROM oven/bun:1.4.2-debian
+FROM oven/bun:1.4.4-debian
 
 WORKDIR /workspace
 COPY package.json bun.lock ./
