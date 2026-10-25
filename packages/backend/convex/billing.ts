@@ -75,6 +75,9 @@ export const checkout = action({
       ).customerId;
     if (account.customerId) await ctx.runMutation(internal.billing.claimCustomer, {});
     const stripe = stripeApi();
+    // Observe sessions before subscriptions: completion during this request must not open a second purchase.
+    const sessions = await stripe.checkout.sessions.list({ customer: customerId, limit: 100 });
+    const previous = sessions.data.find((session) => session.metadata?.partyroomPremium === "v1");
     for await (const subscription of stripe.subscriptions.list({
       customer: customerId,
       status: "all",
@@ -88,8 +91,6 @@ export const checkout = action({
         throw new Error("Manage your existing Premium subscription in the billing portal");
       }
     }
-    const sessions = await stripe.checkout.sessions.list({ customer: customerId, limit: 100 });
-    const previous = sessions.data.find((session) => session.metadata?.partyroomPremium === "v1");
     if (previous?.status === "open") return { sessionId: previous.id, url: previous.url };
     // Fixed server-side price and redirect origins. No client-supplied billing identity.
     // The previous session ID provides a stable key for concurrent checkout requests.
