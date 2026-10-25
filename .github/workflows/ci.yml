@@ -1,0 +1,127 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  javascript:
+    name: JavaScript tests and types
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - run: bun run check-types
+      - run: bun run --cwd apps/web check
+      - name: Bun suites (Vitest suites run separately)
+        run: bun test scripts apps/web/src/lib packages/activity-worker/src apps/media-worker/src apps/metadata-worker/src
+      - run: bun run --cwd packages/backend test:once
+      - run: bun run --cwd packages/activities test
+      - name: Generated activity contracts stay committed
+        run: |
+          bun run generate:activities
+          git diff --exit-code -- apps/*/app/activities_generated.py packages/media-activities/generated/contracts.json
+
+  python:
+    name: Python tests (${{ matrix.project }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project: packages/activity-worker-python
+            extras: ""
+          - project: apps/lyrics-worker
+            extras: --extra cpu
+          - project: apps/annotations-worker
+            extras: ""
+    defaults:
+      run:
+        working-directory: ${{ matrix.project }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: 0.11.28
+          python-version: "3.12"
+          enable-cache: true
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg libsndfile1
+      - run: uv sync --frozen ${{ matrix.extras }}
+      - run: .venv/bin/python -m unittest discover -s tests -v
+      - name: Production topology checker regression tests
+        if: matrix.project == 'packages/activity-worker-python'
+        run: .venv/bin/python -m unittest discover -s ../../scripts -p test_check_production.py -v
+
+  images:
+    name: Production image (${{ matrix.image }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: web
+            dockerfile: apps/web/Dockerfile
+          - image: backend-deploy
+            dockerfile: packages/backend/Dockerfile
+          - image: stem-worker
+            dockerfile: apps/stem-worker/Dockerfile
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          load: true
+          tags: partyroom-ci-${{ matrix.image }}:test
+          build-args: |
+            ORIGIN=http://localhost:3000
+            PUBLIC_CONVEX_URL=http://localhost:3210
+            PUBLIC_CONVEX_SITE_URL=http://localhost:3211
+            PUBLIC_FEEDBACK_FORM_URL=https://example.com/feedback
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+      - name: Web runtime starts and renders login without workspace source
+        if: matrix.image == 'web'
+        run: bun scripts/check-web-runtime.ts partyroom-ci-web:test
+      - name: Stem unit tests use the image's audio-separator dependency
+        if: matrix.image == 'stem-worker'
+        run: docker run --rm -v "$PWD/apps/stem-worker:/src:ro" -e PYTHONPATH=/src partyroom-ci-stem-worker:test python3 -m unittest discover -s /src/tests -v
+
+  required:
+    name: CI required
+    if: always()
+    needs: [javascript, python, images]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 1
+    env:
+      RESULTS: ${{ toJSON(needs) }}
+    steps:
+      - name: Every suite must pass
+        run: |
+          echo "$RESULTS" | jq -e 'all(.[]; .result == "success")'
