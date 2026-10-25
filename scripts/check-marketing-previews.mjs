@@ -1,5 +1,5 @@
 // Run in the Codex computer-use REPL with a tab open at the marketing page:
-// const { checkMarketingPreviews } = await import("/Users/grant/Documents/Repositories/partyroom/scripts/check-marketing-previews.mjs");
+// const { checkMarketingPreviews } = await import("/absolute/path/to/partyroom/scripts/check-marketing-previews.mjs");
 // await checkMarketingPreviews(previewTab);
 import assert from "node:assert/strict";
 
