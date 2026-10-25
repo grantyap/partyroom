@@ -123,14 +123,16 @@ export function retryAfterMilliseconds(value: string | null, now = Date.now()) {
   return Number.isFinite(date) ? Math.max(0, date - now) : 1_000;
 }
 
-async function request(path: string, jobId: string) {
+async function request(path: string, jobId: string, deadline?: number) {
   for (let attempt = 1; attempt <= MAX_RATE_LIMIT_ATTEMPTS; attempt += 1) {
+    const remaining = deadline === undefined ? 60_000 : deadline - Date.now();
+    if (remaining <= 0) throw new Error("LRCLIB fallback deadline exceeded");
     const response = await fetch(`${LRCLIB_ORIGIN}${path}`, {
       headers: {
         Accept: "application/json",
         "User-Agent": USER_AGENT,
       },
-      signal: AbortSignal.timeout(60_000),
+      signal: AbortSignal.timeout(Math.min(60_000, remaining)),
     });
     if (response.status !== 429) return response;
     const retryAfterMs = retryAfterMilliseconds(response.headers.get("Retry-After"));
@@ -141,6 +143,9 @@ async function request(path: string, jobId: string) {
     });
     if (attempt === MAX_RATE_LIMIT_ATTEMPTS) {
       throw new Error("LRCLIB rate limit persisted after 3 attempts");
+    }
+    if (deadline !== undefined && Date.now() + retryAfterMs >= deadline) {
+      throw new Error("LRCLIB fallback deadline exceeded");
     }
     await wait(retryAfterMs);
   }
@@ -282,6 +287,12 @@ function parsedTitleParts(title: string) {
   return artist && track ? { artist, track } : null;
 }
 
+function candidateKey(candidate: LrclibSearchCandidate) {
+  return candidate.query
+    ? `q:${normalize(candidate.query)}`
+    : `fields:${normalize(`${candidate.artistName ?? ""}\n${candidate.trackName ?? ""}`)}`;
+}
+
 export function lrclibSearchCandidates({
   title,
   trackName,
@@ -294,10 +305,6 @@ export function lrclibSearchCandidates({
   albumName?: string;
 }) {
   const candidates: LrclibSearchCandidate[] = [];
-  const candidateKey = (candidate: LrclibSearchCandidate) =>
-    candidate.query
-      ? `q:${normalize(candidate.query)}`
-      : `fields:${normalize(`${candidate.artistName ?? ""}\n${candidate.trackName ?? ""}`)}`;
   const add = (candidate: LrclibSearchCandidate) => {
     const key = candidateKey(candidate);
     if (key && !candidates.some((existing) => candidateKey(existing) === key)) {
@@ -350,6 +357,32 @@ function versionMismatchCount(expected: string, actual: string) {
     if (!expectedVersions.has(token)) mismatch += 1;
   });
   return mismatch;
+}
+
+/** Prefer a miss over a wrong named remix; extra uploader words can reject versioned uploads. */
+function versionIdentityMatches(
+  expected: string,
+  actual: string,
+  trackName?: string,
+  artistName?: string,
+) {
+  const actualTokens = new Set(tokens(actual));
+  const trackTokens = tokens(trackName ?? "");
+  if (
+    trackTokens.some((token) => VERSION_TOKENS.has(token)) &&
+    !trackTokens.every((token) => actualTokens.has(token))
+  )
+    return false;
+  let expectedTokens = tokens(lrclibSearchTitle(expected));
+  const artistTokens = tokens(artistName ?? "");
+  if (artistTokens.every((token, index) => expectedTokens[index] === token)) {
+    expectedTokens = expectedTokens.slice(artistTokens.length);
+  }
+  return (
+    versionMismatchCount(expected, actual) === 0 &&
+    (!expectedTokens.some((token) => VERSION_TOKENS.has(token)) ||
+      expectedTokens.every((token) => actualTokens.has(token)))
+  );
 }
 
 function candidateIdentityScore(record: LrclibRecord, candidate: LrclibSearchCandidate) {
@@ -512,15 +545,27 @@ export function normalizeLrclibTimedLyrics({
   return observations.length > 0 ? { timing: "line", format: "syncedLyrics", observations } : null;
 }
 
-async function fetchLyrics(args: {
+export async function fetchLyrics(args: {
   jobId: string;
   title: string;
   duration?: number;
   trackName?: string;
   artistName?: string;
   albumName?: string;
+  extractedMetadata?: { trackName?: string; artistName?: string };
 }): Promise<NormalizedLyrics> {
-  const candidates = lrclibSearchCandidates(args);
+  const fallback = args.extractedMetadata !== undefined;
+  const trackName = args.trackName?.trim() || args.extractedMetadata?.trackName?.trim();
+  const artistName = args.artistName?.trim() || args.extractedMetadata?.artistName?.trim();
+  const candidates = fallback
+    ? trackName && artistName
+      ? [
+          { trackName, artistName, albumName: args.albumName },
+          { query: `${artistName} ${trackName}` },
+        ]
+      : []
+    : lrclibSearchCandidates(args);
+  const deadline = fallback ? Date.now() + 15_000 : undefined;
   const recordsById = new Map<number, LrclibRecord>();
   log("search.started", {
     jobId: args.jobId,
@@ -528,11 +573,18 @@ async function fetchLyrics(args: {
     queryCount: candidates.length,
     duration: args.duration,
   });
-  let match: ReturnType<typeof rankLrclibMatches> = undefined;
   let attemptCount = 0;
-  for (const [index, candidate] of candidates.entries()) {
+  const searched: LrclibSearchCandidate[] = [];
+  let match: ReturnType<typeof rankLrclibMatches>;
+  for (const candidate of candidates) {
+    if (attemptCount > 0) {
+      if (deadline !== undefined && Date.now() + SEARCH_ATTEMPT_DELAY_MS >= deadline) {
+        throw new Error("LRCLIB fallback deadline exceeded");
+      }
+      await wait(SEARCH_ATTEMPT_DELAY_MS);
+    }
     attemptCount += 1;
-    if (index > 0) await wait(SEARCH_ATTEMPT_DELAY_MS);
+    searched.push(candidate);
     const params = candidate.query
       ? new URLSearchParams({ q: candidate.query })
       : new URLSearchParams({
@@ -542,19 +594,26 @@ async function fetchLyrics(args: {
     const path = `/api/search?${params}`;
     log("search.attempted", {
       jobId: args.jobId,
-      attempt: index + 1,
+      attempt: attemptCount,
       query: candidate.query,
       trackName: candidate.trackName,
       artistName: candidate.artistName,
       url: `${LRCLIB_ORIGIN}${path}`,
     });
-    const response = await request(path, args.jobId);
+    const response = await request(path, args.jobId, deadline);
     if (!response.ok) throw new Error(`LRCLIB search failed with HTTP ${response.status}`);
     const value: unknown = await response.json();
     if (!Array.isArray(value)) throw new Error("LRCLIB search returned an invalid response");
     value.filter(isRecord).forEach((record) => recordsById.set(record.id, record));
-    match = rankLrclibMatches([...recordsById.values()], {
-      candidates: candidates.slice(0, index + 1),
+    const records = [...recordsById.values()].filter(
+      (record) =>
+        !fallback ||
+        (normalizeLrclibTimedLyrics(record) &&
+          versionIdentityMatches(args.title, record.trackName, trackName, artistName) &&
+          (!args.trackName || versionIdentityMatches(args.trackName, record.trackName))),
+    );
+    match = rankLrclibMatches(records, {
+      candidates: searched,
       duration: args.duration,
     });
     if (match) break;
@@ -628,6 +687,12 @@ export const lookup = internalAction({
     trackName: v.optional(v.string()),
     artistName: v.optional(v.string()),
     albumName: v.optional(v.string()),
+    extractedMetadata: v.optional(
+      v.object({
+        trackName: v.optional(v.string()),
+        artistName: v.optional(v.string()),
+      }),
+    ),
   },
   returns: v.object({
     state: v.union(v.literal("ready"), v.literal("not_found")),
@@ -641,11 +706,7 @@ export const lookup = internalAction({
   }),
   handler: async (_ctx, args) => {
     try {
-      const result = await fetchLyrics(args);
-      if (result.state === "not_found") {
-        throw new Error("No synchronized lyrics were found");
-      }
-      return result;
+      return await fetchLyrics(args);
     } catch (error) {
       log("search.failed", {
         jobId: args.jobId,

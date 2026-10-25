@@ -1,4 +1,47 @@
 {
+  "extractMetadata": {
+    "name": "media.extractMetadata",
+    "version": 1,
+    "taskQueue": "metadata",
+    "input": {
+      "kind": "object",
+      "fields": {
+        "title": {
+          "kind": "string"
+        },
+        "trackName": {
+          "kind": "optional",
+          "value": {
+            "kind": "string"
+          }
+        },
+        "artistName": {
+          "kind": "optional",
+          "value": {
+            "kind": "string"
+          }
+        }
+      }
+    },
+    "output": {
+      "kind": "object",
+      "fields": {
+        "trackName": {
+          "kind": "optional",
+          "value": {
+            "kind": "string"
+          }
+        },
+        "artistName": {
+          "kind": "optional",
+          "value": {
+            "kind": "string"
+          }
+        }
+      }
+    },
+    "artifacts": {}
+  },
   "resolve": {
     "name": "media.resolve",
     "version": 1,

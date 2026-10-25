@@ -1,0 +1,23 @@
+{
+  "name": "@partyroom/metadata-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun src/server.ts",
+    "dev:mac": "PORT=4500 METADATA_DEVICE=metal bun --env-file=../../.env src/server.ts",
+    "dev:mac:build": "bun run dev:mac",
+    "dev:mac:host": "bun run dev:mac",
+    "dev:mac:host:build": "bun run dev:mac",
+    "check-types": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@partyroom/activity-worker": "workspace:*",
+    "@partyroom/media-activities": "workspace:*",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/bun": "catalog:",
+    "typescript": "catalog:"
+  }
+}

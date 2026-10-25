@@ -1,5 +1,6 @@
-import { describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
+  fetchLyrics,
   lrclibSearchCandidates,
   lrclibSearchTitle,
   normalizeLrclibTimedLyrics,
@@ -28,6 +29,195 @@ function lrclibRecord(
     ...overrides,
   };
 }
+
+describe("LRCLIB metadata fallback", () => {
+  const args = { jobId: "job", title: "An unhelpful upload title", duration: 131 };
+  const extractedMetadata = { artistName: "Example Artist", trackName: "Example Song" };
+  const record = lrclibRecord(1, extractedMetadata.trackName, extractedMetadata.artistName);
+  let http: ReturnType<typeof vi.fn<typeof fetch>>;
+
+  beforeEach(() => {
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    http = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", http);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  test("returns an original success without extraction", async () => {
+    http.mockImplementation(async () => Response.json([record]));
+    expect(await fetchLyrics({ ...args, ...extractedMetadata })).toMatchObject({
+      state: "ready",
+      id: 1,
+    });
+    expect(http).toHaveBeenCalledTimes(1);
+  });
+
+  test("returns a normal miss without calling a model service", async () => {
+    http.mockImplementation(async () => Response.json([]));
+    expect(await fetchLyrics(args)).toMatchObject({ state: "not_found" });
+    expect(http).toHaveBeenCalledTimes(1);
+    expect(String(http.mock.calls[0][0])).toMatch(/^https:\/\/lrclib.net\/api\/search/);
+  });
+
+  test.each([503, 404])("throws on HTTP %i", async (status) => {
+    http.mockImplementation(async () => Response.json({}, { status }));
+    await expect(fetchLyrics(args)).rejects.toThrow(`LRCLIB search failed with HTTP ${status}`);
+    expect(http).toHaveBeenCalledTimes(1);
+  });
+
+  test("throws on network failure", async () => {
+    http.mockRejectedValue(new Error("network unavailable"));
+    await expect(fetchLyrics(args)).rejects.toThrow("network unavailable");
+  });
+
+  test("searches only extracted candidates and caps extra searches at two", async () => {
+    http.mockImplementation(async () => Response.json([]));
+    expect(await fetchLyrics({ ...args, extractedMetadata })).toMatchObject({ state: "not_found" });
+    expect(http).toHaveBeenCalledTimes(2);
+    expect(String(http.mock.calls[0][0])).toContain("artist_name=Example+Artist");
+    expect(String(http.mock.calls[1][0])).toContain("q=Example+Artist+Example+Song");
+  });
+
+  test("fills only missing source fields", async () => {
+    http.mockImplementation(async () => Response.json([]));
+    const source = { ...args, artistName: "Source Artist", extractedMetadata };
+    await fetchLyrics(source);
+    expect(String(http.mock.calls[0][0])).toContain("artist_name=Source+Artist");
+    expect(source.artistName).toBe("Source Artist");
+    http.mockClear();
+    await fetchLyrics({ ...source, trackName: "Source Song" });
+    expect(String(http.mock.calls[0][0])).toContain("track_name=Source+Song");
+  });
+
+  test.each([{}, { trackName: "Example Song" }, { artistName: "Example Artist" }])(
+    "unknown extraction %j causes no searches",
+    async (extractedMetadata) => {
+      expect(await fetchLyrics({ ...args, extractedMetadata })).toMatchObject({
+        state: "not_found",
+      });
+      expect(http).not.toHaveBeenCalled();
+    },
+  );
+
+  test("malformed initial lyrics remain a normal miss", async () => {
+    http.mockImplementation(async () => Response.json([{ ...record, syncedLyrics: "malformed" }]));
+    expect(await fetchLyrics({ ...args, ...extractedMetadata })).toMatchObject({
+      state: "not_found",
+    });
+  });
+
+  test("malformed fallback lyrics do not outrank a valid record", async () => {
+    http.mockImplementation(async () =>
+      Response.json([
+        { ...record, syncedLyrics: "malformed" },
+        { ...record, id: 2 },
+      ]),
+    );
+    expect(await fetchLyrics({ ...args, extractedMetadata })).toMatchObject({
+      state: "ready",
+      id: 2,
+    });
+  });
+
+  test.each(["Remix", "Live", "Acoustic", "Sped Up"])(
+    "keeps original %s evidence",
+    async (version) => {
+      http.mockImplementation(async () => Response.json([record]));
+      expect(
+        await fetchLyrics({
+          ...args,
+          title: `Example Artist - Example Song (${version})`,
+          extractedMetadata,
+        }),
+      ).toMatchObject({ state: "not_found" });
+    },
+  );
+
+  test.each(["(Avicii Remix)", "Avicii Remix"])("rejects a different named %s", async (version) => {
+    const trackName = `The Long Example Song With Many Shared Words ${version}`;
+    http.mockImplementation(async () =>
+      Response.json([
+        lrclibRecord(2, trackName.replace("Avicii", "Tiesto"), extractedMetadata.artistName),
+      ]),
+    );
+    expect(
+      await fetchLyrics({
+        ...args,
+        title: `${trackName} Official MV`,
+        extractedMetadata: { ...extractedMetadata, trackName },
+      }),
+    ).toMatchObject({ state: "not_found" });
+  });
+
+  test("preserves a remixer name dropped by extraction", async () => {
+    const trackName = "The Long Example Song With Many Shared Words";
+    http.mockImplementation(async () =>
+      Response.json([lrclibRecord(2, `${trackName} (Tiesto Remix)`, extractedMetadata.artistName)]),
+    );
+    expect(
+      await fetchLyrics({
+        ...args,
+        title: `${extractedMetadata.artistName} ${trackName} Avicii Remix`,
+        extractedMetadata: { ...extractedMetadata, trackName: `${trackName} Remix` },
+      }),
+    ).toMatchObject({ state: "not_found" });
+  });
+
+  test("accepts a matching version", async () => {
+    const trackName = "Example Song (Live)";
+    http.mockImplementation(async () =>
+      Response.json([lrclibRecord(2, trackName, extractedMetadata.artistName)]),
+    );
+    expect(
+      await fetchLyrics({
+        ...args,
+        title: "Example Artist Example Song (Live) Official Video",
+        extractedMetadata: { ...extractedMetadata, trackName },
+      }),
+    ).toMatchObject({ state: "ready", id: 2 });
+  });
+
+  test("retains ambiguity and duration ranking", async () => {
+    http.mockImplementation(async () =>
+      Response.json([record, { ...record, id: 2, artistName: "Example Artist Two" }]),
+    );
+    expect(await fetchLyrics({ ...args, extractedMetadata })).toMatchObject({ state: "not_found" });
+    http.mockImplementation(async () =>
+      Response.json([
+        { ...record, duration: 500 },
+        { ...record, id: 2, duration: args.duration },
+      ]),
+    );
+    expect(await fetchLyrics({ ...args, extractedMetadata })).toMatchObject({
+      state: "ready",
+      id: 2,
+    });
+  });
+
+  test("does not start another candidate when its delay would exceed the deadline", async () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(0);
+    http.mockImplementation(async () => {
+      now.mockReturnValue(14_900);
+      return Response.json([]);
+    });
+    await expect(fetchLyrics({ ...args, extractedMetadata })).rejects.toThrow("fallback deadline");
+    expect(http).toHaveBeenCalledTimes(1);
+  });
+
+  test("bounds fallback request timeout and excessive rate-limit waits", async () => {
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    http.mockImplementation(async () =>
+      Response.json({}, { status: 429, headers: { "Retry-After": "3600" } }),
+    );
+    await expect(fetchLyrics({ ...args, extractedMetadata })).rejects.toThrow("fallback deadline");
+    expect(timeout).toHaveBeenCalledWith(expect.any(Number));
+    expect(timeout.mock.calls[0][0]).toBeLessThanOrEqual(15_000);
+    expect(http).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe("LRCLIB lyric normalization", () => {
   test("parses LRC timestamps and derives each line duration", () => {

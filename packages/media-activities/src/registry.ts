@@ -1,13 +1,12 @@
-import {
-  defineActivity,
-  defineQueue,
-  wire,
-  type WireSchema,
-} from "@partyroom/activities";
+import { defineActivity, defineQueue, wire, type WireSchema } from "@partyroom/activities";
 
 const minute = 60_000;
 
 export const mediaQueues = {
+  metadata: defineQueue("metadata", {
+    leaseDurationMs: 30_000,
+    maxConcurrentActivities: 1,
+  }),
   media: defineQueue("media", {
     leaseDurationMs: 30_000,
     maxConcurrentActivities: 4,
@@ -44,6 +43,7 @@ function activity<
   input: Input;
   output: Output;
   startToCloseTimeoutMs: number;
+  scheduleToCloseTimeoutMs?: number;
   nonRetryableErrorTypes?: string[];
 }) {
   return Object.freeze({
@@ -54,7 +54,7 @@ function activity<
       input: config.input,
       output: config.output,
       startToCloseTimeoutMs: config.startToCloseTimeoutMs,
-      scheduleToCloseTimeoutMs: 6 * 60 * minute,
+      scheduleToCloseTimeoutMs: config.scheduleToCloseTimeoutMs ?? 6 * 60 * minute,
       retryPolicy: {
         maximumAttempts: 3,
         initialIntervalMs: 5_000,
@@ -66,6 +66,22 @@ function activity<
 }
 
 export const mediaActivities = {
+  extractMetadata: activity({
+    name: "media.extractMetadata",
+    version: 1,
+    queue: mediaQueues.metadata,
+    input: wire.object({
+      title: wire.string,
+      trackName: wire.optional(wire.string),
+      artistName: wire.optional(wire.string),
+    }),
+    output: wire.object({
+      trackName: wire.optional(wire.string),
+      artistName: wire.optional(wire.string),
+    }),
+    startToCloseTimeoutMs: 30_000,
+    scheduleToCloseTimeoutMs: minute,
+  }),
   resolve: activity({
     name: "media.resolve",
     version: 1,

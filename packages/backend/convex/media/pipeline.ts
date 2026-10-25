@@ -5,6 +5,7 @@ import {
   activityStep,
   type ActivityDefinition,
   type ActivityInput,
+  type ManagedWorkflowCtx,
   workflowStep,
 } from "@partyroom/activities";
 import type { FunctionReference } from "convex/server";
@@ -31,6 +32,7 @@ type LyricsLookup = FunctionReference<
     trackName?: string;
     artistName?: string;
     albumName?: string;
+    extractedMetadata?: { trackName?: string; artistName?: string };
   },
   {
     state: "ready" | "not_found";
@@ -64,44 +66,45 @@ const workflowOperations: {
   fetchLyrics: internal.media.lrclib.lookup,
 };
 
-const mediaPipelineDefinition = managedWorkflow.define({
-  args: { jobId: v.id("mediaJobs") },
-  steps: {
-    resolve: activityStep(mediaActivities.resolve, {
-      input: inputBuilders.resolve,
-      label: "Resolve source",
-      order: 0,
-    }),
-    fetchLyrics: workflowStep({
-      action: workflowOperations.fetchLyrics,
-      retry: { maxAttempts: 3, initialBackoffMs: 1_000, base: 2 },
-      label: "Fetch synced lyrics",
-      order: 1,
-    }),
-    download: activityStep(mediaActivities.download, {
-      input: inputBuilders.download,
-      label: "Download source",
-      order: 2,
-    }),
-    extractAudio: activityStep(mediaActivities.extractAudio, {
-      input: inputBuilders.extractAudio,
-      label: "Extract audio",
-      order: 3,
-    }),
-    separate: activityStep(mediaActivities.separate, {
-      input: inputBuilders.separate,
-      label: "Separate stems",
-      order: 4,
-    }),
-    mux: activityStep(mediaActivities.mux, {
-      input: inputBuilders.mux,
-      label: "Build final video",
-      order: 8,
-    }),
-  },
-});
+const pipelineSteps = {
+  resolve: activityStep(mediaActivities.resolve, {
+    input: inputBuilders.resolve,
+    label: "Resolve source",
+    order: 0,
+  }),
+  fetchLyrics: workflowStep({
+    action: workflowOperations.fetchLyrics,
+    retry: { maxAttempts: 3, initialBackoffMs: 1_000, base: 2 },
+    label: "Fetch synced lyrics",
+    order: 1,
+  }),
+  download: activityStep(mediaActivities.download, {
+    input: inputBuilders.download,
+    label: "Download source",
+    order: 2,
+  }),
+  extractAudio: activityStep(mediaActivities.extractAudio, {
+    input: inputBuilders.extractAudio,
+    label: "Extract audio",
+    order: 3,
+  }),
+  separate: activityStep(mediaActivities.separate, {
+    input: inputBuilders.separate,
+    label: "Separate stems",
+    order: 4,
+  }),
+  mux: activityStep(mediaActivities.mux, {
+    input: inputBuilders.mux,
+    label: "Build final video",
+    order: 8,
+  }),
+};
 
-const mediaPipelineHandler = mediaPipelineDefinition.handler(async (step, { jobId }) => {
+async function runMediaPipeline(
+  step: ManagedWorkflowCtx<typeof pipelineSteps>,
+  { jobId }: { jobId: Id<"mediaJobs"> },
+  fallback?: (input: LyricsLookup["_args"]) => Promise<LyricsLookup["_returnType"] | undefined>,
+) {
   try {
     const resolved = await step.steps.resolve.run({ jobId });
     const claim = await step.runMutation(
@@ -144,14 +147,18 @@ const mediaPipelineHandler = mediaPipelineDefinition.handler(async (step, { jobI
       { name: "mark-lrclib-processing", inline: true },
     );
     try {
-      const result = await step.steps.fetchLyrics.run({
+      const lookupInput = {
         jobId,
         title: resolved.title ?? "Untitled media",
         duration: resolved.duration,
         trackName: resolved.track,
         artistName: resolved.artist,
         albumName: resolved.album,
-      });
+      };
+      let result = await step.steps.fetchLyrics.run(lookupInput);
+      if (fallback && result.state === "not_found") {
+        result = (await fallback(lookupInput)) ?? result;
+      }
       await step.runMutation(
         internal.media.jobs.recordLrclib,
         {
@@ -255,12 +262,60 @@ const mediaPipelineHandler = mediaPipelineDefinition.handler(async (step, { jobI
     );
     throw error;
   }
-});
+}
 
-// Keep the original export forever while v1 journals can still reference it.
+const mediaPipelineHandler = managedWorkflow
+  .define({
+    args: { jobId: v.id("mediaJobs") },
+    steps: pipelineSteps,
+  })
+  .handler((step, args) => runMediaPipeline(step, args));
+
+// Keep the original exports while their journals can still reference them.
 export const mediaPipeline = mediaPipelineHandler;
 export const mediaPipelineV1 = mediaPipelineHandler;
 export const mediaPipelineV2 = mediaPipelineHandler;
+// New starts in routing generation 2 use V3; stored v2 journals keep their graph.
+export const mediaPipelineV3 = managedWorkflow
+  .define({
+    args: { jobId: v.id("mediaJobs") },
+    steps: {
+      ...pipelineSteps,
+      extractMetadata: activityStep(mediaActivities.extractMetadata, {
+        label: "Extract song metadata",
+        order: 1.1,
+      }),
+      fetchFallbackLyrics: workflowStep({
+        action: workflowOperations.fetchLyrics,
+        retry: false,
+        label: "Fetch lyrics using extracted metadata",
+        order: 1.2,
+      }),
+    },
+  })
+  .handler((step, args) =>
+    runMediaPipeline(step, args, async (input) => {
+      try {
+        const extractedMetadata = await step.steps.extractMetadata.run({
+          title: input.title,
+          trackName: input.trackName,
+          artistName: input.artistName,
+        });
+        if (
+          (input.trackName?.trim() || extractedMetadata.trackName?.trim()) &&
+          (input.artistName?.trim() || extractedMetadata.artistName?.trim())
+        ) {
+          return await step.steps.fetchFallbackLyrics.run({ ...input, extractedMetadata });
+        }
+      } catch (error) {
+        // Optional fallback failures leave the genuine initial miss intact.
+        console.warn("[lrclib] Metadata fallback failed", {
+          jobId: input.jobId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }),
+  );
 
 export const onPipelineComplete = internalMutation({
   args: {

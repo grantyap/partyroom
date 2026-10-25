@@ -112,7 +112,7 @@ export const request = internalMutation({
       const workflowId = await managedWorkflow.start(
         ctx,
         result.workflowVersion === 2
-          ? internal.media.pipeline.mediaPipelineV2
+          ? internal.media.pipeline.mediaPipelineV3
           : internal.media.pipeline.mediaPipeline,
         { jobId: result.jobId },
         {
@@ -178,7 +178,7 @@ export const reprocess = mutation({
     const workflowId = await managedWorkflow.start(
       ctx,
       job.workflowVersion === 2
-        ? internal.media.pipeline.mediaPipelineV2
+        ? internal.media.pipeline.mediaPipelineV3
         : internal.media.pipeline.mediaPipeline,
       { jobId },
       {
@@ -207,7 +207,7 @@ export const releaseQueuedV2 = internalMutation({
     await ctx.db.patch(jobId, { workflowVersion: 2 });
     const workflowId = await managedWorkflow.start(
       ctx,
-      internal.media.pipeline.mediaPipelineV2,
+      internal.media.pipeline.mediaPipelineV3,
       { jobId },
       {
         onComplete: internal.media.pipeline.onPipelineComplete,

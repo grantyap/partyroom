@@ -35,6 +35,18 @@
         "typescript": "catalog:",
       },
     },
+    "apps/metadata-worker": {
+      "name": "@partyroom/metadata-worker",
+      "dependencies": {
+        "@partyroom/activity-worker": "workspace:*",
+        "@partyroom/media-activities": "workspace:*",
+        "zod": "catalog:",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
     "apps/stem-worker": {
       "name": "@partyroom/stem-worker",
     },
@@ -461,6 +473,8 @@
     "@partyroom/media-activities": ["@partyroom/media-activities@workspace:packages/media-activities"],
 
     "@partyroom/media-worker": ["@partyroom/media-worker@workspace:apps/media-worker"],
+
+    "@partyroom/metadata-worker": ["@partyroom/metadata-worker@workspace:apps/metadata-worker"],
 
     "@partyroom/stem-worker": ["@partyroom/stem-worker@workspace:apps/stem-worker"],
 

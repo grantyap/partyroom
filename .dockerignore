@@ -1,4 +1,5 @@
 .git
+.cache/metadata-models
 **/.env*
 **/.venv
 **/__pycache__

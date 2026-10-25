@@ -1,4 +1,19 @@
 services:
+  metadata-worker:
+    cgroup_parent: ${ML_WORKER_CGROUP_PARENT:-}
+    volumes:
+      - ml_runtime:/resource-lock
+    environment:
+      METADATA_DEVICE: cuda
+      ACTIVITY_PROCESS_LOCK_PATH: /resource-lock/model.lock
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
   backend:
     labels:
       partyroom.dev.mode: nvidia

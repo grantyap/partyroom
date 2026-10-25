@@ -30,3 +30,7 @@ services:
   annotations-worker:
     ports:
       - "${ANNOTATIONS_WORKER_PORT:-4400}:4400"
+
+  metadata-worker:
+    ports:
+      - "127.0.0.1:${METADATA_WORKER_PORT:-4500}:4500"

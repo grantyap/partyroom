@@ -5,7 +5,7 @@ import re
 import subprocess
 import urllib.request
 
-SERVICES = ("web", "backend", "dashboard", "media-worker", "stem-worker", "lyrics-worker", "annotations-worker")
+SERVICES = ("web", "backend", "dashboard", "media-worker", "stem-worker", "lyrics-worker", "metadata-worker", "annotations-worker")
 JOBS = ("backend-deploy", "queue-release")
 
 

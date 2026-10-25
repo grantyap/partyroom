@@ -50,3 +50,37 @@ for (const [name, service] of Object.entries(compose.services)) {
     }
   });
 }
+
+test("metadata worker uses explicit CPU/CUDA modes and native Metal in Mac mode", async () => {
+  const base = Bun.YAML.parse(
+    await Bun.file(new URL("../docker-compose.yaml", import.meta.url)).text(),
+  );
+  const mac = Bun.YAML.parse(
+    await Bun.file(new URL("../docker-compose.mac.yaml", import.meta.url)).text(),
+  );
+  const nvidia = Bun.YAML.parse(
+    await Bun.file(new URL("../docker-compose.nvidia.yaml", import.meta.url)).text(),
+  );
+  expect(base.services["metadata-worker"].environment.METADATA_DEVICE).toBe("cpu");
+  expect(base.services["metadata-worker"].ports).toBeUndefined();
+  expect(base.services["metadata-worker"].environment.ACTIVITY_WORKER_API_URL).toContain(
+    "/activities/workers/",
+  );
+  expect(base.services["backend-deploy"].environment.METADATA_WORKER_URL).toBeUndefined();
+  expect(nvidia.services["metadata-worker"].environment.METADATA_DEVICE).toBe("cuda");
+  expect(
+    nvidia.services["metadata-worker"].deploy.resources.reservations.devices[0].capabilities,
+  ).toContain("gpu");
+  expect(mac.services["metadata-worker"].profiles).toEqual(["docker-metadata-worker"]);
+  expect(nvidia.services["metadata-worker"].environment.ACTIVITY_PROCESS_LOCK_PATH).toBe(
+    "/resource-lock/model.lock",
+  );
+  expect(nvidia.services["metadata-worker"].volumes).toContain("ml_runtime:/resource-lock");
+  const worker = await Bun.file(
+    new URL("../apps/metadata-worker/package.json", import.meta.url),
+  ).json();
+  for (const name of ["dev:mac", "dev:mac:build", "dev:mac:host", "dev:mac:host:build"]) {
+    expect(worker.scripts[name]).toBeDefined();
+  }
+  expect(worker.scripts["dev:mac"]).toContain("METADATA_DEVICE=metal");
+});

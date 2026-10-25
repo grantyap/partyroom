@@ -3,6 +3,11 @@ services:
     labels:
       partyroom.dev.mode: mac
 
+  metadata-worker:
+    # dev:mac tasks run this worker natively: Docker cannot provide Metal acceleration.
+    profiles:
+      - docker-metadata-worker
+
   stem-worker:
     profiles:
       - docker-stem-worker

@@ -107,6 +107,7 @@ export async function workflowTest() {
       "_generated/api.js",
       "media/jobs.ts",
       "media/pipeline.ts",
+      "media/lrclib.ts",
       "media/activityInputs/core.ts",
       "activities/activityCompletion.ts",
       "activities/managedWorkflow.ts",
