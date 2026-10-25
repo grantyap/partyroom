@@ -1,5 +1,14 @@
 # Agent instructions
 
+## Pull requests
+
+- When creating or substantially rewriting a PR description, read and fill
+  [.github/pull_request_template.md](.github/pull_request_template.md).
+- This also applies to `gh`, API calls, and delegated work. Explicit body arguments
+  bypass automatic template population; replace comments with concrete details.
+- Scale detail to the change. Report actual validation and pending user-flow
+  checks separately. Use closing issue keywords only for completed outcomes.
+
 ## GitHub issues
 
 - When creating or substantially rewriting an issue, read and use the appropriate
