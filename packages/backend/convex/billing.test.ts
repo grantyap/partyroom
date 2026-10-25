@@ -288,6 +288,8 @@ function stripeResponses(respond: (url: URL, method: string) => unknown) {
 test("rerunning the import skips a revoked free subscription and rejects a live price in sandbox", async () => {
   const t = billingTest();
   let livemode = false;
+  let existingStatus = "canceled";
+  let complimentary = true;
   const calls = stripeResponses((url, method) => {
     if (url.pathname === "/v1/prices/price_premium")
       return {
@@ -313,15 +315,26 @@ test("rerunning the import skips a revoked free subscription and rejects a live 
         has_more: false,
       };
     if (url.pathname === "/v1/subscriptions") {
+      if (method === "POST")
+        return {
+          id: "sub_new_import",
+          customer: "cus_import",
+          status: "active",
+          cancel_at_period_end: false,
+          metadata: { partyroomEarlyAccess: "v1" },
+          items: {
+            data: [{ current_period_end: now / 1000 + 86400, price: { id: "price_premium" } }],
+          },
+        };
       expect(method).toBe("GET");
       return {
         data: [
           {
             id: "sub_import",
             customer: "cus_import",
-            status: "canceled",
+            status: existingStatus,
             cancel_at_period_end: false,
-            metadata: { partyroomEarlyAccess: "v1" },
+            metadata: complimentary ? { partyroomEarlyAccess: "v1" } : {},
             items: {
               data: [{ current_period_end: now / 1000 + 86400, price: { id: "price_premium" } }],
             },
@@ -345,6 +358,23 @@ test("rerunning the import skips a revoked free subscription and rejects a live 
     "environment does not match",
   );
   expect(calls).toHaveBeenCalledTimes(1);
+  livemode = false;
+  complimentary = false;
+  for (const status of ["active", "past_due", "unpaid", "incomplete"]) {
+    existingStatus = status;
+    calls.mockClear();
+    await expect(t.action(internal.billingStripe.importEarlyAccess, args)).rejects.toThrow(
+      "already has a Premium subscription",
+    );
+    expect(calls.mock.calls.every(([, options]) => options?.method === "GET")).toBe(true);
+  }
+  for (const status of ["canceled", "incomplete_expired"]) {
+    existingStatus = status;
+    expect(await t.action(internal.billingStripe.importEarlyAccess, args)).toEqual({
+      created: 1,
+      skipped: 0,
+    });
+  }
 });
 
 test("checkout reuses an open session and refuses subscription duplication", async () => {
@@ -381,6 +411,64 @@ test("checkout reuses an open session and refuses subscription duplication", asy
   existing = true;
   await expect(t.action(api.billing.checkout, {})).rejects.toThrow("existing Premium subscription");
 });
+
+test("checkout observes completed sessions before checking for their new subscription", async () => {
+  const t = billingTest();
+  await seed(t, "canceled");
+  vi.spyOn(authComponent, "getAuthUser").mockResolvedValue(host as never);
+  let completed = false;
+  const calls = stripeResponses((url, method) => {
+    if (url.pathname === "/v1/checkout/sessions" && method === "GET") {
+      completed = true;
+      return {
+        data: [{ id: "cs_completed", status: "complete", metadata: { partyroomPremium: "v1" } }],
+      };
+    }
+    if (url.pathname === "/v1/subscriptions")
+      return {
+        data: completed
+          ? [{ status: "active", items: { data: [{ price: { id: "price_premium" } }] } }]
+          : [],
+        has_more: false,
+      };
+    return { id: "cs_duplicate", url: "https://checkout.stripe.com/duplicate" };
+  });
+  await expect(t.action(api.billing.checkout, {})).rejects.toThrow("existing Premium subscription");
+  expect(calls.mock.calls.every(([, options]) => options?.method === "GET")).toBe(true);
+});
+
+test.each([null, "cs_expired"])(
+  "concurrent Checkout requests share the idempotency key after %s",
+  async (previousId) => {
+    const t = billingTest();
+    await seed(t, "canceled");
+    vi.spyOn(authComponent, "getAuthUser").mockResolvedValue(host as never);
+    vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_dummy");
+    vi.stubEnv("SITE_URL", "https://partyroom.invalid");
+    const keys: string[] = [];
+    vi.stubGlobal("fetch", async (input: string, options: RequestInit) => {
+      const url = new URL(input);
+      if (url.pathname === "/v1/subscriptions") return Response.json({ data: [], has_more: false });
+      if (options.method === "GET")
+        return Response.json({
+          data: previousId
+            ? [{ id: previousId, status: "expired", metadata: { partyroomPremium: "v1" } }]
+            : [],
+        });
+      keys.push(new Headers(options.headers).get("idempotency-key")!);
+      return Response.json({ id: "cs_one", url: "https://checkout.stripe.com/one" });
+    });
+    const results = await Promise.all([
+      t.action(api.billing.checkout, {}),
+      t.action(api.billing.checkout, {}),
+    ]);
+    expect(results[0]).toEqual(results[1]);
+    expect(keys).toHaveLength(2);
+    expect(new Set(keys)).toEqual(
+      new Set([`partyroom-checkout-cus_host-${previousId ?? "first"}`]),
+    );
+  },
+);
 
 test("old expiry timers cannot revoke a renewed paid period", async () => {
   const t = billingTest();
@@ -436,6 +524,80 @@ test("a signed old webhook cannot leave a canceled subscription active", async (
   expect(await t.run((ctx) => getPremiumAccess(ctx, host))).toMatchObject({ premium: false });
 });
 
+async function signedEvent(t: ReturnType<typeof billingTest>, type: string, object: unknown) {
+  vi.stubEnv("STRIPE_WEBHOOK_SECRET", "whsec_test");
+  const payload = JSON.stringify({
+    id: "evt_replayed",
+    type,
+    created: now / 1000 - 60,
+    data: { object },
+  });
+  const signature = await new Stripe("sk_test_dummy").webhooks.generateTestHeaderStringAsync({
+    payload,
+    secret: "whsec_test",
+    timestamp: now / 1000,
+    cryptoProvider: Stripe.createSubtleCryptoProvider(),
+  });
+  return t.fetch("/stripe/webhook", {
+    method: "POST",
+    body: payload,
+    headers: { "stripe-signature": signature },
+  });
+}
+
+test("replayed customer updates use current ownership and preserve a verified local claim", async () => {
+  const t = billingTest();
+  await seed(t);
+  stripeResponses((url) => {
+    expect(url.pathname).toBe("/v1/customers/cus_host");
+    return { id: "cus_host", email: host.email, metadata: { userId: host._id } };
+  });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    expect(
+      (
+        await signedEvent(t, "customer.updated", {
+          id: "cus_host",
+          email: host.email,
+          metadata: {},
+        })
+      ).status,
+    ).toBe(200);
+    expect(await t.run((ctx) => getPremiumAccess(ctx, host))).toMatchObject({ premium: true });
+  }
+  // A local claim can precede the retryable Stripe metadata update.
+  await t.mutation(components.stripe.private.handleCustomerUpdated, {
+    stripeCustomerId: "cus_host",
+    email: host.email,
+    metadata: {},
+  });
+  expect(await t.run((ctx) => getPremiumAccess(ctx, host))).toMatchObject({ premium: true });
+  expect(await t.run((ctx) => getBillingCustomer(ctx, { ...host, _id: "other" }))).toBeNull();
+});
+
+test.each(["active", "canceled"])(
+  "failed refresh preserves %s access without committing an old event",
+  async (status) => {
+    const t = billingTest();
+    await seed(t, status);
+    vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_dummy");
+    vi.stubGlobal("fetch", async () =>
+      Response.json({ error: { message: "Forbidden" } }, { status: 403 }),
+    );
+    const response = await signedEvent(t, "customer.subscription.updated", {
+      id: "sub_host",
+      customer: "cus_host",
+      status: status === "active" ? "canceled" : "active",
+      cancel_at_period_end: false,
+      metadata: {},
+      items: { data: [{ current_period_end: now / 1000 + 86400, price: { id: "price_premium" } }] },
+    });
+    expect(response.status).toBe(500);
+    expect(await t.run((ctx) => getPremiumAccess(ctx, host))).toMatchObject({
+      premium: status === "active",
+    });
+  },
+);
+
 test("an initial failed invoice cannot start a renewal grace period", async () => {
   const t = billingTest();
   await seed(t, "incomplete");
@@ -464,6 +626,27 @@ test("an initial failed invoice cannot start a renewal grace period", async () =
   );
   expect(await t.run((ctx) => ctx.db.query("billingRenewals").take(1))).toEqual([]);
   expect(await t.run((ctx) => getPremiumAccess(ctx, host))).toMatchObject({ premium: false });
+});
+
+test("media requests reject unauthenticated callers and unpaid hosts", async () => {
+  const t = billingTest();
+  const roomId = await t.run((ctx) =>
+    ctx.db.insert("rooms", {
+      owner: host._id,
+      name: "unpaid-room",
+      memberPermissions: defaultRoomMemberPermissions,
+    }),
+  );
+  const user = vi.spyOn(authComponent, "getAuthUser");
+  user.mockRejectedValue(new Error("Unauthenticated"));
+  await expect(
+    t.action(api.media.actions.requestMedia, { roomId, url: "https://example.com/song" }),
+  ).rejects.toThrow("Unauthenticated");
+  user.mockResolvedValue(host as never);
+  await expect(
+    t.action(api.media.actions.requestMedia, { roomId, url: "https://example.com/song" }),
+  ).rejects.toThrow("Premium subscription required");
+  expect(await t.run((ctx) => ctx.db.query("mediaJobs").take(1))).toEqual([]);
 });
 
 test("media creation rechecks host access after the action's earlier authorization", async () => {
@@ -531,7 +714,6 @@ test("billing UI exposes only owned or verified accounts, and keeps canceled his
   });
 });
 
-
 test("unverified accounts cannot start Checkout or make any Stripe requests", async () => {
   const t = billingTest();
   const user = vi.spyOn(authComponent, "getAuthUser");
@@ -541,7 +723,9 @@ test("unverified accounts cannot start Checkout or make any Stripe requests", as
     user.mockResolvedValue({ ...host, emailVerified } as never);
     await expect(t.action(api.billing.checkout, {})).rejects.toThrow("Verify your email");
     expect(fetch).not.toHaveBeenCalled();
-    expect(await t.query(components.stripe.public.getCustomerByUserId, { userId: host._id })).toBeNull();
+    expect(
+      await t.query(components.stripe.public.getCustomerByUserId, { userId: host._id }),
+    ).toBeNull();
   }
   await seed(t, "canceled");
   user.mockResolvedValue({ ...host, emailVerified: false } as never);
