@@ -1,7 +1,8 @@
 import Stripe from "stripe";
+import { processEvent } from "@convex-dev/stripe";
 import { v } from "convex/values";
 import { components, internal } from "./_generated/api";
-import { action, internalAction, env, type ActionCtx } from "./_generated/server";
+import { action, httpAction, internalAction, env, type ActionCtx } from "./_generated/server";
 
 export function stripeApi() {
   if (!env.STRIPE_SECRET_KEY) throw new Error("Stripe API key is not configured");
@@ -36,6 +37,21 @@ export async function handleBillingEvent(
   event: { type: string; created: number; data: { object: unknown } },
 ) {
   const stripe = stripeApi();
+  if (["customer.created", "customer.updated", "customer.deleted"].includes(event.type)) {
+    const current = await stripe.customers.retrieve((event.data.object as Stripe.Customer).id);
+    if (current.deleted) {
+      await ctx.runMutation(components.stripe.private.handleCustomerDeleted, {
+        stripeCustomerId: current.id,
+      });
+    } else {
+      await ctx.runMutation(components.stripe.public.createOrUpdateCustomer, {
+        stripeCustomerId: current.id,
+        email: current.email ?? undefined,
+        name: current.name ?? undefined,
+        metadata: current.metadata,
+      });
+    }
+  }
   if (event.type.startsWith("customer.subscription.")) {
     const subscription = event.data.object as Stripe.Subscription;
     // Retrieve current state: replaying an old update must not resurrect a canceled subscription.
@@ -46,6 +62,7 @@ export async function handleBillingEvent(
     const subscription = invoice.parent?.subscription_details?.subscription;
     const subscriptionId = typeof subscription === "string" ? subscription : subscription?.id;
     if (!subscriptionId) return;
+    const current = await stripe.subscriptions.retrieve(subscriptionId);
     if (invoice.billing_reason === "subscription_cycle" && invoice.amount_due > 0) {
       await ctx.runMutation(internal.billing.recordRenewal, {
         stripeInvoiceId: invoice.id,
@@ -55,9 +72,35 @@ export async function handleBillingEvent(
         paid: event.type === "invoice.paid",
       });
     }
-    await syncSubscription(ctx, await stripe.subscriptions.retrieve(subscriptionId));
+    await syncSubscription(ctx, current);
   }
 }
+
+export const webhook = httpAction(async (ctx, request) => {
+  if (!env.STRIPE_SECRET_KEY || !env.STRIPE_WEBHOOK_SECRET)
+    return new Response("Stripe webhook is not configured", { status: 503 });
+  const stripe = stripeApi();
+  let event: Stripe.Event;
+  try {
+    event = await stripe.webhooks.constructEventAsync(
+      await request.text(),
+      request.headers.get("stripe-signature") ?? "",
+      env.STRIPE_WEBHOOK_SECRET,
+    );
+  } catch {
+    return new Response("Invalid Stripe signature", { status: 400 });
+  }
+  try {
+    // The component commits event snapshots before custom hooks; access needs current state first.
+    if (!event.type.startsWith("customer."))
+      await processEvent(ctx, components.stripe, event, stripe);
+    await handleBillingEvent(ctx, event);
+    return Response.json({ received: true });
+  } catch {
+    console.error("Stripe webhook processing failed", event.id, event.type);
+    return new Response("Stripe webhook processing failed", { status: 500 });
+  }
+});
 
 export const linkImportedCustomer = action({
   args: {},
@@ -148,6 +191,16 @@ export const importEarlyAccess = internalAction({
         status: "all",
         limit: 100,
       })) {
+        if (
+          subscription.metadata.partyroomEarlyAccess !== "v1" &&
+          subscription.status !== "canceled" &&
+          subscription.status !== "incomplete_expired" &&
+          subscription.items.data.some((item) => item.price.id === price.id)
+        ) {
+          throw new Error(
+            `Customer ${customer.id} already has a Premium subscription; resolve it before importing`,
+          );
+        }
         if (subscription.metadata.partyroomEarlyAccess === "v1") {
           imported = true;
           await syncSubscription(ctx, subscription);

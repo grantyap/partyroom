@@ -16,7 +16,7 @@ export async function getBillingCustomer(ctx: QueryCtx, user: BillingUser) {
   const linked = await ctx.runQuery(components.stripe.public.getCustomerByUserId, {
     userId: user._id,
   });
-  if (linked) return linked.metadata?.userId === user._id ? linked : null;
+  if (linked) return linked;
   // A signup's self-reported email must never claim somebody else's subscription.
   if (!user.emailVerified || !user.email) return null;
   const imported = await ctx.runQuery(components.stripe.public.getCustomerByEmail, {

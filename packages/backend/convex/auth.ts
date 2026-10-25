@@ -27,6 +27,12 @@ export const createAuth = (convexCtx: GenericCtx<DataModel>) => {
     emailAndPassword: {
       enabled: true,
       requireEmailVerification: false,
+      revokeSessionsOnPasswordReset: true,
+      sendResetPassword: async ({ user, url }) => {
+        if (!("runMutation" in convexCtx))
+          throw new Error("Password reset requires a Convex action context");
+        await convexCtx.runMutation(internal.email.sendPasswordReset, { email: user.email, url });
+      },
     },
     emailVerification: {
       // Existing users request a link with authClient.sendVerificationEmail({ email,

@@ -10,3 +10,10 @@ export function authRedirect(target: string | null) {
     return "/app";
   }
 }
+
+export function verificationRedirect(target: string) {
+  const url = new URL(authRedirect(target), "https://partyroom.invalid");
+  url.searchParams.delete("error");
+  url.searchParams.set("verification", "success");
+  return `${url.pathname}${url.search}${url.hash}`;
+}
