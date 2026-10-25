@@ -5,10 +5,13 @@ import { managedWorkflow, workflowStatus } from "../activities/workflowManager";
 import { attachWorkflowToJob } from "./domain/jobs";
 import { defaultRoomMemberPermissions } from "../rooms.schema";
 import { completedArtifacts, workflowTest } from "../../test/media";
+import { authComponent } from "../auth";
+import { registerStripe } from "../test.setup";
 
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
 
@@ -191,6 +194,30 @@ async function fallbackPipeline(routingVersion: 1 | 2 = 2) {
   const http = vi.fn<typeof fetch>().mockImplementation(async () => Response.json([]));
   vi.stubGlobal("fetch", http);
   const t = await workflowTest();
+  registerStripe(t);
+  vi.stubEnv("STRIPE_PREMIUM_PRICE_ID", "price_premium");
+  vi.spyOn(authComponent, "getAuthUser").mockResolvedValue({
+    _id: "user",
+    email: "guest@example.com",
+    emailVerified: true,
+  } as never);
+  vi.spyOn(authComponent, "getAnyUserById").mockResolvedValue({
+    _id: "owner",
+    email: "host@example.com",
+    emailVerified: true,
+  } as never);
+  await t.mutation(components.stripe.public.createOrUpdateCustomer, {
+    stripeCustomerId: "cus_owner",
+    metadata: { userId: "owner" },
+  });
+  await t.mutation(components.stripe.private.handleSubscriptionUpdated, {
+    stripeSubscriptionId: "sub_owner",
+    stripeCustomerId: "cus_owner",
+    status: "active",
+    currentPeriodEnd: Date.now() / 1000 + 86400,
+    cancelAtPeriodEnd: false,
+    priceId: "price_premium",
+  });
   const roomId = await t.run(async (ctx) => {
     await ctx.db.insert("migrationRuns", {
       migrationId: "workflow-state-redesign-v1",
