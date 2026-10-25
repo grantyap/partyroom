@@ -18,6 +18,32 @@ First, install the dependencies:
 bun install
 ```
 
+## T3 worktrees
+
+`t3.json` sets `defaultThreadEnvMode: "worktree"` so new T3 threads default to a
+separate worktree unless overridden in T3 settings. It runs the **Setup Worktree**
+action automatically on creation (`runOnWorktreeCreate: true`).
+It requires Bun on PATH and copies `.env`, `apps/web/.env`, and
+`packages/backend/.env.local` from `T3CODE_PROJECT_ROOT` (the original checkout)
+only when missing. Copies are owner-readable/writable only; existing files and
+symlinks are preserved. Missing source files produce a warning; create them using
+the examples below before running services. Copies are independent, not synced.
+
+Setup then runs `bun install --frozen-lockfile` inside the worktree. The action sets
+`async: false` so T3 waits for it to exit before starting the agent. Rerunning the
+action is safe; install failures fail setup. It does not start services, run
+`dev:setup`, deploy Convex functions, or install Python dependencies. Keep each
+worktree's `node_modules` and Python `.venv` local; do not symlink them between
+checkouts. Native worker launchers prepare their Python environments when started.
+
+**Use only one active full development stack and Convex watcher across all
+checkouts.** Copied env files still target the same backend, Docker Compose project,
+and fixed ports. Native workers also share scratch directories, which the lyrics
+worker clears on startup. `dev:setup` changes the shared backend, `dev:down` stops
+its containers, and `dev:reset` deletes its data volumes. T3 has no configuration
+option to enforce this single-stack restriction. Other worktrees can edit code and
+run isolated checks.
+
 ## Convex Setup
 
 Create the local environment files:
