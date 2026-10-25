@@ -254,6 +254,10 @@ This setup affects development only, not production builds or deployments.
 
 ## Coolify
 
+Pull requests and branch pushes run the test and production-image checks described
+in [CI setup](.github/CI.md). That guide also lists the remaining configuration
+needed to make CI control production releases.
+
 Deploy `docker-compose.yaml` as the production stack and route the `web` service to port `3000`.
 Set the web, Convex, Google Form, and Google Sheets values listed in `.env.example` in Coolify before
 building; the two `PUBLIC_CONVEX_*` values are build arguments and require a rebuild when changed.

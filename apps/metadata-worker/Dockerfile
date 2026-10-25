@@ -1,4 +1,4 @@
-FROM oven/bun:1.4.2-debian AS application
+FROM oven/bun:1.4.4-debian AS application
 WORKDIR /workspace
 COPY package.json bun.lock ./
 COPY apps/metadata-worker/package.json ./apps/metadata-worker/
