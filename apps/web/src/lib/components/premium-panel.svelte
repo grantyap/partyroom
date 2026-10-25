@@ -5,6 +5,9 @@
 	import ArrowRightIcon from "@lucide/svelte/icons/arrow-right";
 	import MailIcon from "@lucide/svelte/icons/mail";
 	import { refreshAll } from "$app/navigation";
+	import { page } from "$app/state";
+	import { verificationRedirect } from "#lib/auth-redirect.js";
+	import { PUBLIC_FEEDBACK_FORM_URL } from "$app/env/public";
 	import { SearchParams } from "#lib/hooks/search-params.svelte.js";
 	import { authClient } from "#lib/auth-client.js";
 	import { Button } from "#lib/components/ui/button/index.js";
@@ -26,10 +29,23 @@
 	let claimAttemptedFor = $state<string | null>(null);
 	let sentTo = $state<string | null>(null);
 	let claimFailed = $state(false);
+	let confirmationDelayed = $state(false);
 	const status = $derived(billing.data);
 	const subscription = $derived(status?.subscription);
 	const paymentFailed = $derived(subscription?.status === "past_due" || subscription?.status === "unpaid");
 	const accessDate = $derived(status?.accessUntil ? new Date(status.accessUntil).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : null);
+	const supportUrl = $derived.by(() => {
+		try {
+			const url = new URL(PUBLIC_FEEDBACK_FORM_URL);
+			return url.protocol === "https:" && !url.href.includes("YOUR_FORM_ID") ? url.href : null;
+		} catch { return null; }
+	});
+	$effect(() => {
+		confirmationDelayed = false;
+		if (query.current.billing !== "success" || status?.premium) return;
+		const timer = setTimeout(() => confirmationDelayed = true, 60_000);
+		return () => clearTimeout(timer);
+	});
 
 	// Claim only an authenticated, verified association returned by the backend.
 	// The Stripe metadata write is retryable; never infer a grant from a redirect.
@@ -84,7 +100,8 @@
 		busy = "verify";
 		error = null;
 		try {
-			const result = await authClient.sendVerificationEmail({ email: user.data.email, callbackURL: "/app/settings?verification=success#email" });
+			const current = page.shallow?.url ?? page.url;
+			const result = await authClient.sendVerificationEmail({ email: user.data.email, callbackURL: verificationRedirect(`${current.pathname}${current.search}${current.hash}`) });
 			if (result.error) throw new Error(result.error.message);
 			sentTo = user.data.email;
 			notice = `We sent a link to ${sentTo}. Open it to verify your email.`;
@@ -103,7 +120,7 @@
 			const result = await authClient.getSession({ query: { disableCookieCache: true } });
 			if (result.error) throw new Error(result.error.message);
 			await refreshAll({ includeLoadFunctions: true });
-			notice = "Account refreshed. To verify your email, open the link we sent you.";
+				notice = "Account refreshed. Your current verification and subscription status appears above.";
 		} catch {
 			error = "We couldn’t refresh your account. Please try again.";
 		} finally {
@@ -174,6 +191,11 @@
 					</section>
 				</AnchorHighlight>
 			{:else}
+				<ol aria-label="Hosting setup" class="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
+					<li>1. Verify email {user.data.emailVerified ? "✓" : ""}</li>
+					<li>2. Get Premium {status.premium ? "✓" : ""}</li>
+					<li>3. Create a room</li>
+				</ol>
 				{@render verificationCard()}
 				{@render billingDetails()}
 			{/if}
@@ -237,8 +259,14 @@
 				{/if}
 				{#if query.current.billing === "success" && !status.premium}
 					<p role="status">Confirming your payment… This page will update when it’s ready. If it takes too long, check Manage billing before paying again.</p>
+					{#if confirmationDelayed}
+						<p role="status">Confirmation is taking longer than expected. Refresh your account or check Manage billing. Please don’t pay again.</p>
+						<Button variant="outline" disabled={Boolean(busy)} onclick={refreshVerification}>Refresh account</Button>
+						{#if supportUrl}<Button variant="outline" href={supportUrl} target="_blank" rel="noreferrer">Contact support</Button>{:else}<p>Support contact is not configured. Keep your receipt and contact the person who invited you.</p>{/if}
+					{/if}
 				{:else if query.current.billing === "success" && status.premium}
-					<p role="status">{settingsPage ? "You’re all set. Head back to Rooms to start hosting." : "You’re all set. Close this window to create a room."}</p>
+					<p role="status">You’re all set. Start hosting from Rooms.</p>
+					<Button href="/app">Go to Rooms</Button>
 				{:else if query.current.billing === "canceled"}
 					<p role="status">You haven’t been charged.</p>
 				{/if}
