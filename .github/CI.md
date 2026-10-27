@@ -68,18 +68,23 @@ concurrent triggers. Do not configure the production environment or disable its
 existing webhook until those checks pass. Restrict manual and external Coolify
 deployments so they cannot race the workflow.
 
-The GitHub-hosted runner needs a secure network route and SSH access to the Docker
-host; its current private address is not reachable directly from GitHub. The SSH
-account needs Python 3 and permission to inspect Docker containers. In the protected
+The GitHub-hosted runner joins the existing ZeroTier network and connects through
+an SSH jump host to the Docker host. The target SSH account needs Python 3 and
+permission to inspect Docker containers. In the protected
 GitHub production environment, set variables `COOLIFY_URL`, `COOLIFY_APPLICATION_UUID`, and
 `SMOKE_ORIGIN`, and secrets `COOLIFY_READ_TOKEN`, `COOLIFY_WRITE_TOKEN`,
 `COOLIFY_DEPLOY_TOKEN`, `SMOKE_EMAIL`, `SMOKE_PASSWORD`, `PRODUCTION_SSH_HOST`,
 `PRODUCTION_SSH_PORT`, `PRODUCTION_SSH_USER`, `PRODUCTION_SSH_KEY`, and
-`PRODUCTION_SSH_KNOWN_HOSTS`. Verify the host key independently. Use a dedicated
+`PRODUCTION_SSH_KNOWN_HOSTS`, `PRODUCTION_SSH_JUMP_HOST`,
+`PRODUCTION_SSH_JUMP_USER`, `PRODUCTION_SSH_JUMP_KEY`, `ZEROTIER_NETWORK_ID`,
+and `ZEROTIER_CENTRAL_TOKEN`. Verify both SSH host keys independently. The
+ZeroTier token authorizes and removes temporary runner members. Use a dedicated
 account and the minimum Coolify permissions for each token. Disable Coolify's
 automatic Git deployments only when the tested replacement is ready, then set
 the repository enable variable and run a controlled release. The write token can
 change application configuration and must be restricted to the protected environment.
+The vendored ZeroTier action is based on v1.0.1 with its nested action pinned;
+review and update it when upgrading the upstream action.
 
 Real GPU inference and a complete media/playback check need a separate trusted
 GPU runner and fixtures. Run them for worker releases; the fast checks do not
