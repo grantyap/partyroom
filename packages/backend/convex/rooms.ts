@@ -6,7 +6,11 @@ import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/s
 import { authComponent, getCurrentUserImpl } from "./auth";
 import { requirePremium } from "./billingAccess";
 import { capabilities, requireCapability, type RoomPermission } from "./capabilities";
-import { defaultRoomMemberPermissions, roomMemberPermissionsSchema } from "./rooms.schema";
+import {
+  defaultRoomMemberPermissions,
+  EMPTY_ROOM_LIFETIME_MS,
+  roomMemberPermissionsSchema,
+} from "./rooms.schema";
 
 const roomDocSchema = v.object({
   _id: v.id("rooms"),
@@ -200,7 +204,7 @@ export const createRoom = mutation({
       revision: 0,
       queueRevision: 0,
     });
-    await ctx.scheduler.runAfter(10 * 60_000, internal.playback.deleteIfEmpty, {
+    await ctx.scheduler.runAfter(EMPTY_ROOM_LIFETIME_MS, internal.playback.deleteIfEmpty, {
       roomId: room,
       occupancyGeneration: 0,
     });

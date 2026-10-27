@@ -15,6 +15,7 @@ import {
 import { defaultRoomMemberPermissions } from "./rooms.schema";
 import schema from "./schema";
 import { modules, registerStripe } from "./test.setup";
+import { presence } from "./presenceComponent";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -130,6 +131,28 @@ async function enqueue(
 }
 
 describe("room playback aggregate", () => {
+  test("each empty period gets a fresh 24-hour deletion timer", async () => {
+    vi.useFakeTimers();
+    const t = convexTest(schema, modules);
+    const { roomId } = await seedRoom(t);
+    vi.spyOn(presence, "listRoom").mockResolvedValue([]);
+    vi.spyOn(presence, "removeRoom").mockResolvedValue(undefined as never);
+    await t.mutation(internal.playback.observePresence, { roomId });
+    await vi.advanceTimersByTimeAsync(600_000);
+    await t.finishInProgressScheduledFunctions();
+    expect(await t.run((ctx) => ctx.db.get("rooms", roomId))).not.toBeNull();
+    await t.mutation(internal.playback.recordOccupied, { roomId });
+    await t.mutation(internal.playback.observePresence, { roomId });
+    await vi.advanceTimersByTimeAsync(86_400_000 - 600_000);
+    await t.finishInProgressScheduledFunctions();
+    expect(await t.run((ctx) => ctx.db.get("rooms", roomId))).not.toBeNull();
+    await vi.advanceTimersByTimeAsync(599_999);
+    await t.finishInProgressScheduledFunctions();
+    expect(await t.run((ctx) => ctx.db.get("rooms", roomId))).not.toBeNull();
+    await vi.advanceTimersByTimeAsync(1);
+    await t.finishInProgressScheduledFunctions();
+    expect(await t.run((ctx) => ctx.db.get("rooms", roomId))).toBeNull();
+  });
   test("duplicate media receives distinct embedded queue keys", async () => {
     const t = convexTest(schema, modules);
     const { roomId, playbackId } = await seedRoom(t, false);
