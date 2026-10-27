@@ -27,6 +27,10 @@ jobs:
         with:
           bun-version: 1.4.4
       - run: bun install --frozen-lockfile
+      - name: Unattended room smoke regression test
+        run: |
+          bunx playwright install --with-deps chromium
+          node --test scripts/test-room-creation-unattended.mjs
       - run: bun run check-types
       - run: bun run --cwd apps/web check
       - name: Bun suites (Vitest suites run separately)
