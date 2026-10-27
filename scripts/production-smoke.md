@@ -43,9 +43,18 @@ One empty room is created; the app's normal empty-room expiry cleans it up.
 The account must have room-creation access (including Premium when that ships).
 Credentials are supplied through normal sign-in, never committed or printed.
 
-These are explicit smoke checks, not an unattended monitor. For unattended runs,
-provide a dedicated test account and a browser runner, and invoke the Docker-host
-check from the release runner too. Do not rely on Coolify's post-deployment hook
+For unattended runs, install dependencies with `bun install --frozen-lockfile`
+and Chromium with `bunx playwright install --with-deps chromium`, then provide a
+dedicated account through `SMOKE_EMAIL` and `SMOKE_PASSWORD`, and set
+`SMOKE_ORIGIN` to the HTTPS origin. Run:
+
+```sh
+node scripts/check-room-creation-unattended.mjs
+```
+
+The process exits nonzero on login, room, persistence, or browser errors; it does
+not print credentials or browser error details. Invoke the Docker-host check from
+separately on the Docker host; the release workflow does not run it. Do not rely on Coolify's post-deployment hook
 as a failure gate: in Coolify 4.4.6 it marks the deployment complete first and logs
 post-command failures without failing the deployment.
 
