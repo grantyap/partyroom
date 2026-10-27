@@ -14,6 +14,7 @@ import { requireRoomAction } from "./rooms";
 import { defaultRoomMemberPermissions } from "./rooms.schema";
 import schema from "./schema";
 import { modules, registerStripe } from "./test.setup";
+import { presence } from "./presenceComponent";
 
 const now = 1_800_000_000_000;
 const host = { _id: "host", email: "host@example.com", emailVerified: true };
@@ -117,6 +118,27 @@ test("unpaid accounts cannot create rooms or check out as guests", async () => {
   );
   user.mockResolvedValue({ ...host, isAnonymous: true } as never);
   await expect(t.action(api.billing.checkout, {})).rejects.toThrow("Registered account required");
+});
+
+test("new empty rooms expire after 24 hours and clean up their visits", async () => {
+  const t = billingTest();
+  await seed(t);
+  vi.spyOn(authComponent, "getAuthUser").mockResolvedValue(host as never);
+  vi.spyOn(presence, "listRoom").mockResolvedValue([]);
+  vi.spyOn(presence, "removeRoom").mockResolvedValue(undefined as never);
+  const { id } = await t.mutation(api.rooms.createRoom, { name: "expiry-test" });
+  await t.run((ctx) =>
+    ctx.db.insert("roomVisits", { room: id, user: "visitor", lastVisitedAt: now }),
+  );
+  for (const elapsed of [600_000, 86_400_000 - 600_000 - 1]) {
+    await vi.advanceTimersByTimeAsync(elapsed);
+    await t.finishInProgressScheduledFunctions();
+    expect(await t.run((ctx) => ctx.db.get("rooms", id))).not.toBeNull();
+  }
+  await vi.advanceTimersByTimeAsync(1);
+  await t.finishInProgressScheduledFunctions();
+  expect(await t.run((ctx) => ctx.db.get("rooms", id))).toBeNull();
+  expect(await t.run((ctx) => ctx.db.query("roomVisits").collect())).toEqual([]);
 });
 
 test("renewal retries and out-of-order failures cannot extend grace or undo payment", async () => {
@@ -531,7 +553,6 @@ test("billing UI exposes only owned or verified accounts, and keeps canceled his
   });
 });
 
-
 test("unverified accounts cannot start Checkout or make any Stripe requests", async () => {
   const t = billingTest();
   const user = vi.spyOn(authComponent, "getAuthUser");
@@ -541,7 +562,9 @@ test("unverified accounts cannot start Checkout or make any Stripe requests", as
     user.mockResolvedValue({ ...host, emailVerified } as never);
     await expect(t.action(api.billing.checkout, {})).rejects.toThrow("Verify your email");
     expect(fetch).not.toHaveBeenCalled();
-    expect(await t.query(components.stripe.public.getCustomerByUserId, { userId: host._id })).toBeNull();
+    expect(
+      await t.query(components.stripe.public.getCustomerByUserId, { userId: host._id }),
+    ).toBeNull();
   }
   await seed(t, "canceled");
   user.mockResolvedValue({ ...host, emailVerified: false } as never);
