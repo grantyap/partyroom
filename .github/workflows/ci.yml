@@ -77,6 +77,9 @@ jobs:
       - name: Coolify deployment checker regression tests
         if: matrix.project == 'packages/activity-worker-python'
         run: .venv/bin/python -m unittest discover -s ../../scripts -p test_check_coolify_deployment.py -v
+      - name: Coolify release regression tests
+        if: matrix.project == 'packages/activity-worker-python'
+        run: .venv/bin/python -m unittest discover -s ../../scripts -p test_release_coolify.py -v
 
   images:
     name: Production image (${{ matrix.image }})

@@ -51,6 +51,34 @@ independently. Before treating CI as a production release gate:
    versions, and test upgrade/migration recovery before enabling automated rollback.
    A previous application image does not reverse database migrations.
 
+`Production release` is disabled until the repository variable
+`PRODUCTION_RELEASE_ENABLED` is set to `true`. Once enabled, a successful push
+CI run on `main` starts one serialized release on the dedicated
+`partyroom-production` self-hosted runner. The job checks that the SHA is still
+the tip of `main`, pins it in Coolify, queues the deployment, verifies its
+result and SHA, and runs both smoke checks. A superseded run fails without
+deploying. PR jobs must never have access to this runner or the production
+environment. Configure branch protection before trusting code on `main`.
+
+Before enabling it, validate this sequence against a separate nonproduction
+application on the installed Coolify version: confirm that setting
+`git_commit_sha` actually makes a Git-based Compose deployment use that commit,
+including when the branch advances. An API readback alone cannot prove that.
+Test failed deployments, SHA mismatch, timeouts, both smoke failures, and
+concurrent triggers. Do not configure the production environment or disable its
+existing webhook until those checks pass. Restrict manual and external Coolify
+deployments so they cannot race the workflow.
+
+The runner must be on the Docker host and have Docker, Python 3, Node, GitHub CLI,
+Bun 1.4.4, and Playwright Chromium installed. In the protected GitHub production
+environment, set variables `COOLIFY_URL`, `COOLIFY_APPLICATION_UUID`, and
+`SMOKE_ORIGIN`, and secrets `COOLIFY_READ_TOKEN`, `COOLIFY_WRITE_TOKEN`,
+`COOLIFY_DEPLOY_TOKEN`, `SMOKE_EMAIL`, and `SMOKE_PASSWORD`. Use a dedicated
+account and the minimum Coolify permissions for each token. Disable Coolify's
+automatic Git deployments only when the tested replacement is ready, then set
+the repository enable variable and run a controlled release. The write token can
+change application configuration and must be restricted to the trusted runner.
+
 Real GPU inference and a complete media/playback check need a separate trusted
 GPU runner and fixtures. Run them for worker releases; the fast checks do not
 establish model accuracy, accelerator compatibility, or successful end-to-end media
