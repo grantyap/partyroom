@@ -20,7 +20,7 @@ jobs:
       github.event.workflow_run.event == 'push' &&
       github.event.workflow_run.head_branch == 'main' &&
       github.event.workflow_run.conclusion == 'success'
-    runs-on: [self-hosted, partyroom-production]
+    runs-on: ubuntu-24.04
     environment: production
     timeout-minutes: 45
     env:
@@ -37,8 +37,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: test "$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')" = "$RELEASE_SHA"
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.4
       - name: Install smoke dependencies
-        run: bun install --frozen-lockfile
+        run: |
+          bun install --frozen-lockfile
+          bunx playwright install --with-deps chromium
       - name: Pin, deploy, and verify commit
         env:
           COOLIFY_READ_TOKEN: ${{ secrets.COOLIFY_READ_TOKEN }}
@@ -46,7 +51,23 @@ jobs:
           COOLIFY_DEPLOY_TOKEN: ${{ secrets.COOLIFY_DEPLOY_TOKEN }}
         run: python3 scripts/release_coolify.py
       - name: Check production topology
-        run: python3 scripts/check_production.py "$COOLIFY_APPLICATION_UUID" --origin "$SMOKE_ORIGIN"
+        env:
+          SSH_HOST: ${{ secrets.PRODUCTION_SSH_HOST }}
+          SSH_PORT: ${{ secrets.PRODUCTION_SSH_PORT }}
+          SSH_USER: ${{ secrets.PRODUCTION_SSH_USER }}
+          SSH_KEY: ${{ secrets.PRODUCTION_SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.PRODUCTION_SSH_KNOWN_HOSTS }}
+        run: |
+          [[ "$COOLIFY_APPLICATION_UUID" =~ ^[a-z0-9]+$ && "$SMOKE_ORIGIN" =~ ^https://[a-zA-Z0-9.-]+$ ]]
+          [[ "$SSH_HOST" =~ ^[a-zA-Z0-9.-]+$ && "$SSH_PORT" =~ ^[0-9]+$ && "$SSH_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
+          keyfile="$(mktemp)"
+          known_hosts="$(mktemp)"
+          trap 'rm -f "$keyfile" "$known_hosts"' EXIT
+          chmod 600 "$keyfile" "$known_hosts"
+          printf '%s\n' "$SSH_KEY" > "$keyfile"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$known_hosts"
+          ssh -i "$keyfile" -p "$SSH_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$known_hosts" "$SSH_USER@$SSH_HOST" \
+            python3 - "$COOLIFY_APPLICATION_UUID" --origin "$SMOKE_ORIGIN" < scripts/check_production.py
       - name: Check authenticated room creation
         env:
           SMOKE_EMAIL: ${{ secrets.SMOKE_EMAIL }}

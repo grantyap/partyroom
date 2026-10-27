@@ -53,12 +53,11 @@ independently. Before treating CI as a production release gate:
 
 `Production release` is disabled until the repository variable
 `PRODUCTION_RELEASE_ENABLED` is set to `true`. Once enabled, a successful push
-CI run on `main` starts one serialized release on the dedicated
-`partyroom-production` self-hosted runner. The job checks that the SHA is still
+CI run on `main` starts one serialized release on a GitHub-hosted runner. The job checks that the SHA is still
 the tip of `main`, pins it in Coolify, queues the deployment, verifies its
 result and SHA, and runs both smoke checks. A superseded run fails without
-deploying. PR jobs must never have access to this runner or the production
-environment. Configure branch protection before trusting code on `main`.
+deploying. PR jobs must never have access to the production environment.
+Configure branch protection before trusting code on `main`.
 
 Before enabling it, validate this sequence against a separate nonproduction
 application on the installed Coolify version: confirm that setting
@@ -69,15 +68,18 @@ concurrent triggers. Do not configure the production environment or disable its
 existing webhook until those checks pass. Restrict manual and external Coolify
 deployments so they cannot race the workflow.
 
-The runner must be on the Docker host and have Docker, Python 3, Node, GitHub CLI,
-Bun 1.4.4, and Playwright Chromium installed. In the protected GitHub production
-environment, set variables `COOLIFY_URL`, `COOLIFY_APPLICATION_UUID`, and
+The GitHub-hosted runner needs a secure network route and SSH access to the Docker
+host; its current private address is not reachable directly from GitHub. The SSH
+account needs Python 3 and permission to inspect Docker containers. In the protected
+GitHub production environment, set variables `COOLIFY_URL`, `COOLIFY_APPLICATION_UUID`, and
 `SMOKE_ORIGIN`, and secrets `COOLIFY_READ_TOKEN`, `COOLIFY_WRITE_TOKEN`,
-`COOLIFY_DEPLOY_TOKEN`, `SMOKE_EMAIL`, and `SMOKE_PASSWORD`. Use a dedicated
+`COOLIFY_DEPLOY_TOKEN`, `SMOKE_EMAIL`, `SMOKE_PASSWORD`, `PRODUCTION_SSH_HOST`,
+`PRODUCTION_SSH_PORT`, `PRODUCTION_SSH_USER`, `PRODUCTION_SSH_KEY`, and
+`PRODUCTION_SSH_KNOWN_HOSTS`. Verify the host key independently. Use a dedicated
 account and the minimum Coolify permissions for each token. Disable Coolify's
 automatic Git deployments only when the tested replacement is ready, then set
 the repository enable variable and run a controlled release. The write token can
-change application configuration and must be restricted to the trusted runner.
+change application configuration and must be restricted to the protected environment.
 
 Real GPU inference and a complete media/playback check need a separate trusted
 GPU runner and fixtures. Run them for worker releases; the fast checks do not
