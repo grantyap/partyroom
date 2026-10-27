@@ -44,41 +44,12 @@ jobs:
         run: |
           bun install --frozen-lockfile
           bunx playwright install --with-deps chromium
-      - name: Join private network
-        uses: ./.github/actions/zerotier
-        with:
-          network_id: ${{ secrets.ZEROTIER_NETWORK_ID }}
-          auth_token: ${{ secrets.ZEROTIER_CENTRAL_TOKEN }}
       - name: Pin, deploy, and verify commit
         env:
           COOLIFY_READ_TOKEN: ${{ secrets.COOLIFY_READ_TOKEN }}
           COOLIFY_WRITE_TOKEN: ${{ secrets.COOLIFY_WRITE_TOKEN }}
           COOLIFY_DEPLOY_TOKEN: ${{ secrets.COOLIFY_DEPLOY_TOKEN }}
         run: python3 scripts/release_coolify.py
-      - name: Check production topology
-        env:
-          SSH_HOST: ${{ secrets.PRODUCTION_SSH_HOST }}
-          SSH_PORT: ${{ secrets.PRODUCTION_SSH_PORT }}
-          SSH_USER: ${{ secrets.PRODUCTION_SSH_USER }}
-          SSH_KEY: ${{ secrets.PRODUCTION_SSH_KEY }}
-          SSH_KNOWN_HOSTS: ${{ secrets.PRODUCTION_SSH_KNOWN_HOSTS }}
-          SSH_JUMP_HOST: ${{ secrets.PRODUCTION_SSH_JUMP_HOST }}
-          SSH_JUMP_USER: ${{ secrets.PRODUCTION_SSH_JUMP_USER }}
-          SSH_JUMP_KEY: ${{ secrets.PRODUCTION_SSH_JUMP_KEY }}
-        run: |
-          [[ "$COOLIFY_APPLICATION_UUID" =~ ^[a-z0-9]+$ && "$SMOKE_ORIGIN" =~ ^https://[a-zA-Z0-9.-]+$ ]]
-          [[ "$SSH_HOST" =~ ^[a-zA-Z0-9.-]+$ && "$SSH_PORT" =~ ^[0-9]+$ && "$SSH_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
-          [[ "$SSH_JUMP_HOST" =~ ^[a-zA-Z0-9.-]+$ && "$SSH_JUMP_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
-          ssh_dir="$(mktemp -d)"
-          trap 'rm -rf "$ssh_dir"' EXIT
-          printf '%s\n' "$SSH_KEY" > "$ssh_dir/target_key"
-          printf '%s\n' "$SSH_JUMP_KEY" > "$ssh_dir/jump_key"
-          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
-          chmod 600 "$ssh_dir"/*
-          printf 'Host jump\n HostName %s\n User %s\n IdentityFile %s/jump_key\nHost target\n HostName %s\n User %s\n Port %s\n IdentityFile %s/target_key\n ProxyJump jump\nHost *\n BatchMode yes\n IdentitiesOnly yes\n StrictHostKeyChecking yes\n UserKnownHostsFile %s/known_hosts\n' \
-            "$SSH_JUMP_HOST" "$SSH_JUMP_USER" "$ssh_dir" "$SSH_HOST" "$SSH_USER" "$SSH_PORT" "$ssh_dir" "$ssh_dir" > "$ssh_dir/config"
-          ssh -F "$ssh_dir/config" target \
-            python3 - "$COOLIFY_APPLICATION_UUID" --origin "$SMOKE_ORIGIN" < scripts/check_production.py
       - name: Check authenticated room creation
         env:
           SMOKE_EMAIL: ${{ secrets.SMOKE_EMAIL }}

@@ -54,7 +54,7 @@ node scripts/check-room-creation-unattended.mjs
 
 The process exits nonzero on login, room, persistence, or browser errors; it does
 not print credentials or browser error details. Invoke the Docker-host check from
-the release runner too. Do not rely on Coolify's post-deployment hook
+separately on the Docker host; the release workflow does not run it. Do not rely on Coolify's post-deployment hook
 as a failure gate: in Coolify 4.4.6 it marks the deployment complete first and logs
 post-command failures without failing the deployment.
 

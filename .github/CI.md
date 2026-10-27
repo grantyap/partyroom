@@ -28,25 +28,26 @@ These workflows validate changes; Coolify's current push webhook still deploys
 independently. Before treating CI as a production release gate:
 
 1. Require `CI required` on both branches, including the promotion path to `main`.
-2. Configure a trusted release job with a scoped Coolify deployment credential,
-   the application UUID, and private access to the deployment Docker host. Only
+2. Configure a trusted release job with scoped Coolify credentials and the
+   application UUID. Only
    trusted `main` commits should receive these credentials. Keep pull request
    jobs on hosted runners without production access.
 3. Disable the independent Coolify push deployment when the replacement release
    job is ready. Serialize the complete release and verify that the requested SHA
    matches the Coolify deployment SHA; an API request being accepted is not a
    completed deployment.
-4. Wait for that deployment's successful result, then run
-   `scripts/check_production.py` on the Docker host and the authenticated
-   room-creation smoke with a dedicated test account. Fail the GitHub release if
-   either fails. See `scripts/production-smoke.md`; do not use a post-deployment
-   hook alone as the release gate.
+4. Wait for that deployment's successful result and run the authenticated
+   room-creation smoke with a dedicated test account. Independently run
+   `scripts/check_production.py` on the Docker host to detect duplicate stacks
+   and failed deployment jobs; the workflow does not perform that host check.
+   See `scripts/production-smoke.md`; do not use a post-deployment hook alone
+   as the release gate.
    `scripts/check_coolify_deployment.py DEPLOYMENT_UUID FULL_COMMIT_SHA` polls
    the Coolify API using `COOLIFY_URL` and `COOLIFY_TOKEN` in the environment,
    fails on timeout, failure, or a mismatched commit, and does not print API logs.
    It checks a deployment after it has been queued; it cannot prevent Coolify
-   from deploying a different commit. The complete release workflow must address
-   that race and run both smoke checks before it can replace the push webhook.
+   from deploying a different commit. The release workflow pins the commit,
+   but this behavior must be verified on the installed Coolify version.
 5. Pin floating backend/dashboard/base-image references to tested immutable
    versions, and test upgrade/migration recovery before enabling automated rollback.
    A previous application image does not reverse database migrations.
@@ -55,36 +56,29 @@ independently. Before treating CI as a production release gate:
 `PRODUCTION_RELEASE_ENABLED` is set to `true`. Once enabled, a successful push
 CI run on `main` starts one serialized release on a GitHub-hosted runner. The job checks that the SHA is still
 the tip of `main`, pins it in Coolify, queues the deployment, verifies its
-result and SHA, and runs both smoke checks. A superseded run fails without
+result and SHA, and runs the authenticated smoke check. A superseded run fails without
 deploying. PR jobs must never have access to the production environment.
 Configure branch protection before trusting code on `main`.
+The workflow cannot detect duplicate stacks or failed deployment jobs; run the
+host check separately before accepting the release.
 
 Before enabling it, validate this sequence against a separate nonproduction
 application on the installed Coolify version: confirm that setting
 `git_commit_sha` actually makes a Git-based Compose deployment use that commit,
 including when the branch advances. An API readback alone cannot prove that.
-Test failed deployments, SHA mismatch, timeouts, both smoke failures, and
+Test failed deployments, SHA mismatch, timeouts, authenticated smoke failure, and
 concurrent triggers. Do not configure the production environment or disable its
 existing webhook until those checks pass. Restrict manual and external Coolify
 deployments so they cannot race the workflow.
 
-The GitHub-hosted runner joins the existing ZeroTier network and connects through
-an SSH jump host to the Docker host. The target SSH account needs Python 3 and
-permission to inspect Docker containers. In the protected
-GitHub production environment, set variables `COOLIFY_URL`, `COOLIFY_APPLICATION_UUID`, and
+In the protected GitHub production environment, set variables `COOLIFY_URL`,
+`COOLIFY_APPLICATION_UUID`, and
 `SMOKE_ORIGIN`, and secrets `COOLIFY_READ_TOKEN`, `COOLIFY_WRITE_TOKEN`,
-`COOLIFY_DEPLOY_TOKEN`, `SMOKE_EMAIL`, `SMOKE_PASSWORD`, `PRODUCTION_SSH_HOST`,
-`PRODUCTION_SSH_PORT`, `PRODUCTION_SSH_USER`, `PRODUCTION_SSH_KEY`, and
-`PRODUCTION_SSH_KNOWN_HOSTS`, `PRODUCTION_SSH_JUMP_HOST`,
-`PRODUCTION_SSH_JUMP_USER`, `PRODUCTION_SSH_JUMP_KEY`, `ZEROTIER_NETWORK_ID`,
-and `ZEROTIER_CENTRAL_TOKEN`. Verify both SSH host keys independently. The
-ZeroTier token authorizes and removes temporary runner members. Use a dedicated
+`COOLIFY_DEPLOY_TOKEN`, `SMOKE_EMAIL`, and `SMOKE_PASSWORD`. Use a dedicated
 account and the minimum Coolify permissions for each token. Disable Coolify's
 automatic Git deployments only when the tested replacement is ready, then set
 the repository enable variable and run a controlled release. The write token can
 change application configuration and must be restricted to the protected environment.
-The vendored ZeroTier action is based on v1.0.1 with its nested action pinned;
-review and update it when upgrading the upstream action.
 
 Real GPU inference and a complete media/playback check need a separate trusted
 GPU runner and fixtures. Run them for worker releases; the fast checks do not
