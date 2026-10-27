@@ -16,10 +16,10 @@ import { capabilities, type RoomPermission } from "./capabilities";
 import { removeRoomMedia } from "./media/domain/jobs";
 import { presence } from "./presenceComponent";
 import { requireRoomAction, userHasRoomPermission } from "./rooms";
+import { EMPTY_ROOM_LIFETIME_MS } from "./rooms.schema";
 
 const PRESENCE_CHECK_INTERVAL_MS = 30_000;
 const EMPTY_PAUSE_GRACE_MS = 15_000;
-const EMPTY_ROOM_LIFETIME_MS = 10 * 60_000;
 const MAX_QUEUE_ITEMS = 200;
 const DEFAULT_PLAY_START_DELAY_MS = 1_000;
 
