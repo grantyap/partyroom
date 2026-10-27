@@ -40,6 +40,8 @@ it, then confirms it appears in Your rooms and rejects browser errors emitted du
 the check. A successful login page or HTTP 200
 alone is insufficient: the incident failed at the authenticated Convex mutation.
 One empty room is created; the app's normal empty-room expiry cleans it up.
+New empty-room timers expire after 24 hours. Timers scheduled before this change
+retain their original ten-minute deadline until the room is occupied again.
 The account must have room-creation access (including Premium when that ships).
 Credentials are supplied through normal sign-in, never committed or printed.
 
