@@ -1,5 +1,7 @@
 import { v, type Infer } from "convex/values";
 
+export const EMPTY_ROOM_LIFETIME_MS = 24 * 60 * 60_000;
+
 export const roomMemberPermissionsSchema = v.object({
   controlPlayback: v.boolean(),
   addToQueue: v.boolean(),
