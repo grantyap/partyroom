@@ -41,6 +41,12 @@ independently. Before treating CI as a production release gate:
    room-creation smoke with a dedicated test account. Fail the GitHub release if
    either fails. See `scripts/production-smoke.md`; do not use a post-deployment
    hook alone as the release gate.
+   `scripts/check_coolify_deployment.py DEPLOYMENT_UUID FULL_COMMIT_SHA` polls
+   the Coolify API using `COOLIFY_URL` and `COOLIFY_TOKEN` in the environment,
+   fails on timeout, failure, or a mismatched commit, and does not print API logs.
+   It checks a deployment after it has been queued; it cannot prevent Coolify
+   from deploying a different commit. The complete release workflow must address
+   that race and run both smoke checks before it can replace the push webhook.
 5. Pin floating backend/dashboard/base-image references to tested immutable
    versions, and test upgrade/migration recovery before enabling automated rollback.
    A previous application image does not reverse database migrations.
