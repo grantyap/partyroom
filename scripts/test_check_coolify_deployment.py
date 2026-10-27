@@ -1,6 +1,8 @@
 import unittest
+import io
+from unittest.mock import patch
 
-from check_coolify_deployment import wait_for_deployment
+from check_coolify_deployment import main, wait_for_deployment
 
 
 class DeploymentCheckTest(unittest.TestCase):
@@ -28,6 +30,14 @@ class DeploymentCheckTest(unittest.TestCase):
     def test_timeout(self):
         with self.assertRaises(TimeoutError):
             self.check([{"deployment_uuid": "abc123", "status": "in_progress"}] * 5)
+
+    def test_api_uses_a_user_agent_accepted_by_cloudflare(self):
+        response = io.BytesIO(b'{"deployment_uuid":"abc123","status":"finished","commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}')
+        with patch.dict("os.environ", {"COOLIFY_URL": "https://example.com", "COOLIFY_TOKEN": "token"}), \
+             patch("sys.argv", ["check", "abc123", "a" * 40]), \
+             patch("urllib.request.urlopen", return_value=response) as urlopen:
+            main()
+        self.assertEqual(urlopen.call_args.args[0].get_header("User-agent"), "Mozilla/5.0")
 
 
 if __name__ == "__main__":

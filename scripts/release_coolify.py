@@ -41,7 +41,8 @@ def main():
         body = json.dumps(data).encode() if data is not None else None
         req = urllib.request.Request(f"{base_url}/api/v1{path}", data=body, method=method,
                                      headers={"Authorization": f"Bearer {tokens[permission]}",
-                                              "Accept": "application/json", "Content-Type": "application/json"})
+                                              "Accept": "application/json", "Content-Type": "application/json",
+                                              "User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(req, timeout=15) as response:
             return json.load(response)
 

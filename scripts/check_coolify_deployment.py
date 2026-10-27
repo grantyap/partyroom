@@ -46,7 +46,7 @@ def main():
     def fetch(deployment_id):
         request = urllib.request.Request(
             f"{base_url}/api/v1/deployments/{deployment_id}",
-            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/json", "User-Agent": "Mozilla/5.0"},
         )
         with urllib.request.urlopen(request, timeout=15) as response:
             return json.load(response)
