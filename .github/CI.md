@@ -22,31 +22,28 @@ selected branch. It runs the existing restart harness against a disposable Conve
 database, not production, and retains logs/results for seven days. See
 `scripts/restart-test/README.md` for the scenarios it covers.
 
-## Production release follow-up
+## Production releases
 
-These workflows validate changes; Coolify's current push webhook still deploys
-independently. Before treating CI as a production release gate:
+`Production release` is disabled until the repository variable
+`PRODUCTION_RELEASE_ENABLED` is set to `true`. After a successful push CI run
+on `main`, it calls Coolify's deploy webhook using the protected `production`
+environment. Pull request and manually dispatched CI runs cannot deploy.
 
-1. Require `CI required` on both branches, including the promotion path to `main`.
-2. Configure a trusted release job with a scoped Coolify deployment credential,
-   the application UUID, and private access to the deployment Docker host. Only
-   trusted `main` commits should receive these credentials. Keep pull request
-   jobs on hosted runners without production access.
-3. Disable the independent Coolify push deployment when the replacement release
-   job is ready. Serialize the complete release and verify that the requested SHA
-   matches the Coolify deployment SHA; an API request being accepted is not a
-   completed deployment.
-4. Wait for that deployment's successful result, then run
-   `scripts/check_production.py` on the Docker host and the authenticated
-   room-creation smoke with a dedicated test account. Fail the GitHub release if
-   either fails. See `scripts/production-smoke.md`; do not use a post-deployment
-   hook alone as the release gate.
-5. Pin floating backend/dashboard/base-image references to tested immutable
-   versions, and test upgrade/migration recovery before enabling automated rollback.
-   A previous application image does not reverse database migrations.
+Before enabling the workflow, require `CI required` on `develop` and `main`;
+restrict the production environment to trusted `main` releases. Store
+`COOLIFY_DEPLOY_WEBHOOK` and a Coolify deploy-only `COOLIFY_DEPLOY_TOKEN` as
+production environment secrets. Disable Coolify's independent Git deploy-on-push
+only when the replacement is ready; otherwise it bypasses CI. After cutover,
+verify that a successful push requests a deployment and a failed CI run does not.
+The workflow must exist on the default branch for `workflow_run` to fire.
+
+A successful request means Coolify accepted it, not that deployment succeeded.
+Check Coolify's deployment logs and notifications and run the checks in
+`scripts/production-smoke.md` after deployment. A branch can advance while CI
+runs, so this webhook does not guarantee Coolify deploys the commit that passed
+that particular CI run. This workflow does not publish immutable images.
 
 Real GPU inference and a complete media/playback check need a separate trusted
 GPU runner and fixtures. Run them for worker releases; the fast checks do not
 establish model accuracy, accelerator compatibility, or successful end-to-end media
-processing. Publishing immutable images once and deploying their digests is a
-later improvement; this workflow does not publish images.
+processing.

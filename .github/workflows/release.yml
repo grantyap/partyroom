@@ -1,0 +1,35 @@
+name: Production release
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: partyroom-production-release
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >-
+      vars.PRODUCTION_RELEASE_ENABLED == 'true' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 2
+    steps:
+      - name: Request Coolify deployment
+        env:
+          COOLIFY_DEPLOY_WEBHOOK: ${{ secrets.COOLIFY_DEPLOY_WEBHOOK }}
+          COOLIFY_DEPLOY_TOKEN: ${{ secrets.COOLIFY_DEPLOY_TOKEN }}
+        run: |
+          test -n "$COOLIFY_DEPLOY_TOKEN"
+          [[ "$COOLIFY_DEPLOY_WEBHOOK" == https://* ]]
+          curl --fail --silent --show-error --max-time 30 --output /dev/null \
+            --header "Authorization: Bearer $COOLIFY_DEPLOY_TOKEN" "$COOLIFY_DEPLOY_WEBHOOK"
+          echo 'Coolify accepted the deployment request; check Coolify for its result.'
