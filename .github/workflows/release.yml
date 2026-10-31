@@ -50,6 +50,22 @@ jobs:
           COOLIFY_WRITE_TOKEN: ${{ secrets.COOLIFY_WRITE_TOKEN }}
           COOLIFY_DEPLOY_TOKEN: ${{ secrets.COOLIFY_DEPLOY_TOKEN }}
         run: python3 scripts/release_coolify.py
+      - name: Check deployment host
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_HOST_SSH_KEY: ${{ secrets.DEPLOY_HOST_SSH_KEY }}
+          DEPLOY_HOST_KNOWN_HOSTS: ${{ secrets.DEPLOY_HOST_KNOWN_HOSTS }}
+        run: |
+          [[ "$DEPLOY_HOST" =~ ^[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+$ ]]
+          [[ "$COOLIFY_APPLICATION_UUID" =~ ^[a-z0-9]+$ ]]
+          [[ "$SMOKE_ORIGIN" =~ ^https://[a-zA-Z0-9.-]+(:[0-9]+)?$ ]]
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_HOST_SSH_KEY" > ~/.ssh/release_key
+          printf '%s\n' "$DEPLOY_HOST_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/release_key ~/.ssh/known_hosts
+          ssh -i ~/.ssh/release_key -o IdentitiesOnly=yes -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes -o ConnectTimeout=15 "$DEPLOY_HOST" \
+            "python3 - '$COOLIFY_APPLICATION_UUID' --origin '$SMOKE_ORIGIN'" < scripts/check_production.py
       - name: Check authenticated room creation
         env:
           SMOKE_EMAIL: ${{ secrets.SMOKE_EMAIL }}

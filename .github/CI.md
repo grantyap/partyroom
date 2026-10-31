@@ -36,10 +36,9 @@ independently. Before treating CI as a production release gate:
    job is ready. Serialize the complete release and verify that the requested SHA
    matches the Coolify deployment SHA; an API request being accepted is not a
    completed deployment.
-4. Wait for that deployment's successful result and run the authenticated
-   room-creation smoke with a dedicated test account. Independently run
-   `scripts/check_production.py` on the Docker host to detect duplicate stacks
-   and failed deployment jobs; the workflow does not perform that host check.
+4. Wait for that deployment's successful result, run `scripts/check_production.py`
+   on the Docker host, and run the authenticated room-creation smoke with a
+   dedicated test account. Both checks must pass.
    See `scripts/production-smoke.md`; do not use a post-deployment hook alone
    as the release gate.
    `scripts/check_coolify_deployment.py DEPLOYMENT_UUID FULL_COMMIT_SHA` polls
@@ -56,11 +55,12 @@ independently. Before treating CI as a production release gate:
 `PRODUCTION_RELEASE_ENABLED` is set to `true`. Once enabled, a successful push
 CI run on `main` starts one serialized release on a GitHub-hosted runner. The job checks that the SHA is still
 the tip of `main`, pins it in Coolify, queues the deployment, verifies its
-result and SHA, and runs the authenticated smoke check. A superseded run fails without
+result and SHA, and runs the host and authenticated smoke checks. A superseded run fails without
 deploying. PR jobs must never have access to the production environment.
 Configure branch protection before trusting code on `main`.
-The workflow cannot detect duplicate stacks or failed deployment jobs; run the
-host check separately before accepting the release.
+The hosted runner must reach the Docker host over SSH. Use a dedicated account
+and key with only the access needed for the read-only check; Docker access grants
+extensive control of the host. Pin the host key and restrict network access.
 
 Before enabling it, validate this sequence against a separate nonproduction
 application on the installed Coolify version: confirm that setting
@@ -72,9 +72,11 @@ existing webhook until those checks pass. Restrict manual and external Coolify
 deployments so they cannot race the workflow.
 
 In the protected GitHub production environment, set variables `COOLIFY_URL`,
-`COOLIFY_APPLICATION_UUID`, and
+`COOLIFY_APPLICATION_UUID`, `DEPLOY_HOST` (user@host), and
 `SMOKE_ORIGIN`, and secrets `COOLIFY_READ_TOKEN`, `COOLIFY_WRITE_TOKEN`,
-`COOLIFY_DEPLOY_TOKEN`, `SMOKE_EMAIL`, and `SMOKE_PASSWORD`. Use a dedicated
+`COOLIFY_DEPLOY_TOKEN`, `DEPLOY_HOST_SSH_KEY`, `DEPLOY_HOST_KNOWN_HOSTS`,
+`SMOKE_EMAIL`, and `SMOKE_PASSWORD`. The host needs Python 3, Docker access,
+and access to the smoke origin. Use a dedicated
 account and the minimum Coolify permissions for each token. Disable Coolify's
 automatic Git deployments only when the tested replacement is ready, then set
 the repository enable variable and run a controlled release. The write token can
