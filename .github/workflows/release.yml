@@ -30,6 +30,7 @@ jobs:
         run: |
           test -n "$COOLIFY_DEPLOY_TOKEN"
           [[ "$COOLIFY_DEPLOY_WEBHOOK" == https://* ]]
-          curl --fail --silent --show-error --max-time 30 --output /dev/null \
+          curl --request POST --user-agent 'Mozilla/5.0' \
+            --fail --silent --show-error --max-time 30 --output /dev/null \
             --header "Authorization: Bearer $COOLIFY_DEPLOY_TOKEN" "$COOLIFY_DEPLOY_WEBHOOK"
           echo 'Coolify accepted the deployment request; check Coolify for its result.'
