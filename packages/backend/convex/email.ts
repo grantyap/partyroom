@@ -28,6 +28,26 @@ export const sendVerification = internalMutation({
   },
 });
 
+export const sendPasswordReset = internalMutation({
+  args: { email: v.string(), url: v.string() },
+  returns: v.null(),
+  handler: async (ctx, { email, url }) => {
+    if (!env.RESEND_API_KEY || !env.RESEND_FROM_EMAIL)
+      throw new Error("Password reset email sender is not configured");
+    await new Resend(components.resend, {
+      apiKey: env.RESEND_API_KEY,
+      testMode: env.RESEND_TEST_MODE !== "false",
+    }).sendEmail(ctx, {
+      from: env.RESEND_FROM_EMAIL,
+      to: email,
+      subject: "Reset your Partyroom password",
+      text: `Reset your password using this link. It expires in one hour:\n\n${url}\n\nIf you didn't request this, ignore this email. Your password won't change.`,
+      idempotencyKey: `reset-password:${url}`,
+    });
+    return null;
+  },
+});
+
 export const webhook = httpAction(async (ctx, request) => {
   if (!env.RESEND_WEBHOOK_SECRET) {
     return new Response("Resend webhook is not configured", { status: 503 });

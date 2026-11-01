@@ -332,8 +332,16 @@
 			class="max-h-[calc(100svh-2rem)] overflow-y-auto sm:max-w-sm"
 		>
 			<Dialog.Header class="text-center">
-				<Dialog.Title class="font-heading text-2xl">Early access</Dialog.Title>
-				<Dialog.Description>Hosting is free during early access.</Dialog.Description>
+				<Dialog.Title class="font-heading text-2xl"
+					>{!user.emailVerified
+						? "Verify your email to host"
+						: "Partyroom Premium"}</Dialog.Title
+				>
+				<Dialog.Description
+					>{!user.emailVerified
+						? "First verify your email, then choose Premium."
+						: "Host karaoke with your friends."}</Dialog.Description
+				>
 			</Dialog.Header>
 			<PremiumPanel />
 		</Dialog.Content>

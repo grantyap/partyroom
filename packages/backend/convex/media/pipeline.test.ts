@@ -197,8 +197,13 @@ async function fallbackPipeline(routingVersion: 1 | 2 = 2) {
   registerStripe(t);
   vi.stubEnv("STRIPE_PREMIUM_PRICE_ID", "price_premium");
   vi.spyOn(authComponent, "getAuthUser").mockResolvedValue({
+    _id: "user",
+    email: "guest@example.com",
+    emailVerified: true,
+  } as never);
+  vi.spyOn(authComponent, "getAnyUserById").mockResolvedValue({
     _id: "owner",
-    email: "owner@example.com",
+    email: "host@example.com",
     emailVerified: true,
   } as never);
   await t.mutation(components.stripe.public.createOrUpdateCustomer, {
@@ -209,10 +214,9 @@ async function fallbackPipeline(routingVersion: 1 | 2 = 2) {
     stripeSubscriptionId: "sub_owner",
     stripeCustomerId: "cus_owner",
     status: "active",
-    currentPeriodEnd: (Date.now() + 86_400_000) / 1000,
+    currentPeriodEnd: Date.now() / 1000 + 86400,
     cancelAtPeriodEnd: false,
     priceId: "price_premium",
-    metadata: { userId: "owner" },
   });
   const roomId = await t.run(async (ctx) => {
     await ctx.db.insert("migrationRuns", {
@@ -242,7 +246,7 @@ async function fallbackPipeline(routingVersion: 1 | 2 = 2) {
   });
   const { jobId } = await t.mutation(internal.media.jobs.request, {
     roomId,
-    requestedBy: "owner",
+    requestedBy: "user",
     requestKey: "fallback",
     encryptedSource: "encrypted",
     sourceIv: "iv",
