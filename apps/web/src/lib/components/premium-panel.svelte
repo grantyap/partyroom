@@ -1,8 +1,6 @@
 <script lang="ts">
 	import AnchorHighlight from "#lib/components/anchor-highlight.svelte";
 	import CheckIcon from "@lucide/svelte/icons/check";
-	import CrownIcon from "@lucide/svelte/icons/crown";
-	import ArrowRightIcon from "@lucide/svelte/icons/arrow-right";
 	import MailIcon from "@lucide/svelte/icons/mail";
 	import { refreshAll } from "$app/navigation";
 	import { SearchParams } from "#lib/hooks/search-params.svelte.js";
@@ -17,7 +15,6 @@
 	const auth = useAuth();
 	const user = useQuery(api.auth.getCurrentUser, () => auth.isAuthenticated ? {} : "skip");
 	const billing = useQuery(api.billing.status, () => auth.isAuthenticated ? {} : "skip");
-	const checkout = useAction(api.billing.checkout);
 	const portal = useAction(api.billing.portal);
 	const linkImportedCustomer = useAction(api.billingStripe.linkImportedCustomer);
 	let busy = $state<string | null>(null);
@@ -49,31 +46,22 @@
 			await linkImportedCustomer({});
 		} catch {
 			claimFailed = true;
-			error = "We couldn’t link your account. Try again before starting a paid subscription.";
+			error = "We couldn’t link your account. Try again to manage your account.";
 		} finally {
 			busy = null;
 		}
 	}
 
-	async function openBilling(kind: "checkout" | "portal") {
+	async function openBilling() {
 		if (busy) return;
-		if (kind === "checkout" && !user.data?.emailVerified) {
-			error = "Verify your email before getting Premium.";
-			return;
-		}
-		busy = kind;
+		busy = "portal";
 		error = null;
 		try {
-			const result = await (kind === "checkout" ? checkout({}) : portal({}));
-			if (!result.url) throw new Error("Checkout is unavailable. Please try again.");
+			const result = await portal({});
+			if (!result.url) throw new Error("Billing settings are unavailable.");
 			window.location.assign(result.url);
-		} catch (cause) {
-			const message = cause instanceof Error ? cause.message : "";
-			error = message.includes("Verify your email")
-				? "Verify your email first, then try again."
-				: message.includes("existing Premium") || message.includes("already active")
-					? "You already have Premium. Check your subscription under Manage billing."
-					: "We couldn’t open " + (kind === "checkout" ? "Checkout" : "billing settings") + ". Please try again.";
+		} catch {
+			error = "We couldn’t open billing settings. Please try again.";
 		} finally {
 			busy = null;
 		}
@@ -121,7 +109,7 @@
 				</div>
 				<div class="min-w-0 flex-1 space-y-1">
 					<h3 class="text-sm font-semibold">{sentTo === user.data?.email ? "Check your inbox" : "Verify your email"}</h3>
-					<p class="text-sm text-muted-foreground">Verify your email before getting Premium or creating a room.</p>
+					<p class="text-sm text-muted-foreground">Verify your email to secure your account. Hosting is free during early access.</p>
 					<p class="break-all text-sm text-muted-foreground">{user.data?.email}</p>
 					<div class="flex flex-wrap items-center gap-1 pt-2">
 						<Button size="sm" variant="outline" disabled={Boolean(busy)} onclick={verifyEmail}>{busy === "verify" ? "Sending…" : sentTo === user.data?.email ? "Resend link" : "Send link"}</Button>
@@ -129,7 +117,6 @@
 					</div>
 				</div>
 			</div>
-			<p class="mt-3 border-t border-border/60 pt-3 text-xs leading-relaxed text-muted-foreground">On the early-access list? Use the email you signed up with to claim free Premium when your invitation arrives.</p>
 		</div>
 	{:else if settingsPage}
 		<div class="flex flex-wrap items-center gap-3"><p class="break-all text-sm text-muted-foreground">{user.data?.email}</p><span class="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary"><CheckIcon class="size-3.5" aria-hidden="true" />Verified</span></div>
@@ -141,14 +128,13 @@
 			<div class={settingsPage ? "flex flex-wrap gap-2" : "flex flex-col gap-2"}>
 				{#if status.needsClaim || claimFailed}
 					<Button disabled={Boolean(busy)} onclick={claim}>{busy === "claim" ? "Linking Premium…" : "Link Premium account"}</Button>
-				{:else if !status.premium && !subscription && query.current.billing !== "success"}
-					<Button href={!user.data?.emailVerified ? settingsPage ? "#email" : "/app/settings#email" : undefined} disabled={Boolean(busy)} onclick={user.data?.emailVerified ? () => openBilling("checkout") : undefined} class={settingsPage ? "" : "w-full"} size={settingsPage ? "default" : "lg"}>{!user.data?.emailVerified ? "Verify email to continue" : busy === "checkout" ? "Opening Checkout…" : "Get Premium"}<ArrowRightIcon class="size-4" aria-hidden="true" /></Button>
+
 				{/if}
 				{#if status.hasBillingAccount}
-					<Button variant="outline" disabled={Boolean(busy) || status.needsClaim || claimFailed} onclick={() => openBilling("portal")}>{busy === "portal" ? "Opening billing…" : "Manage billing"}</Button>
+					<Button variant="outline" disabled={Boolean(busy) || status.needsClaim || claimFailed} onclick={openBilling}>{busy === "portal" ? "Opening billing…" : "Manage billing"}</Button>
 				{/if}
 				{#if query.current.billing === "success" && !status.premium}
-					<Button onclick={() => query.update({ billing: "" }, { pushHistory: false })} variant="ghost">Return to Premium</Button>
+					<Button onclick={() => query.update({ billing: "" }, { pushHistory: false })} variant="ghost">Return to billing</Button>
 				{/if}
 			</div>
 	{/if}
@@ -189,51 +175,20 @@
 {#snippet billingDetails()}
 	{#if status}
 			<div aria-live="polite" class="space-y-2 text-sm">
+				<p class="font-medium">Hosting is free during early access.</p>
 				{#if paymentFailed}
-					<p class="font-medium">Your payment didn’t go through.</p>
-					<p>{status.premium ? `You can keep hosting until ${accessDate}.` : "Hosting is paused."} Update your payment details under Manage billing.</p>
+					<p>Your payment didn’t go through. Update your payment details under Manage billing.</p>
 				{:else if status.premium}
-					<p class="font-medium">{subscription?.complimentary ? "Your early-access account has free Premium." : "You have Premium."}</p>
+					<p>{subscription?.complimentary ? "Your account has complimentary Premium." : "You have Premium."}</p>
 					{#if subscription?.cancelAtPeriodEnd}
-						<p>Your subscription will end on {accessDate}. You can keep hosting until then.</p>
+						<p>Your subscription will end on {accessDate}.</p>
 					{:else if subscription?.complimentary}
 						<p>It renews automatically. You won’t be charged.</p>
 					{:else}
-						<p>You can host until {accessDate}. Update your payment details or cancel below.</p>
+						<p>Update your payment details or cancel below.</p>
 					{/if}
 				{:else if subscription}
-					<p>You can’t host yet. Check your subscription under Manage billing.</p>
-				{:else if settingsPage}
-					<div class="space-y-1">
-						<p class="font-medium">Free account</p>
-						<p class="text-muted-foreground">Join rooms for free. Get Premium to host your own.</p>
-						<p class="text-muted-foreground">$4.99 USD / month · Cancel anytime.</p>
-					</div>
-					<div class="pt-3">{@render billingActions()}</div>
-				{:else}
-					<div class="overflow-hidden rounded-3xl border border-primary/30 bg-background shadow-sm">
-						<div class="space-y-5 border-b border-primary/15 bg-primary/5 p-6">
-							<div class="flex items-center justify-between gap-3">
-								<div class="flex items-center gap-2 text-primary"><CrownIcon class="size-5" aria-hidden="true" /><h3 class="text-base font-semibold">Premium</h3></div>
-								<span class="rounded-full border border-primary/15 bg-background px-2.5 py-1 text-xs text-muted-foreground">For hosts</span>
-							</div>
-							<div>
-								<p class="flex items-baseline gap-2"><span class="text-5xl font-semibold tracking-tight">$4.99</span><span class="text-muted-foreground">/ month</span></p>
-								<p class="mt-2 text-xs text-muted-foreground">USD · billed monthly</p>
-							</div>
-						</div>
-						<div class="space-y-6 p-6">
-							<ul class="space-y-3">
-								{#each ["Create as many rooms as you want", "Friends join free", "Queue songs and sing along"] as benefit}
-									<li class="flex items-start gap-2.5"><CheckIcon class="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" /><span>{benefit}</span></li>
-								{/each}
-							</ul>
-							<div class="space-y-3">
-								{@render billingActions()}
-								<p class="text-center text-xs leading-relaxed text-muted-foreground">Cancel anytime. Keep hosting through your paid month.</p>
-							</div>
-						</div>
-					</div>
+					<p>Check your subscription under Manage billing.</p>
 				{/if}
 				{#if query.current.billing === "success" && !status.premium}
 					<p role="status">Confirming your payment… This page will update when it’s ready. If it takes too long, check Manage billing before paying again.</p>
