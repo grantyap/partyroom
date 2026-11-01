@@ -271,6 +271,8 @@ services:
       ACTIVITY_WORKER_API_URL: ${ACTIVITY_WORKER_API_URL:-http://backend:3211/activities/workers/}
       ACTIVITY_WORKER_TOKEN: ${ACTIVITY_WORKER_TOKEN:?}
       METADATA_DEVICE: cpu
+      # The backend's shared PORT must not override this worker's health port.
+      METADATA_WORKER_PORT: "4500"
     volumes:
       - metadata_models:/models
     depends_on:
