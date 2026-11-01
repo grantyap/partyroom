@@ -62,6 +62,10 @@ test("metadata worker uses explicit CPU/CUDA modes and native Metal in Mac mode"
     await Bun.file(new URL("../docker-compose.nvidia.yaml", import.meta.url)).text(),
   );
   expect(base.services["metadata-worker"].environment.METADATA_DEVICE).toBe("cpu");
+  expect(base.services["metadata-worker"].environment.METADATA_WORKER_PORT).toBe("4500");
+  expect(base.services["metadata-worker"].healthcheck.test.join(" ")).toContain(
+    "http://127.0.0.1:4500/health",
+  );
   expect(base.services["metadata-worker"].ports).toBeUndefined();
   expect(base.services["metadata-worker"].environment.ACTIVITY_WORKER_API_URL).toContain(
     "/activities/workers/",
