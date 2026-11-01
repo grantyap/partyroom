@@ -4,6 +4,7 @@ import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { authComponent, getCurrentUserImpl } from "./auth";
+import { requirePremium } from "./billingAccess";
 import { capabilities, requireCapability, type RoomPermission } from "./capabilities";
 import {
   defaultRoomMemberPermissions,
@@ -181,6 +182,7 @@ export const createRoom = mutation({
     }
 
     requireCapability(user, capabilities.rooms.create);
+    await requirePremium(ctx, user);
 
     const roomName = name || generateSlug();
     const room = await ctx.db.insert("rooms", {
@@ -260,5 +262,8 @@ export async function requireRoomAction(
   const room = await ctx.db.get("rooms", roomId);
   if (!room) throw new Error("Room not found");
   requireRoomPermission({ user: user._id, room, permission });
+  const host = room.owner === user._id ? user : await authComponent.getAnyUserById(ctx, room.owner);
+  if (!host) throw new Error("Room host not found");
+  await requirePremium(ctx, host);
   return { room, user };
 }

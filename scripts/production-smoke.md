@@ -42,7 +42,7 @@ alone is insufficient: the incident failed at the authenticated Convex mutation.
 One empty room is created; the app's normal empty-room expiry cleans it up.
 New empty-room timers expire after 24 hours. Timers scheduled before this change
 retain their original ten-minute deadline until the room is occupied again.
-The account must have room-creation access (including Premium when that ships).
+The account must have a verified email and active Premium room-creation access.
 Credentials are supplied through normal sign-in, never committed or printed.
 
 These are explicit smoke checks, not an unattended monitor. For unattended runs,

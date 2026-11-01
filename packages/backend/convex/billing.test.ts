@@ -13,8 +13,8 @@ import { handleBillingEvent } from "./billingStripe";
 import { requireRoomAction } from "./rooms";
 import { defaultRoomMemberPermissions } from "./rooms.schema";
 import schema from "./schema";
-import { modules, registerStripe } from "./test.setup";
 import { presence } from "./presenceComponent";
+import { modules, registerStripe } from "./test.setup";
 
 const now = 1_800_000_000_000;
 const host = { _id: "host", email: "host@example.com", emailVerified: true };
@@ -86,7 +86,7 @@ test("imported subscriptions require verified email and cannot be claimed by a d
   );
 });
 
-test("guests can use rooms after the host subscription is canceled", async () => {
+test("guests use their host's subscription; immediate cancellation revokes room operations", async () => {
   const t = billingTest();
   await seed(t);
   vi.spyOn(authComponent, "getAuthUser").mockResolvedValue({
@@ -105,15 +105,18 @@ test("guests can use rooms after the host subscription is canceled", async () =>
     "guest",
   );
   await seed(t, "canceled");
-  expect((await t.run((ctx) => requireRoomAction(ctx, roomId, "room:read"))).user._id).toBe("guest");
+  await expect(t.run((ctx) => requireRoomAction(ctx, roomId, "room:read"))).rejects.toThrow(
+    "Premium subscription required",
+  );
 });
 
-test("unverified unpaid accounts can create rooms, but guests cannot host or check out", async () => {
+test("unpaid accounts cannot create rooms or check out as guests", async () => {
   const t = billingTest();
-  const user = vi.spyOn(authComponent, "getAuthUser").mockResolvedValue({ ...host, emailVerified: false } as never);
-  await expect(t.mutation(api.rooms.createRoom, {})).resolves.toMatchObject({ name: expect.any(String) });
+  const user = vi.spyOn(authComponent, "getAuthUser").mockResolvedValue(host as never);
+  await expect(t.mutation(api.rooms.createRoom, {})).rejects.toThrow(
+    "Premium subscription required",
+  );
   user.mockResolvedValue({ ...host, isAnonymous: true } as never);
-  await expect(t.mutation(api.rooms.createRoom, {})).rejects.toThrow("Unauthorized");
   await expect(t.action(api.billing.checkout, {})).rejects.toThrow("Registered account required");
 });
 
@@ -158,6 +161,9 @@ test("renewal retries and out-of-order failures cannot extend grace or undo paym
   vi.setSystemTime(now + RENEWAL_GRACE_MS);
   // Queries change with stored expiry state; writes still reject access at the exact deadline.
   expect(await t.query(api.billing.status, {})).toMatchObject({ premium: true });
+  await expect(t.mutation(api.rooms.createRoom, {})).rejects.toThrow(
+    "Premium subscription required",
+  );
   await t.mutation(internal.billing.expireRenewal, { stripeInvoiceId: "in_renewal" });
   expect(await t.query(api.billing.status, {})).toMatchObject({ premium: false });
   await t.mutation(internal.billing.recordRenewal, { ...renewal, paid: true });
@@ -211,6 +217,9 @@ test("early cancellation expiry is reactive and delayed timers cannot permit wri
     premium: true,
     accessUntil: now + 1000,
   });
+  await expect(t.mutation(api.rooms.createRoom, {})).rejects.toThrow(
+    "Premium subscription required",
+  );
   await t.mutation(internal.billing.expirePeriod, period);
   expect(await t.query(api.billing.status, {})).toMatchObject({ premium: false, accessUntil: 0 });
 });
@@ -232,7 +241,7 @@ test("current-user returns validate registered, guest, absent and dashboard iden
     image: null,
     emailVerified: true,
     isAnonymous: false,
-    capabilities: ["room:list", "room:create"],
+    capabilities: ["room:list"],
   });
   await seed(t);
   expect((await t.query(api.auth.getCurrentUser, {}))?.capabilities).toEqual([
@@ -263,7 +272,7 @@ test("current-user returns validate registered, guest, absent and dashboard iden
     image: null,
     emailVerified: false,
     isAnonymous: false,
-    capabilities: ["room:list", "room:create"],
+    capabilities: ["room:list"],
   });
 });
 
@@ -641,7 +650,7 @@ test("an initial failed invoice cannot start a renewal grace period", async () =
   expect(await t.run((ctx) => getPremiumAccess(ctx, host))).toMatchObject({ premium: false });
 });
 
-test("media requests reject unauthenticated callers", async () => {
+test("media requests reject unauthenticated callers and unpaid hosts", async () => {
   const t = billingTest();
   const roomId = await t.run((ctx) =>
     ctx.db.insert("rooms", {
@@ -655,6 +664,35 @@ test("media requests reject unauthenticated callers", async () => {
   await expect(
     t.action(api.media.actions.requestMedia, { roomId, url: "https://example.com/song" }),
   ).rejects.toThrow("Unauthenticated");
+  user.mockResolvedValue(host as never);
+  await expect(
+    t.action(api.media.actions.requestMedia, { roomId, url: "https://example.com/song" }),
+  ).rejects.toThrow("Premium subscription required");
+  expect(await t.run((ctx) => ctx.db.query("mediaJobs").take(1))).toEqual([]);
+});
+
+test("media creation rechecks host access after the action's earlier authorization", async () => {
+  const t = billingTest();
+  await seed(t);
+  vi.spyOn(authComponent, "getAuthUser").mockResolvedValue(host as never);
+  const roomId = await t.run((ctx) =>
+    ctx.db.insert("rooms", {
+      owner: host._id,
+      name: "revoked-room",
+      memberPermissions: defaultRoomMemberPermissions,
+    }),
+  );
+  expect(await t.query(internal.media.jobs.authorizeRequest, { roomId })).toBe(host._id);
+  await seed(t, "canceled");
+  await expect(
+    t.mutation(internal.media.jobs.request, {
+      roomId,
+      requestedBy: host._id,
+      requestKey: "request",
+      encryptedSource: "ciphertext",
+      sourceIv: "iv",
+    }),
+  ).rejects.toThrow("Premium subscription required");
   expect(await t.run((ctx) => ctx.db.query("mediaJobs").take(1))).toEqual([]);
 });
 

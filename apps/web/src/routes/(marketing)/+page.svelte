@@ -7,7 +7,7 @@
 
 <svelte:head>
  <title>Partyroom — Karaoke every song ever.</title>
- <meta name="description" content="Turn your next night in into karaoke. Paste a song link, share a room, and sing along with friends. Hosting is free during early access." />
+ <meta name="description" content="Turn your next night in into karaoke. Paste a song link, share a room, and sing along with friends. Host with Partyroom Premium. Friends join free." />
 </svelte:head>
 <div data-marketing-page class="min-h-svh [html:has(&)]:[--room:#0c0b10] [html:has(&)]:bg-(--room) [body:has(&)]:bg-(--room) [--foreground:#f5f0ff] [--muted:#b2aabd] [--purple:#b48aff] [--surface:#17131f] [--stage:#030305] [--line:#35303f] [--error:#ff9baf] [--lyrics:oklch(0.83_0.18_85)] bg-(--room) bg-[radial-gradient(ellipse_at_80%_15%,var(--surface),transparent_45%)] text-(--foreground) selection:bg-(--purple) selection:text-(--room) [color-scheme:dark] [&_a:focus-visible]:outline-2 [&_a:focus-visible]:outline-offset-4 [&_button:focus-visible]:outline-2 [&_button:focus-visible]:outline-offset-4 [&_summary:focus-visible]:outline-2 [&_summary:focus-visible]:outline-offset-4">
  <header class="mx-auto flex max-w-[1440px] items-center justify-between gap-4 px-6 py-6 sm:px-12 lg:px-20">
@@ -27,7 +27,7 @@
     <h1 id="headline" class="font-heading text-[clamp(3.3rem,8.3vw,8rem)] leading-[0.94] font-extrabold tracking-[-0.075em]">Karaoke<br />every song<br /><span class="text-(--purple)">ever.</span></h1>
     <p class="mt-8 max-w-sm text-lg leading-7 text-(--muted)">Turn a song link into karaoke, with the vocals removed and lyrics in sync. Invite your friends and sing together.</p>
     <a href="/sign-up?to=%2Fapp" class="mt-8 inline-flex items-center gap-10 rounded-full bg-(--purple) px-7 py-4 text-sm font-semibold text-(--room) transition hover:bg-(--purple)/80">Start singing<ArrowUpRightIcon class="size-5" aria-hidden="true" /></a>
-    <p class="mt-4 text-xs text-(--muted)">Hosting is free during early access.</p>
+    <p class="mt-4 text-xs text-(--muted)">Premium is $4.99/month. Friends join free.</p>
    </div>
    <div class="relative isolate mx-auto w-full max-w-[560px] py-8" aria-hidden="true">
     <div class="absolute inset-0 -z-10 rounded-full bg-(--purple)/15 blur-3xl"></div>
@@ -74,12 +74,12 @@
   <MarketingFeatureDemos />
   <section id="premium" aria-labelledby="premium-heading" class="scroll-mt-6 border-y border-(--line) bg-(--surface)">
    <div class="mx-auto grid max-w-[1440px] gap-10 px-6 py-16 sm:px-12 lg:grid-cols-2 lg:gap-24 lg:px-20 lg:py-24">
-    <div><p class="mb-5 text-xs font-bold tracking-[0.15em] uppercase">Early access</p><h2 id="premium-heading" class="font-heading text-5xl leading-[0.98] font-extrabold tracking-[-0.06em] sm:text-7xl">Host the<br />party.</h2><p class="mt-6 max-w-sm text-base leading-7 text-(--muted)">Create as many rooms as you want. Add songs and share the link. Your friends join free.</p></div>
+    <div><p class="mb-5 text-xs font-bold tracking-[0.15em] uppercase">Partyroom Premium</p><h2 id="premium-heading" class="font-heading text-5xl leading-[0.98] font-extrabold tracking-[-0.06em] sm:text-7xl">Host the<br />party.</h2><p class="mt-6 max-w-sm text-base leading-7 text-(--muted)">Create as many rooms as you want. Add songs and share the link. Your friends join free.</p></div>
     <div class="space-y-6 rounded-2xl border border-(--line) bg-(--room) p-6 sm:p-8">
-     <p class="font-heading text-4xl font-bold">Free <span class="font-sans text-base font-normal text-(--muted)">during early access</span></p>
-     <p class="text-sm leading-6 text-(--muted)">Sign in to create a room and invite your friends.</p>
+     <p class="font-heading text-4xl font-bold">$4.99 <span class="font-sans text-base font-normal text-(--muted)">USD / month</span></p>
+     <p class="text-sm leading-6 text-(--muted)">Renews monthly. Cancel anytime. You can keep hosting until the end of your paid month.</p>
      <a href="/sign-up?to=%2Fapp" class="inline-flex items-center gap-6 rounded-full bg-(--purple) px-6 py-3 text-sm font-semibold text-(--room) transition hover:bg-(--purple)/80">Create account <ArrowUpRightIcon class="size-5" aria-hidden="true" /></a>
-     <div class="border-t border-(--line) pt-6 text-sm leading-6 text-(--muted)"><p class="font-semibold text-(--foreground)">Already have an account?</p><p class="mt-2">Log in to start hosting.</p><a href="/login?to=%2Fapp" class="mt-3 inline-block underline underline-offset-4">Log in</a></div>
+     <div class="border-t border-(--line) pt-6 text-sm leading-6 text-(--muted)"><p class="font-semibold text-(--foreground)">Already on the early-access list?</p><p class="mt-2">Already signed up? Log in with that email and verify it to claim free Premium when your invitation arrives.</p><a href="/login?to=%2Fapp" class="mt-3 inline-block underline underline-offset-4">Log in</a></div>
     </div>
    </div>
   </section>
