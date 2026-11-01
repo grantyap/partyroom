@@ -18,6 +18,15 @@ First, install the dependencies:
 bun install
 ```
 
+## Branch history
+
+Keep commit history linear: do not create merge commits. Merge pull requests with
+GitHub's squash or rebase option. When `main` advances, rebase `develop` onto
+the updated `main`, preserving commits unique to `develop`. If the shared branch
+must be rewritten, fetch first and use an explicit `--force-with-lease` for the
+previously observed `develop` commit; stop if it has changed. Rebase open branches
+that depend on `develop` after the update.
+
 ## T3 worktrees
 
 `t3.json` sets `defaultThreadEnvMode: "worktree"` so new T3 threads default to a
