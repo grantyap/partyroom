@@ -261,6 +261,29 @@ To revoke the extra local authentication origin, run
 `bunx convex env remove DEV_SITE_URL --env-file .env.local` from `packages/backend`.
 This setup affects development only, not production builds or deployments.
 
+### Local test inbox
+
+Mailpit is opt-in and is never started by the production Compose configuration.
+After creating the local `.env` as described above, start it and run the synthetic
+receiver check:
+
+```bash
+docker compose -f docker-compose.yaml -f docker-compose.dev.yaml --profile mailpit up -d --wait mailpit
+python3 scripts/mailpit-smoke.py
+```
+
+The inbox and API are at http://127.0.0.1:8025 and SMTP is at
+127.0.0.1:1025. From the Compose backend container use `mailpit:8025` or
+`mailpit:1025`, not container localhost. SMTP accepts only `.test` recipients;
+do not put personal data or real credentials in test messages. No relay or
+forwarding is configured. Mail is disposable, limited to 100 messages and one
+day, and disappears when the container is removed. Stop and remove just this
+service with `docker compose -f docker-compose.yaml -f docker-compose.dev.yaml rm -sf mailpit`.
+
+The check demonstrates local capture only. It does not exercise application auth,
+Resend delivery, DNS authentication, or Gmail/Outlook folder placement. The
+separately opted-in real delivery check remains in `scripts/production-smoke.md`.
+
 ## Coolify
 
 Pull requests and branch pushes run the test and production-image checks described

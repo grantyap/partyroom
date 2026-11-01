@@ -1,4 +1,17 @@
 services:
+  mailpit:
+    image: axllent/mailpit:v1.32.0
+    profiles: [mailpit]
+    command: ["--max", "100", "--max-age", "1d", "--disable-version-check", "--smtp-allowed-recipients", "(?i)^[^@]+@[^@]+\\.test$"]
+    ports:
+      - "127.0.0.1:1025:1025"
+      - "127.0.0.1:8025:8025"
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+
   # Keep Vite on the host for HMR; the production web image is built by the base stack only.
   web:
     profiles:
