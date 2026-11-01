@@ -27,6 +27,11 @@ must be rewritten, fetch first and use an explicit `--force-with-lease` for the
 previously observed `develop` commit; stop if it has changed. Rebase open branches
 that depend on `develop` after the update.
 
+For an issue fully resolved by a PR, put `Closes #123` on its own line in the
+PR description (one line per issue, or comma-separated issue numbers). A merged
+PR targeting `develop` closes those local issues automatically. GitHub handles
+closing keywords for PRs targeting `main`. Use `Related to #123` for partial work.
+
 ## T3 worktrees
 
 `t3.json` sets `defaultThreadEnvMode: "worktree"` so new T3 threads default to a
