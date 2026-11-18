@@ -298,7 +298,9 @@ function stripeResponses(respond: (url: URL, method: string) => unknown) {
     const url = new URL(
       typeof input === "string" ? input : input instanceof URL ? input.href : input.url,
     );
-    return new Response(JSON.stringify(respond(url, options?.method ?? "GET")), {
+    const result = respond(url, options?.method ?? "GET");
+    if (result instanceof Response) return result;
+    return new Response(JSON.stringify(result), {
       status: 200,
       headers: { "content-type": "application/json" },
     });
@@ -421,6 +423,7 @@ test("checkout reuses an open session and refuses subscription duplication", asy
             status: "open",
             url: "https://checkout.stripe.com/test",
             metadata: { partyroomPremium: "v1" },
+            managed_payments: { enabled: true },
           },
         ],
       };
@@ -468,6 +471,7 @@ test.each([null, "cs_expired"])(
     vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_dummy");
     vi.stubEnv("SITE_URL", "https://partyroom.invalid");
     const keys: string[] = [];
+    const managedPaymentsFlags: Array<string | null> = [];
     vi.stubGlobal("fetch", async (input: string, options: RequestInit) => {
       const url = new URL(input);
       if (url.pathname === "/v1/subscriptions") return Response.json({ data: [], has_more: false });
@@ -478,19 +482,105 @@ test.each([null, "cs_expired"])(
             : [],
         });
       keys.push(new Headers(options.headers).get("idempotency-key")!);
-      return Response.json({ id: "cs_one", url: "https://checkout.stripe.com/one" });
+      managedPaymentsFlags.push(
+        new URLSearchParams(String(options.body)).get("managed_payments[enabled]"),
+      );
+      return Response.json({
+        id: "cs_one",
+        url: "https://checkout.stripe.com/one",
+        managed_payments: { enabled: true },
+      });
     });
     const results = await Promise.all([
       t.action(api.billing.checkout, {}),
       t.action(api.billing.checkout, {}),
     ]);
     expect(results[0]).toEqual(results[1]);
+    expect(managedPaymentsFlags).toEqual(["true", "true"]);
     expect(keys).toHaveLength(2);
     expect(new Set(keys)).toEqual(
       new Set([`partyroom-checkout-cus_host-${previousId ?? "first"}`]),
     );
   },
 );
+
+test.each(["open", "completed"])(
+  "checkout safely handles an %s ordinary session during replacement",
+  async (status) => {
+    const t = billingTest();
+    await seed(t, "canceled");
+    vi.spyOn(authComponent, "getAuthUser").mockResolvedValue(host as never);
+    vi.stubEnv("SITE_URL", "https://partyroom.invalid");
+    const requests = stripeResponses((url, method) => {
+      if (url.pathname === "/v1/checkout/sessions/cs_ordinary/expire" && method === "POST") {
+        if (status === "completed") {
+          return Response.json(
+            {
+              error: {
+                type: "invalid_request_error",
+                message: "Checkout Session cannot be expired",
+              },
+            },
+            { status: 400 },
+          );
+        }
+        return { id: "cs_ordinary", status: "expired" };
+      }
+      if (url.pathname === "/v1/subscriptions") {
+        return { data: [], has_more: false };
+      }
+      if (url.pathname === "/v1/checkout/sessions" && method === "GET") {
+        return {
+          data: [
+            {
+              id: "cs_ordinary",
+              status: "open",
+              url: "https://checkout.stripe.com/ordinary",
+              metadata: { partyroomPremium: "v1" },
+              managed_payments: null,
+            },
+          ],
+        };
+      }
+      return {
+        id: "cs_managed",
+        url: "https://checkout.stripe.com/managed",
+        managed_payments: { enabled: true },
+      };
+    });
+    const checkout = t.action(api.billing.checkout, {});
+    if (status === "completed") {
+      await expect(checkout).rejects.toThrow("Checkout Session cannot be expired");
+      expect(requests).toHaveBeenCalledTimes(2);
+      return;
+    }
+    await expect(checkout).resolves.toEqual({
+      sessionId: "cs_managed",
+      url: "https://checkout.stripe.com/managed",
+    });
+    expect(
+      requests.mock.calls.map(([url, options]) => [options?.method, new URL(String(url)).pathname]),
+    ).toEqual([
+      ["GET", "/v1/checkout/sessions"],
+      ["POST", "/v1/checkout/sessions/cs_ordinary/expire"],
+      ["GET", "/v1/subscriptions"],
+      ["POST", "/v1/checkout/sessions"],
+    ]);
+  },
+);
+
+test("checkout withholds the URL if Stripe does not confirm Managed Payments", async () => {
+  const t = billingTest();
+  await seed(t, "canceled");
+  vi.spyOn(authComponent, "getAuthUser").mockResolvedValue(host as never);
+  vi.stubEnv("SITE_URL", "https://partyroom.invalid");
+  stripeResponses((_url, method) =>
+    method === "GET"
+      ? { data: [], has_more: false }
+      : { id: "cs_ordinary", url: "https://checkout.stripe.com/ordinary", managed_payments: null },
+  );
+  await expect(t.action(api.billing.checkout, {})).rejects.toThrow("Managed Payments");
+});
 
 test("old expiry timers cannot revoke a renewed paid period", async () => {
   const t = billingTest();

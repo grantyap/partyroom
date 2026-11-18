@@ -83,6 +83,16 @@ current script always leaves delivery and retry-policy evidence to the walkthrou
 Sending-only Resend keys can leave the domain check unverified; inspect its status
 in Dashboard without expanding key permissions solely for this check.
 
+Confirm Partyroom Premium is eligible for [Stripe Managed Payments](https://docs.stripe.com/payments/managed-payments/eligibility),
+enable it in the [target Stripe Dashboard](https://dashboard.stripe.com/settings/managed-payments),
+and assign the Premium product an eligible tax code. Verify the price's tax
+behavior against the advertised price. Managed Payments applies to new Checkout
+purchases. Review any existing paid subscriptions separately. If the target
+environment has already offered ordinary Premium Checkout, pause Checkout and
+let requests running the old code finish. Expire any remaining ordinary Premium
+sessions before reopening purchases with Managed Payments. Complimentary grants
+remain direct, zero-dollar subscriptions.
+
 Configure the Stripe destination at the public Convex HTTP origin plus
 `/stripe/webhook`, using the destination's signing secret. Events:
 `customer.created/updated/deleted`,
@@ -106,8 +116,12 @@ of the walkthrough. Any operator-run live validation needs separate authorizatio
 - [ ] Sign up; receive/open the verification email; check resend and expired links.
       Verify in another tab/device and use **I've verified** in the original tab.
 - [ ] Confirm an unverified user cannot purchase. Complete a sandbox Checkout
-      requiring card authentication; verify access comes from the webhook, then
-      go to Rooms and create a room.
+      requiring card authentication. Verify the session has Managed Payments
+      enabled and the receipt identifies Link as the merchant of record.
+      Confirm the webhook unlocks Premium, then go to Rooms and create a room.
+- [ ] Retry purchase with an ordinary Premium Checkout session still open in the
+      sandbox. Verify that the old URL expires and the replacement uses Managed
+      Payments.
 - [ ] Join from a fresh incognito guest session and a mobile guest. Queue a test
       song, wait for processing, and verify audio/video/lyrics and shared playback.
 - [ ] Abandon/cancel Checkout and retry. Repeat purchase clicks in two tabs;
