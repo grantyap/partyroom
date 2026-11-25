@@ -570,17 +570,28 @@ test.each(["open", "completed"])(
   },
 );
 
-test("checkout withholds the URL if Stripe does not confirm Managed Payments", async () => {
+test("checkout expires and withholds the URL if Stripe does not confirm Managed Payments", async () => {
   const t = billingTest();
   await seed(t, "canceled");
   vi.spyOn(authComponent, "getAuthUser").mockResolvedValue(host as never);
   vi.stubEnv("SITE_URL", "https://partyroom.invalid");
-  stripeResponses((_url, method) =>
-    method === "GET"
+  const requests = stripeResponses((url, method) => {
+    if (url.pathname === "/v1/checkout/sessions/cs_ordinary/expire" && method === "POST") {
+      return { id: "cs_ordinary", status: "expired" };
+    }
+    return method === "GET"
       ? { data: [], has_more: false }
-      : { id: "cs_ordinary", url: "https://checkout.stripe.com/ordinary", managed_payments: null },
-  );
+      : {
+          id: "cs_ordinary",
+          status: "open",
+          url: "https://checkout.stripe.com/ordinary",
+          managed_payments: null,
+        };
+  });
   await expect(t.action(api.billing.checkout, {})).rejects.toThrow("Managed Payments");
+  expect(
+    requests.mock.calls.map(([url, options]) => [options?.method, new URL(String(url)).pathname]),
+  ).toContainEqual(["POST", "/v1/checkout/sessions/cs_ordinary/expire"]);
 });
 
 test("old expiry timers cannot revoke a renewed paid period", async () => {

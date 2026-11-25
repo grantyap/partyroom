@@ -116,6 +116,13 @@ export const checkout = action({
       { idempotencyKey: `partyroom-checkout-${customerId}-${previous?.id ?? "first"}` },
     );
     if (!session.managed_payments?.enabled) {
+      if (session.status !== "expired" && session.status !== "complete") {
+        await stripe.checkout.sessions
+          .expire(session.id, undefined, {
+            idempotencyKey: `partyroom-expire-checkout-${session.id}`,
+          })
+          .catch(() => {});
+      }
       throw new Error("Stripe did not enable Managed Payments for this Checkout session");
     }
     return { sessionId: session.id, url: session.url };
