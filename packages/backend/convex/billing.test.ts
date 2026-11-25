@@ -117,6 +117,7 @@ test("unpaid accounts cannot create rooms or check out as guests", async () => {
     "Premium subscription required",
   );
   user.mockResolvedValue({ ...host, isAnonymous: true } as never);
+  await expect(t.mutation(api.rooms.createRoom, {})).rejects.toThrow("Unauthorized");
   await expect(t.action(api.billing.checkout, {})).rejects.toThrow("Registered account required");
 });
 
@@ -657,12 +658,14 @@ async function signedEvent(t: ReturnType<typeof billingTest>, type: string, obje
   });
 }
 
-test("replayed customer updates use current ownership and preserve a verified local claim", async () => {
+test("replayed customer updates use current ownership, normalize email, and preserve local claims", async () => {
   const t = billingTest();
   await seed(t);
+  vi.spyOn(authComponent, "getAuthUser").mockResolvedValue(host as never);
+  let remoteMetadata: Record<string, string> = { userId: host._id };
   stripeResponses((url) => {
     expect(url.pathname).toBe("/v1/customers/cus_host");
-    return { id: "cus_host", email: host.email, metadata: { userId: host._id } };
+    return { id: "cus_host", email: "Host@Example.com", metadata: remoteMetadata };
   });
   for (let attempt = 0; attempt < 2; attempt++) {
     expect(
@@ -677,13 +680,49 @@ test("replayed customer updates use current ownership and preserve a verified lo
     expect(await t.run((ctx) => getPremiumAccess(ctx, host))).toMatchObject({ premium: true });
   }
   // A local claim can precede the retryable Stripe metadata update.
-  await t.mutation(components.stripe.private.handleCustomerUpdated, {
-    stripeCustomerId: "cus_host",
-    email: host.email,
-    metadata: {},
-  });
+  remoteMetadata = {};
+  expect(
+    (
+      await signedEvent(t, "customer.updated", {
+        id: "cus_host",
+        email: "Host@Example.com",
+        metadata: {},
+      })
+    ).status,
+  ).toBe(200);
   expect(await t.run((ctx) => getPremiumAccess(ctx, host))).toMatchObject({ premium: true });
   expect(await t.run((ctx) => getBillingCustomer(ctx, { ...host, _id: "other" }))).toBeNull();
+  expect(await t.query(api.billing.status, {})).toMatchObject({ needsClaim: true });
+  expect(await t.mutation(internal.billing.claimCustomer, {})).toBe("cus_host");
+  expect(await t.query(api.billing.status, {})).toMatchObject({ needsClaim: false });
+  expect(
+    await t.query(components.stripe.public.getCustomerByEmail, { email: host.email }),
+  ).toMatchObject({ stripeCustomerId: "cus_host", email: host.email });
+});
+
+test("failed invoice refresh returns 500 without writing renewals or component invoices", async () => {
+  const t = billingTest();
+  await seed(t);
+  vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_dummy");
+  vi.stubGlobal("fetch", async () =>
+    Response.json({ error: { message: "Forbidden" } }, { status: 403 }),
+  );
+  const response = await signedEvent(t, "invoice.payment_failed", {
+    id: "in_failed_refresh",
+    customer: "cus_host",
+    created: now / 1000,
+    amount_due: 499,
+    amount_paid: 0,
+    status: "open",
+    billing_reason: "subscription_cycle",
+    parent: { subscription_details: { subscription: "sub_host" } },
+  });
+  expect(response.status).toBe(500);
+  expect(await t.run((ctx) => ctx.db.query("billingRenewals").take(1))).toEqual([]);
+  expect(
+    await t.query(components.stripe.public.listInvoices, { stripeCustomerId: "cus_host" }),
+  ).toEqual([]);
+  expect(await t.run((ctx) => getPremiumAccess(ctx, host))).toMatchObject({ premium: true });
 });
 
 test.each(["active", "canceled"])(

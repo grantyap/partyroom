@@ -46,7 +46,7 @@ export async function handleBillingEvent(
     } else {
       await ctx.runMutation(components.stripe.public.createOrUpdateCustomer, {
         stripeCustomerId: current.id,
-        email: current.email ?? undefined,
+        email: current.email?.trim().toLowerCase() || undefined,
         name: current.name ?? undefined,
         metadata: current.metadata,
       });
@@ -91,10 +91,10 @@ export const webhook = httpAction(async (ctx, request) => {
     return new Response("Invalid Stripe signature", { status: 400 });
   }
   try {
-    // The component commits event snapshots before custom hooks; access needs current state first.
+    // Refresh authoritative Stripe state before component snapshots so failed refreshes commit nothing.
+    await handleBillingEvent(ctx, event);
     if (!event.type.startsWith("customer."))
       await processEvent(ctx, components.stripe, event, stripe);
-    await handleBillingEvent(ctx, event);
     return Response.json({ received: true });
   } catch {
     console.error("Stripe webhook processing failed", event.id, event.type);

@@ -181,7 +181,15 @@ export const claimCustomer = internalMutation({
     const user = await getCurrentUserImpl(ctx);
     if (!user || isAnonymousUser(user)) throw new Error("Registered account required");
     const customer = await getBillingCustomer(ctx, user);
-    if (customer?.userId === user._id) return customer.stripeCustomerId;
+    if (customer?.userId === user._id) {
+      if (customer.metadata?.userId !== user._id) {
+        await ctx.runMutation(components.stripe.public.createOrUpdateCustomer, {
+          stripeCustomerId: customer.stripeCustomerId,
+          metadata: { ...customer.metadata, userId: user._id },
+        });
+      }
+      return customer.stripeCustomerId;
+    }
     if (!("emailVerified" in user) || !user.emailVerified)
       throw new Error("Verify your email before claiming billing access");
     if (!customer) throw new Error("No billing account found");
