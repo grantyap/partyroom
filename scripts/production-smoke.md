@@ -72,12 +72,14 @@ bun --env-file /private/path/to/production.env scripts/check-payment-readiness.t
 ```
 
 The script performs only reads. It checks the current USD 4.99 monthly price,
-Stripe mode, default portal, webhook events/API version, sender domain, and
-required configuration. A copied env file is not proof of deployed settings:
-compare the configuration source with the deployed Convex environment privately.
-Exit 1 means a configuration/read check failed; exit 2 means automatic checks
-passed but manual checks remain; exit 0 means no checks remain unverified. The
-current script always leaves delivery and retry-policy evidence to the walkthrough.
+Premium product tax code and price tax behavior, Stripe mode, default portal,
+webhook events/API version, sender domain, and required configuration. A copied
+env file is not proof of deployed settings: compare the configuration source
+with the deployed Convex environment privately. Exit 1 means a
+configuration/read check failed; exit 2 means automatic checks passed but manual
+checks remain; exit 0 means no checks remain unverified. The current script
+always leaves Managed Payments eligibility/enablement, delivery, and
+retry-policy evidence to the walkthrough.
 `CONFIGURED` means present, `VERIFIED` means checked against an API, and
 `UNVERIFIED` requires operator evidence. These states are deliberately separate.
 Sending-only Resend keys can leave the domain check unverified; inspect its status

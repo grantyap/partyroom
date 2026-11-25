@@ -18,14 +18,23 @@ function respond(wrong = false): typeof fetch {
     const url = new URL(
       typeof input === "string" ? input : input instanceof URL ? input : input.url,
     );
-    if (url.pathname.startsWith("/v1/prices/"))
+    if (url.pathname.startsWith("/v1/prices/")) {
+      expect(url.searchParams.get("expand[0]")).toBe("product");
       return Response.json({
         active: true,
         livemode: false,
         currency: "usd",
         unit_amount: wrong ? 999 : 499,
+        tax_behavior: wrong ? "unspecified" : "exclusive",
+        product: {
+          id: "prod_test",
+          object: "product",
+          active: true,
+          tax_code: wrong ? null : "txcd_10000000",
+        },
         recurring: { interval: "month", interval_count: 1 },
       });
+    }
     if (url.pathname.includes("configurations"))
       return Response.json({
         data: [
@@ -62,6 +71,10 @@ test("valid configuration is read-only and never claims that delivery has been v
   const checks = await checkPaymentReadiness(settings, "sandbox", respond());
   expect(checks.filter((check) => check.status === "FAILED")).toEqual([]);
   expect(checks.find((check) => check.name === "Premium price")?.status).toBe("VERIFIED");
+  expect(checks.find((check) => check.name === "Premium tax configuration")?.status).toBe(
+    "VERIFIED",
+  );
+  expect(checks.find((check) => check.name === "Managed Payments")?.status).toBe("UNVERIFIED");
   expect(checks.find((check) => check.name === "Signed webhook delivery")?.status).toBe(
     "UNVERIFIED",
   );
@@ -86,7 +99,12 @@ test("missing settings, wrong mode, wrong price, unsafe portal and missing event
     )?.status,
   ).toBe("FAILED");
   const checks = await checkPaymentReadiness(settings, "sandbox", respond(true));
-  for (const name of ["Premium price", "Customer portal", "Stripe webhook destination"])
+  for (const name of [
+    "Premium price",
+    "Premium tax configuration",
+    "Customer portal",
+    "Stripe webhook destination",
+  ])
     expect(checks.find((check) => check.name === name)?.status).toBe("FAILED");
 });
 

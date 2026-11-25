@@ -92,7 +92,9 @@ export async function checkPaymentReadiness(
       timeout: 10_000,
     });
     try {
-      const price = await stripe.prices.retrieve(settings.STRIPE_PREMIUM_PRICE_ID);
+      const price = await stripe.prices.retrieve(settings.STRIPE_PREMIUM_PRICE_ID, {
+        expand: ["product"],
+      });
       const valid =
         price.active &&
         price.livemode === live &&
@@ -106,6 +108,21 @@ export async function checkPaymentReadiness(
         valid
           ? "Active USD 4.99 monthly price matches UI and mode."
           : "Use an active USD 499-cent monthly recurring price in the requested mode.",
+      );
+      const product =
+        typeof price.product === "object" && price.product && !price.product.deleted
+          ? price.product
+          : null;
+      const taxCode = product?.tax_code;
+      const hasTaxCode = typeof taxCode === "string" ? taxCode.length > 0 : Boolean(taxCode?.id);
+      const explicitTaxBehavior =
+        price.tax_behavior === "inclusive" || price.tax_behavior === "exclusive";
+      add(
+        "Premium tax configuration",
+        hasTaxCode && explicitTaxBehavior ? "VERIFIED" : "FAILED",
+        hasTaxCode && explicitTaxBehavior
+          ? `Product tax code is set and price tax_behavior is ${price.tax_behavior}; confirm Managed Payments eligibility and displayed pricing.`
+          : "Assign an eligible tax code to the Premium product and set an explicit price tax_behavior (inclusive or exclusive).",
       );
     } catch {
       add(
@@ -220,6 +237,11 @@ export async function checkPaymentReadiness(
       );
     }
   }
+  add(
+    "Managed Payments",
+    "UNVERIFIED",
+    "Confirm Partyroom Premium eligibility, Dashboard enablement, and a sandbox Checkout session with managed_payments.enabled=true and Link as merchant of record.",
+  );
   add(
     "Signed webhook delivery",
     "UNVERIFIED",
