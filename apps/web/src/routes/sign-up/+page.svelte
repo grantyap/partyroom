@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { authRedirect } from "#lib/auth-redirect.js";
+	import { authRedirect, verificationRedirect } from "#lib/auth-redirect.js";
 	import { goto } from "$app/navigation";
 	import { page } from "$app/state";
 	import { authClient } from "#lib/auth-client.js";
@@ -22,13 +22,14 @@
 			}
 
 			const { fullName, email, password } = form.data;
+			const target = authRedirect(page.url.searchParams.get("to"));
 
 			const result = await authClient.signUp.email(
 				{
 					name: fullName,
 					email,
 					password,
-					callbackURL: "/app?verification=success",
+					callbackURL: verificationRedirect(target),
 				},
 				{
 					onError: ({ error }) => {
@@ -38,8 +39,7 @@
 			);
 
 			if (result.data) {
-				const target = authRedirect(page.url.searchParams.get("to"));
-				await goto(target).catch(() => goto("/app"));
+				await goto(target === "/app" ? "/app?billing" : target).catch(() => goto("/app"));
 			}
 		},
 		resetForm: false,

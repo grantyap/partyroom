@@ -1,7 +1,5 @@
 import { httpRouter } from "convex/server";
-import { registerRoutes } from "@convex-dev/stripe";
-import { components } from "./_generated/api";
-import { handleBillingEvent } from "./billingStripe";
+import { webhook as stripeWebhook } from "./billingStripe";
 import { authComponent, createAuth } from "./auth";
 import { webhook as resendWebhook } from "./email";
 import {
@@ -20,7 +18,7 @@ const http = httpRouter();
 // Subscribe to customer.created/updated/deleted, customer.subscription.created/updated/deleted,
 // checkout.session.completed, and invoice.created/finalized/updated/paid/payment_failed.
 // Self-hosted deployments use their own HTTP origin; locally use the dev webhook tunnel.
-registerRoutes(http, components.stripe, { onEvent: handleBillingEvent });
+http.route({ path: "/stripe/webhook", method: "POST", handler: stripeWebhook });
 
 authComponent.registerRoutes(http, createAuth);
 // Resend destination: <public Convex HTTP origin>/resend/webhook; subscribe to all email.* events.

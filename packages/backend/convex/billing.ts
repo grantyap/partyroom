@@ -75,6 +75,15 @@ export const checkout = action({
       ).customerId;
     if (account.customerId) await ctx.runMutation(internal.billing.claimCustomer, {});
     const stripe = stripeApi();
+    // Observe sessions before subscriptions: completion during this request must not open a second purchase.
+    const sessions = await stripe.checkout.sessions.list({ customer: customerId, limit: 100 });
+    const previous = sessions.data.find((session) => session.metadata?.partyroomPremium === "v1");
+    if (previous?.status === "open" && !previous.managed_payments?.enabled) {
+      // Invalidate the old link before checking subscriptions. If it just completed, expiry fails.
+      await stripe.checkout.sessions.expire(previous.id, undefined, {
+        idempotencyKey: `partyroom-expire-checkout-${previous.id}`,
+      });
+    }
     for await (const subscription of stripe.subscriptions.list({
       customer: customerId,
       status: "all",
@@ -88,16 +97,17 @@ export const checkout = action({
         throw new Error("Manage your existing Premium subscription in the billing portal");
       }
     }
-    const sessions = await stripe.checkout.sessions.list({ customer: customerId, limit: 100 });
-    const previous = sessions.data.find((session) => session.metadata?.partyroomPremium === "v1");
-    if (previous?.status === "open") return { sessionId: previous.id, url: previous.url };
+    if (previous?.status === "open" && previous.managed_payments?.enabled) {
+      return { sessionId: previous.id, url: previous.url };
+    }
     // Fixed server-side price and redirect origins. No client-supplied billing identity.
-    // The previous session ID provides a stable key for concurrent checkout requests.
+    // Keep the key stable across deploys so old code can't open a parallel purchase.
     const session = await stripe.checkout.sessions.create(
       {
         customer: customerId,
         line_items: [{ price: env.STRIPE_PREMIUM_PRICE_ID, quantity: 1 }],
         mode: "subscription",
+        managed_payments: { enabled: true },
         success_url: new URL("/app/settings?billing=success", env.SITE_URL).href,
         cancel_url: new URL("/app/settings?billing=canceled", env.SITE_URL).href,
         subscription_data: { metadata: { userId: account.userId } },
@@ -105,6 +115,16 @@ export const checkout = action({
       },
       { idempotencyKey: `partyroom-checkout-${customerId}-${previous?.id ?? "first"}` },
     );
+    if (!session.managed_payments?.enabled) {
+      if (session.status !== "expired" && session.status !== "complete") {
+        await stripe.checkout.sessions
+          .expire(session.id, undefined, {
+            idempotencyKey: `partyroom-expire-checkout-${session.id}`,
+          })
+          .catch(() => {});
+      }
+      throw new Error("Stripe did not enable Managed Payments for this Checkout session");
+    }
     return { sessionId: session.id, url: session.url };
   },
 });
@@ -168,7 +188,15 @@ export const claimCustomer = internalMutation({
     const user = await getCurrentUserImpl(ctx);
     if (!user || isAnonymousUser(user)) throw new Error("Registered account required");
     const customer = await getBillingCustomer(ctx, user);
-    if (customer?.userId === user._id) return customer.stripeCustomerId;
+    if (customer?.userId === user._id) {
+      if (customer.metadata?.userId !== user._id) {
+        await ctx.runMutation(components.stripe.public.createOrUpdateCustomer, {
+          stripeCustomerId: customer.stripeCustomerId,
+          metadata: { ...customer.metadata, userId: user._id },
+        });
+      }
+      return customer.stripeCustomerId;
+    }
     if (!("emailVerified" in user) || !user.emailVerified)
       throw new Error("Verify your email before claiming billing access");
     if (!customer) throw new Error("No billing account found");

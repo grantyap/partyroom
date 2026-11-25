@@ -9,6 +9,7 @@ import { type DataModel } from "./_generated/dataModel";
 import { capabilities, getCapabilities, isAnonymousUser } from "./capabilities";
 import { query, env, type QueryCtx } from "./_generated/server";
 import authConfig from "./auth.config";
+import { getPremiumAccess } from "./billingAccess";
 
 const siteUrl = env.SITE_URL;
 
@@ -26,6 +27,12 @@ export const createAuth = (convexCtx: GenericCtx<DataModel>) => {
     emailAndPassword: {
       enabled: true,
       requireEmailVerification: false,
+      revokeSessionsOnPasswordReset: true,
+      sendResetPassword: async ({ user, url }) => {
+        if (!("runMutation" in convexCtx))
+          throw new Error("Password reset requires a Convex action context");
+        await convexCtx.runMutation(internal.email.sendPasswordReset, { email: user.email, url });
+      },
     },
     emailVerification: {
       // Existing users request a link with authClient.sendVerificationEmail({ email,
@@ -85,6 +92,7 @@ export const getCurrentUser = query({
   ),
   handler: async (ctx) => {
     const user = await getCurrentUserImpl(ctx);
+    const premium = user ? (await getPremiumAccess(ctx, user)).premium : false;
     return user
       ? {
           _id: user._id,
@@ -93,7 +101,9 @@ export const getCurrentUser = query({
           image: "image" in user && typeof user.image === "string" ? user.image : null,
           emailVerified: "emailVerified" in user && user.emailVerified === true,
           isAnonymous: isAnonymousUser(user),
-          capabilities: [...getCapabilities(user)],
+          capabilities: getCapabilities(user).filter(
+            (capability) => capability !== "room:create" || premium,
+          ),
         }
       : null;
   },
