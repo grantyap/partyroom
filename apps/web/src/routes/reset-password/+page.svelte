@@ -25,7 +25,8 @@
     try {
       const result = await authClient.resetPassword({ token, newPassword: password });
       if (result.error) {
-        if (result.error.code === "INVALID_TOKEN") invalid = true;
+        if (result.error.code === "INVALID_TOKEN" || result.error.code === "TOKEN_EXPIRED")
+          invalid = true;
         throw new Error("Password reset failed");
       }
       done = true;

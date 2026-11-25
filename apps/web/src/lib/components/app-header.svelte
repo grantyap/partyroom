@@ -31,6 +31,9 @@
 	import PencilIcon from "@lucide/svelte/icons/pencil";
 	import SettingsIcon from "@lucide/svelte/icons/settings";
 	import UserPlusIcon from "@lucide/svelte/icons/user-plus";
+	import { useAuth } from "@mmailaender/convex-better-auth-svelte/svelte";
+	import { api } from "@partyroom/backend/convex/_generated/api.js";
+	import { useQuery } from "convex-svelte";
 
 	type AppUser = {
 		_id: string;
@@ -83,6 +86,13 @@
 		hasCapability(user, capabilities.rooms.list),
 	);
 	const isGuest = $derived(user?.isAnonymous === true);
+	const auth = useAuth();
+	const liveUser = useQuery(api.auth.getCurrentUser, () =>
+		auth.isAuthenticated && user && !isGuest ? {} : "skip",
+	);
+	const emailVerified = $derived(
+		liveUser.data?.emailVerified ?? user?.emailVerified ?? false,
+	);
 	const currentUserName = $derived(
 		user && locallySavedForUserId === user._id
 			? (locallySavedUserName ?? user.name)
@@ -333,12 +343,12 @@
 		>
 			<Dialog.Header class="text-center">
 				<Dialog.Title class="font-heading text-2xl"
-					>{!user.emailVerified
+					>{!emailVerified
 						? "Verify your email to host"
 						: "Partyroom Premium"}</Dialog.Title
 				>
 				<Dialog.Description
-					>{!user.emailVerified
+					>{!emailVerified
 						? "First verify your email, then choose Premium."
 						: "Host karaoke with your friends."}</Dialog.Description
 				>
